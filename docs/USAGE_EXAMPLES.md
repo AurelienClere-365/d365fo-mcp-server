@@ -7,8 +7,11 @@ Practical examples for X++ code completion and symbol lookup in Visual Studio Co
 - [Code Completion](#code-completion)
 - [Symbol Search](#symbol-search)
 - [Class & Table Information](#class--table-information)
+- [Form, Query & View Analysis](#form-query--view-analysis)
+- [Method Signatures & References](#method-signatures--references)
 - [Extension Development](#extension-development)
 - [Code Generation](#code-generation)
+- [File Operations](#file-operations)
 - [Pattern Analysis & Intelligent Code Generation](#pattern-analysis--intelligent-code-generation)
 - [Configuration](#configuration)
 
@@ -84,6 +87,233 @@ Show me all relations on SalesLine
 ```
 
 **Returns:** Relations to `SalesTable`, `InventTable`, `InventDim` with delete actions
+
+---
+
+### Getting Enum Values
+
+**Scenario:** Need to know all possible values for a status field.
+
+```
+Show me all values in CustAccountType enum
+```
+
+**Returns:**
+```
+CustAccountType (Extensible: ✅)
+Values:
+- Customer = 0          (Regular customer account)
+- Prospect = 1          (Prospective customer)
+- Organization = 2      (Organization account)
+- Person = 3           (Individual person account)
+```
+
+---
+
+## Form, Query & View Analysis
+
+### Analyzing Form Structure
+
+**Scenario:** You need to understand a form before extending it.
+
+```
+Show me the structure of SalesTable form
+```
+
+**Returns:**
+```
+Form: SalesTable
+
+DataSources:
+- SalesTable (main)
+  - Fields: SalesId, CustAccount, SalesName, ...
+  - Methods: validateWrite(), active(), executeQuery()
+- SalesLine (detail)
+  - Link: SalesId -> SalesTable.SalesId
+  - Methods: validateWrite(), modified()
+
+Controls:
+- ButtonNew (FormButtonControl)
+- ButtonDelete (FormButtonControl)
+- SalesLineGrid (FormGridControl)
+- CustomerLookup (FormReferenceControl -> CustTable)
+
+Methods:
+- init() - Initialize form
+- run() - Execute form
+- closeOk() - Save and close
+```
+
+**Use Cases:**
+- Finding buttons to extend (CoC)
+- Understanding datasource relationships
+- Locating form methods for overriding
+
+---
+
+### Analyzing Query Structure
+
+**Scenario:** You need to understand a query before modifying it.
+
+```
+Analyze structure of CustTransOpenQuery
+```
+
+**Returns:**
+```
+Query: CustTransOpenQuery
+
+Primary DataSource: CustTrans
+- Table: CustTrans
+- Fetch Mode: 1:n (One-to-Many)
+- Join Mode: InnerJoin
+
+Ranges:
+- AccountNum (field: AccountNum, EDT: CustAccount)
+- TransDate (field: TransDate, EDT: TransDate)
+- AmountCur (field: AmountCur, EDT: AmountCur)
+
+Child DataSources:
+- CustTable (parent link)
+  Link: AccountNum -> CustTrans.AccountNum
+  
+Total: 1 datasource, 3 ranges
+```
+
+**Use Cases:**
+- Understanding query filters before modification
+- Finding datasources to add/modify
+- Analyzing join relationships
+
+---
+
+### Analyzing View/Data Entity Structure
+
+**Scenario:** You need to understand a data entity for OData integration.
+
+```
+Show me structure of GeneralJournalAccountEntryView
+```
+
+**Returns:**
+```
+View: GeneralJournalAccountEntryView
+Type: Data Entity View
+Public: ✅
+Read-Only: ✅
+
+Mapped Fields (15):
+- RecId -> GeneralJournalEntry.RecId
+- JournalNum -> GeneralJournalEntry.JournalNum
+- AccountNum -> LedgerDimension.DisplayValue
+- TransDate -> GeneralJournalEntry.TransDate
+
+Computed Fields (3):
+- BalanceAmount (calculated from DebitAmount - CreditAmount)
+- AccountType (derived from LedgerDimension)
+- CurrencyCode (derived from Company)
+
+Relations:
+- GeneralJournalEntry (1:1 relation)
+- LedgerDimension (n:1 relation)
+
+Methods:
+- init()
+- validateWrite()
+```
+
+**Use Cases:**
+- OData/integration development
+- Understanding computed vs mapped fields
+- Data migration planning
+
+---
+
+## Method Signatures & References
+
+### Extracting Method Signatures for Extensions
+
+**Scenario:** You need the exact signature to create a Chain of Command extension.
+
+```
+Get method signature for SalesTable.validateWrite()
+```
+
+**Returns:**
+```
+public boolean validateWrite(boolean _checkRelations = true)
+
+Parameters:
+- _checkRelations (boolean, optional, default: true)
+
+Return Type: boolean
+
+Extension Template:
+[ExtensionOf(tableStr(SalesTable))]
+final class SalesTable_Extension
+{
+    public boolean validateWrite(boolean _checkRelations = true)
+    {
+        boolean ret = next validateWrite(_checkRelations);
+        // Your code here
+        return ret;
+    }
+}
+```
+
+**Use Cases:**
+- Creating CoC extensions with correct signatures
+- Understanding optional parameters
+- Ensuring type-safe method overrides
+
+---
+
+### Finding Where Code Is Used
+
+**Scenario:** You need to know where a method is called before changing it.
+
+```
+Find all usages of DimensionAttributeValueSet.createForLedgerDimension()
+```
+
+**Returns:**
+```
+Found 45 usages in your codebase:
+
+📦 LedgerJournalEngine.validateDimensions()
+   Line 245: dimValueSet = DimensionAttributeValueSet::createForLedgerDimension(...);
+   
+📦 CustTable.setDefaultDimension()
+   Line 89: defaultDim = DimensionAttributeValueSet::createForLedgerDimension(recId);
+   
+📦 SalesTable.validateFinancialDimensions()
+   Line 156: dimSet = DimensionAttributeValueSet::createForLedgerDimension(this.DefaultDimension);
+   
+... (showing top 50 results)
+```
+
+**Another Example: Finding Field References**
+
+```
+Find references to SalesLine.RemainSalesPhysical field
+```
+
+**Returns:**
+```
+Found 23 field references:
+
+📦 SalesLineCopy.copy()
+   Line 78: salesLineCopy.RemainSalesPhysical = salesLine.RemainSalesPhysical;
+   
+📦 SalesQuantity.updateFromPacking()
+   Line 145: this.RemainSalesPhysical -= qtyPacked;
+```
+
+**Use Cases:**
+- Impact analysis before changes
+- Understanding dependencies
+- Refactoring safety checks
+- Finding deprecated code usage
 
 ---
 
@@ -217,6 +447,54 @@ Create a helper class MyDimensionHelper in CustomCore and add it to my project a
 1. Reload project in Visual Studio (close/reopen or Unload/Reload project)
 2. Build project to synchronize
 3. Refresh AOT to see the object
+
+---
+
+### Editing Existing D365FO Files
+
+**Scenario:** You need to add a method to an existing class without manually editing XML.
+
+```
+Add method calculateDiscount() to MyCustomHelper class in file K:\AosService\PackagesLocalDirectory\CustomCore\CustomCore\AxClass\MyCustomHelper.xml
+```
+
+**What Happens:**
+- ✅ Automatic backup created (MyCustomHelper.xml.bak)
+- ✅ XML parsed and validated
+- ✅ New method added to `<Methods>` section
+- ✅ XML validated after changes
+- ✅ File saved atomically
+
+**Returns:**
+```
+✅ Backup created: MyCustomHelper.xml.bak
+✅ Added method: calculateDiscount()
+✅ XML validated successfully
+✅ Changes saved
+
+Summary:
+- 1 method added
+- 0 fields modified
+- File size: 2.3 KB -> 2.5 KB
+```
+
+**Another Example: Adding a Field to Table**
+
+```
+Add field CreditStatus (EDT: CustCreditStatus) to MyCustomTable in K:\AosService\...\AxTable\MyCustomTable.xml
+```
+
+**Safety Features:**
+- Automatic `.bak` backup before any change
+- XML validation ensures no corruption
+- Automatic rollback on error
+- Reports what changed (added, modified, deleted)
+
+**Use Cases:**
+- Adding methods to existing classes
+- Adding fields to tables
+- Modifying properties atomically
+- Safe batch modifications with rollback
 
 ---
 

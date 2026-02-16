@@ -137,6 +137,13 @@ async function initializeServices() {
       }
     } else {
       console.log(`✅ Loaded ${symbolCount} symbols from database`);
+      const breakdown = symbolIndex.getSymbolCountByType();
+      console.log('   📊 Symbol types: ' + 
+        `${breakdown.class || 0} classes, ` +
+        `${breakdown.table || 0} tables, ` +
+        `${breakdown.form || 0} forms, ` +
+        `${breakdown.query || 0} queries, ` +
+        `${breakdown.view || 0} views`);
     }
 
     serverState.symbolIndex = symbolIndex;
@@ -274,7 +281,7 @@ async function main() {
         console.log('');
         console.log('🎯 Available tools:');
         console.log('   Basic Discovery:');
-        console.log('   - search: Search for X++ classes, tables, methods, and fields');
+        console.log('   - search: Search for X++ classes, tables, forms, queries, views, methods, and fields');
         console.log('   - search_extensions: Search for symbols in custom extensions/ISV models');
         console.log('   - get_class_info: Get detailed class information');
         console.log('   - get_table_info: Get detailed table information');

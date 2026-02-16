@@ -1241,8 +1241,10 @@ export class XppSymbolIndex {
 
   /**
    * Clear symbols for specific models
+   * @param modelNames - Array of model names to clear
+   * @param shouldVacuum - Whether to run VACUUM after deletion (default: false for better incremental build performance)
    */
-  clearModels(modelNames: string[]): void {
+  clearModels(modelNames: string[], shouldVacuum: boolean = false): void {
     if (modelNames.length === 0) return;
     
     const placeholders = modelNames.map(() => '?').join(',');
@@ -1250,7 +1252,14 @@ export class XppSymbolIndex {
     stmt.run(...modelNames);
     
     console.log(`🗑️  Cleared symbols for models: ${modelNames.join(', ')}`);
-    this.vacuum();
+    
+    if (shouldVacuum) {
+      console.log('🧹 Running VACUUM to optimize database...');
+      this.vacuum();
+      console.log('✅ VACUUM completed');
+    } else {
+      console.log('⏭️  Skipping VACUUM for faster incremental build');
+    }
   }
 
   /**

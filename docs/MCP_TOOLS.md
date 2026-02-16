@@ -116,6 +116,37 @@ A: Returns:
 
 ---
 
+### Get Method Signatures for Extensions
+
+**Ask Copilot:**
+- "Show me the signature of CustTable.validateWrite()"
+- "Get method signature for SalesTable.insert()"
+- "What's the signature of InventTable.calcQty()?"
+
+**What happens:** Copilot extracts the exact method signature you need for Chain of Command extensions, including parameters, return type, and modifiers.
+
+**Example:**
+```
+Q: "Get signature for SalesTable.validateWrite()"
+
+A: Returns:
+  public boolean validateWrite(boolean _checkRelations = true)
+  
+  Use for CoC:
+  [ExtensionOf(tableStr(SalesTable))]
+  final class SalesTable_Extension
+  {
+      public boolean validateWrite(boolean _checkRelations = true)
+      {
+          boolean ret = next validateWrite(_checkRelations);
+          // Your custom logic
+          return ret;
+      }
+  }
+```
+
+---
+
 ### View Table Structure
 
 **Ask Copilot:**
@@ -134,6 +165,60 @@ A: Returns:
   Indexes: AccountIdx (primary), NameIdx...
   Relations: -> SalesTable,  CustTrans,  CustGroup
   Primary Index: AccountIdx
+```
+
+---
+
+### View Enum Values and Properties
+
+**Ask Copilot:**
+- "Show me values in CustAccountType enum"
+- "What are the options in SalesStatus enum?"
+- "Get all values from InventTransType enum"
+
+**What happens:** Copilot retrieves all enum values with their integer values, labels, and properties (extensible, base type for EDTs).
+
+**Example:**
+```
+Q: "Show me CustAccountType enum values"
+
+A: Returns:
+  Enum: CustAccountType
+  Extensible: ✅
+  
+  Values:
+  - Customer = 0            (Regular customer)
+  - Prospect = 1            (Potential customer)
+  - Organization = 2        (Organization account)
+  - Person = 3             (Individual person)
+```
+
+---
+
+### Find Where Code Is Used
+
+**Ask Copilot:**
+- "Find all usages of DimensionAttributeValueSet"
+- "Where is CustTable.validateWrite() called?"
+- "Find references to SalesLine.RemainSalesPhysical field"
+- "Show me where MyCustomMethod is used"
+
+**What happens:** Copilot performs where-used analysis across your codebase, finding all references to classes, methods, tables, fields, or enums.
+
+**Example:**
+```
+Q: "Find all usages of DimensionAttributeValueSet class"
+
+A: Returns:
+  Found in 150 locations:
+  
+  📦 LedgerJournalEngine.validateDimensions()
+     Line 245: dimValueSet = DimensionAttributeValueSet::find(...);
+  
+  📦 CustTable.setDefaultDimension()
+     Line 89: this.DefaultDimension = dimValueSet.save();
+  
+  ... showing top 50 results
 ```
 
 ---
@@ -203,6 +288,107 @@ A: Returns:
   - CustBalanceQuery - Customer balance calculation
   - CustAgedBalanceQuery - Aged balance report
   - CustInvoiceQuery - Customer invoice selection
+```
+
+---
+
+### Analyze Form Structure
+
+**Ask Copilot:**
+- "Show me the structure of SalesTable form"
+- "What datasources does CustTable form have?"
+- "List all controls on InventTable form"
+- "Show me methods on the SalesCreateOrder form"
+
+**What happens:** Copilot parses form XML and shows complete structure: datasources, controls (buttons, grids, groups), and methods.
+
+**Example:**
+```
+Q: "Analyze SalesTable form structure"
+
+A: Returns:
+  DataSources:
+  - SalesTable (main datasource)
+    - Fields: 45 fields
+    - Methods: validateWrite(), active(), executeQuery()
+  - SalesLine (detail datasource)
+    - Link: SalesId -> SalesTable.SalesId
+    
+  Controls:
+  - ButtonNew (FormButtonControl)
+  - ButtonDelete (FormButtonControl)  
+  - SalesLineGrid (FormGridControl)
+  - CustomerGroup (FormReferenceControl -> CustTable)
+  
+  Form Methods:
+  - init()
+  - run()
+  - closeOk()
+```
+
+---
+
+### Analyze Query Structure
+
+**Ask Copilot:**
+- "Show me the structure of CustTransOpenQuery"
+- "What datasources are in SalesInvoiceQuery?"
+- "List all ranges on InventOnHandQuery"
+
+**What happens:** Copilot parses query XML and shows datasources, joins, ranges, and grouping configuration.
+
+**Example:**
+```
+Q: "Analyze CustTransOpenQuery structure"
+
+A: Returns:
+  Primary DataSource: CustTrans
+  - Table: CustTrans
+  - Fetch Mode: 1:n (One-to-Many)
+  - Join Mode: InnerJoin
+  
+  Ranges:
+  - AccountNum (CustAccount field)
+  - TransDate (Date range field)
+  - AmountCur (Amount filter)
+  
+  Child DataSources:
+  - CustTable (parent join)
+    - Link: AccountNum -> CustTrans.AccountNum
+```
+
+---
+
+### Analyze View Structure
+
+**Ask Copilot:**
+- "Show me the structure of LedgerTransView"
+- "What fields does GeneralJournalAccountEntryView have?"
+- "List computed columns in CustBalanceView"
+
+**What happens:** Copilot parses view/data entity XML and shows fields (mapped vs computed), relations, and methods.
+
+**Example:**
+```
+Q: "Analyze GeneralJournalAccountEntryView structure"
+
+A: Returns:
+  View: GeneralJournalAccountEntryView
+  Public: ✅
+  Read-Only: ✅
+  
+  Mapped Fields (15):
+  - RecId -> GeneralJournalEntry.RecId
+  - JournalNum -> GeneralJournalEntry.JournalNum
+  - AccountNum -> LedgerDimension.DisplayValue
+  
+  Computed Fields (3):
+  - BalanceAmount (calculated)
+  - CurrencyCode (derived)
+  
+  Relations:
+  - GeneralJournalEntry (1:1)
+  - LedgerDimension (n:1)
 ```
 
 ---
@@ -373,6 +559,43 @@ A: Copilot:
   2. Creates file: K:\AosService\...\AxClass\MyDimensionHelper.xml
   3. Tells you to add: <Content Include="K:\AosService\...\MyDimensionHelper.xml" />
 ```
+
+---
+
+### Edit Existing D365FO Files
+
+**Ask Copilot:**
+- "Add a method validateCustomer() to MyCustomTable"
+- "Add a field CreditStatus to MyTable"
+- "Modify method calculateTotal() in MyHelper class"
+
+**What happens:** Copilot safely edits existing D365FO XML files with automatic backup.
+
+**Features:**
+- ✅ Automatic backup before editing (`.bak` file)
+- ✅ XML validation after changes
+- ✅ Atomic operations (all-or-nothing)
+- ✅ Preserves formatting (TABS, indentation)
+
+**Example:**
+```
+Q: "Add a new method calculateDiscount() to MyCustomHelper class"
+
+A: Copilot:
+  1. Backs up: MyCustomHelper.xml.bak
+  2. Parses XML structure
+  3. Adds method to <Methods> section
+  4. Validates XML is well-formed
+  5. Saves changes atomically
+  
+  If error occurs: restores from backup automatically
+```
+
+**Safety Features:**
+- Backup created before ANY modification
+- XML validation ensures file isn't corrupted
+- Rollback on any error
+- Reports what changed (added, modified, deleted)
 
 ---
 

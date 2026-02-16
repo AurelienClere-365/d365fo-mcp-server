@@ -14,6 +14,13 @@ import { analyzeClassCompletenessTool } from './analyzeCompleteness.js';
 import { getApiUsagePatternsTool } from './apiUsagePatterns.js';
 import { handleGenerateD365Xml } from './generateD365Xml.js';
 import { handleCreateD365File } from './createD365File.js';
+import { findReferencesTool } from './findReferences.js';
+import { modifyD365FileTool } from './modifyD365File.js';
+import { getMethodSignatureTool } from './methodSignature.js';
+import { getFormInfoTool } from './formInfo.js';
+import { getQueryInfoTool } from './queryInfo.js';
+import { getViewInfoTool } from './viewInfo.js';
+import { getEnumInfoTool } from './enumInfo.js';
 
 /**
  * Centralized tool handler that dispatches to individual tool implementations
@@ -49,6 +56,20 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
         return handleGenerateD365Xml(request);
       case 'create_d365fo_file':
         return handleCreateD365File(request);
+      case 'find_references':
+        return findReferencesTool(request, context);
+      case 'modify_d365fo_file':
+        return modifyD365FileTool(request, context);
+      case 'get_method_signature':
+        return getMethodSignatureTool(request, context);
+      case 'get_form_info':
+        return getFormInfoTool(request, context);
+      case 'get_query_info':
+        return getQueryInfoTool(request, context);
+      case 'get_view_info':
+        return getViewInfoTool(request, context);
+      case 'get_enum_info':
+        return getEnumInfoTool(request, context);
       default:
         return {
           content: [

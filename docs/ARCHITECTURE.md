@@ -35,7 +35,7 @@ graph TB
     subgraph "MCP Server Components"
         HTTP[HTTP Transport Layer<br/>Express + Rate Limiting]
         PROTO[MCP Protocol Handler<br/>JSON-RPC 2.0]
-        TOOLS[Tool Handlers<br/>6 MCP Tools]
+        TOOLS[Tool Handlers<br/>22 MCP Tools]
         DB[(SQLite Database<br/>FTS5 Full-Text Search<br/>584,799 symbols)]
         CACHE[Redis Cache<br/>Optional]
     end
@@ -79,7 +79,7 @@ sequenceDiagram
     alt Initialize
         MCP-->>IDE: Server Capabilities
     else Tools List
-        MCP-->>IDE: 6 Tool Definitions
+        MCP-->>IDE: 22 Tool Definitions
     else Tool Call
         MCP->>Handler: Route to Handler
         Handler->>Tool: Execute Tool
@@ -115,10 +115,20 @@ graph LR
 
     subgraph "Tool Layer"
         SEARCH[search.ts<br/>search Tool]
+        BATCH[batchSearch.ts<br/>batch_search Tool]
         CLASS[classInfo.ts<br/>get_class_info Tool]
         TABLE[tableInfo.ts<br/>get_table_info Tool]
+        FORM[formInfo.ts<br/>get_form_info Tool]
+        QUERY[queryInfo.ts<br/>get_query_info Tool]
+        VIEW[viewInfo.ts<br/>get_view_info Tool]
+        ENUM[enumInfo.ts<br/>get_enum_info Tool]
         COMP[completion.ts<br/>code_completion Tool]
+        SIGNATURE[methodSignature.ts<br/>get_method_signature Tool]
+        REFS[findReferences.ts<br/>find_references Tool]
         GEN[codeGen.ts<br/>generate_code Tool]
+        GENXML[generateD365Xml.ts<br/>generate_d365fo_xml Tool]
+        CREATE[createD365File.ts<br/>create_d365fo_file Tool]
+        MODIFY[modifyD365File.ts<br/>modify_d365fo_file Tool]
         EXT[extensionSearch.ts<br/>search_extensions Tool]
         PATTERN[analyzePatterns.ts<br/>analyze_code_patterns Tool]
         SUGGEST[suggestImplementation.ts<br/>suggest_method_implementation Tool]
@@ -146,24 +156,61 @@ graph LR
 
     SERVER --> HANDLER
     HANDLER --> SEARCH
+    HANDLER --> BATCH
     HANDLER --> CLASS
     HANDLER --> TABLE
+    HANDLER --> FORM
+    HANDLER --> QUERY
+    HANDLER --> VIEW
+    HANDLER --> ENUM
     HANDLER --> COMP
+    HANDLER --> SIGNATURE
+    HANDLER --> REFS
     HANDLER --> GEN
+    HANDLER --> GENXML
+    HANDLER --> CREATE
+    HANDLER --> MODIFY
     HANDLER --> EXT
+    HANDLER --> PATTERN
+    HANDLER --> SUGGEST
+    HANDLER --> COMPLETE
+    HANDLER --> API
 
     SEARCH --> SYMBOL
+    BATCH --> SYMBOL
     CLASS --> SYMBOL
     CLASS --> PARSER
     TABLE --> SYMBOL
     TABLE --> PARSER
+    FORM --> SYMBOL
+    FORM --> PARSER
+    QUERY --> SYMBOL
+    QUERY --> PARSER
+    VIEW --> SYMBOL
+    VIEW --> PARSER
+    ENUM --> SYMBOL
+    ENUM --> PARSER
     COMP --> SYMBOL
+    SIGNATURE --> SYMBOL
+    SIGNATURE --> PARSER
+    REFS --> SYMBOL
     EXT --> SYMBOL
+    PATTERN --> SYMBOL
+    SUGGEST --> SYMBOL
+    COMPLETE --> SYMBOL
+    API --> SYMBOL
 
     SEARCH -.-> CACHE_SVC
+    BATCH -.-> CACHE_SVC
     CLASS -.-> CACHE_SVC
     TABLE -.-> CACHE_SVC
+    FORM -.-> CACHE_SVC
+    QUERY -.-> CACHE_SVC
+    VIEW -.-> CACHE_SVC
+    ENUM -.-> CACHE_SVC
     COMP -.-> CACHE_SVC
+    SIGNATURE -.-> CACHE_SVC
+    REFS -.-> CACHE_SVC
 
     TRANSPORT --> RATE
     
@@ -412,7 +459,7 @@ graph LR
     subgraph "MCP Protocol Methods"
         INIT[initialize<br/>Server Capabilities]
         NOTIFY[notifications/initialized<br/>Handshake Complete]
-        TOOLS_LIST[tools/list<br/>10 Available Tools]
+        TOOLS_LIST[tools/list<br/>22 Available Tools]
         TOOLS_CALL[tools/call<br/>Execute Tool]
         RES_LIST[resources/list<br/>Empty]
         RES_TMPL[resources/templates/list<br/>Empty]
@@ -421,7 +468,7 @@ graph LR
     end
 
     INIT -.-> CAPS[Capabilities:<br/>tools, resources, prompts]
-    TOOLS_LIST -.-> TOOL_DEFS[Tool Definitions:<br/>search, get_class_info,<br/>get_table_info, code_completion,<br/>generate_code,<br/>search_extensions,<br/>analyze_code_patterns,<br/>suggest_method_implementation,<br/>analyze_class_completeness,<br/>get_api_usage_patterns]
+    TOOLS_LIST -.-> TOOL_DEFS[Tool Definitions:<br/>search, batch_search,<br/>get_class_info, get_table_info,<br/>get_form_info, get_query_info,<br/>get_view_info, get_enum_info,<br/>code_completion, get_method_signature,<br/>find_references, generate_code,<br/>generate_d365fo_xml, create_d365fo_file,<br/>modify_d365fo_file, search_extensions,<br/>analyze_code_patterns,<br/>suggest_method_implementation,<br/>analyze_class_completeness,<br/>get_api_usage_patterns]
     TOOLS_CALL -.-> EXEC[Tool Execution:<br/>search DB, parse XML,<br/>return results]
     
     style INIT fill:#4CAF50,color:#fff
@@ -548,6 +595,122 @@ Found 5 matches:
 ```
 
 **Output:** Common usage patterns with initialization, method sequences, and error handling examples
+
+#### 11. batch_search
+**Input:**
+```json
+{
+  "queries": [
+    {"query": "dimension", "type": "class", "limit": 5},
+    {"query": "ledger", "type": "class", "limit": 5},
+    {"query": "financial", "type": "class", "limit": 5}
+  ]
+}
+```
+
+**Output:** Parallel search results for multiple queries in a single request
+
+#### 12. get_form_info
+**Input:**
+```json
+{
+  "formName": "SalesTable"
+}
+```
+
+**Output:** Form structure with datasources, controls (buttons, grids), and methods
+
+#### 13. get_query_info
+**Input:**
+```json
+{
+  "queryName": "CustTransOpenQuery"
+}
+```
+
+**Output:** Query structure with datasources, ranges, joins, and grouping
+
+#### 14. get_view_info
+**Input:**
+```json
+{
+  "viewName": "GeneralJournalAccountEntryView"
+}
+```
+
+**Output:** View/data entity structure with mapped/computed fields and relations
+
+#### 15. get_enum_info
+**Input:**
+```json
+{
+  "enumName": "CustAccountType"
+}
+```
+
+**Output:** Enum values with integer values, labels, and properties (extensible, base type)
+
+#### 16. get_method_signature
+**Input:**
+```json
+{
+  "className": "SalesTable",
+  "methodName": "validateWrite"
+}
+```
+
+**Output:** Exact method signature with parameters, return type, and CoC extension template
+
+#### 17. find_references
+**Input:**
+```json
+{
+  "targetName": "DimensionAttributeValueSet",
+  "targetType": "class",
+  "limit": 50
+}
+```
+
+**Output:** All usages of class/method/field/enum across codebase with code snippets
+
+#### 18. generate_d365fo_xml
+**Input:**
+```json
+{
+  "objectType": "class",
+  "objectName": "MyHelper",
+  "modelName": "CustomCore"
+}
+```
+
+**Output:** D365FO XML content with proper structure and TABS indentation (cloud-ready)
+
+#### 19. create_d365fo_file
+**Input:**
+```json
+{
+  "objectType": "class",
+  "objectName": "MyHelper",
+  "modelName": "CustomCore",
+  "addToProject": true,
+  "solutionPath": "K:\\VSProjects\\CustomCore\\CustomCore.rnrproj"
+}
+```
+
+**Output:** Creates physical D365FO XML file and optionally adds to VS project (local only)
+
+#### 20. modify_d365fo_file
+**Input:**
+```json
+{
+  "filePath": "K:\\AosService\\...\\MyHelper.xml",
+  "operation": "add_method",
+  "methodName": "calculateDiscount",
+  "methodCode": "public real calculateDiscount() { return 0; }"
+}
+```
+
+**Output:** Safely edits D365FO XML file with automatic backup and validation
 
 ---
 
@@ -719,7 +882,7 @@ graph LR
 ```mermaid
 graph TB
     subgraph "Test Pyramid"
-        UNIT[Unit Tests<br/>30 tests<br/>search, classInfo, tableInfo]
+        UNIT[Unit Tests<br/>86 tests<br/>All 22 MCP tools]
         INT[Integration Tests<br/>MCP Protocol, HTTP Transport]
         E2E[End-to-End Tests<br/>symbolIndex, Database]
     end

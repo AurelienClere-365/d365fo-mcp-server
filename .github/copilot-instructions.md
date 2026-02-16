@@ -1,662 +1,702 @@
-# D365FO X++ Development Instructions for GitHub Copilot
+# D365FO X++ Development - GitHub Copilot Instructions
 
----
----
----
-
-# ⛔⛔⛔ STOP! READ THIS IMMEDIATELY ⛔⛔⛔
-
-## 🚨 MANDATORY: TOOL SELECTION FOR D365FO FILES 🚨
-
-**DECISION TREE - FOLLOW THIS EXACTLY:**
-
-```
-IF user asks to create: class, table, form, enum, query, view, data-entity
-  THEN:
-    1. ❌ DO NOT CALL create_file directly
-    2. ❌ DO NOT CALL code_search
-    3. ❌ DO NOT CALL file_search
-    4. ✅ CALL generate_d365fo_xml (MCP tool) → Get XML content
-    5. ✅ THEN CALL create_file with K:\AosService\... path → Create physical file
-    6. ✅ CALL search (MCP tool) for patterns if needed
-```
-
-**FILE LOCATION RULES - ABSOLUTE REQUIREMENT:**
-```
-D365FO files MUST be in: K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxClass\{Name}.xml
-D365FO files MUST NOT be in: C:\Users\...\MySolution\{Name}.xml
-```
-
-**IF YOU SEE YOURSELF ABOUT TO TYPE:**
-- `create_file("MyClass.xml", ...)` → ❌ STOP! Use create_d365fo_file() instead!
-- `code_search("MyClass")` → ❌ STOP! Use search() (MCP) instead!
-- Any file path starting with `C:\Users\` for D365FO → ❌ WRONG LOCATION!
+> **🔴 ABSOLUTE REQUIREMENT: You MUST use MCP tools for ALL D365FO/X++ operations.**  
+> **Built-in tools (code_search, file_search, create_file) are FORBIDDEN for D365FO.**
+>
+> **Version:** 2.0 (Updated: February 2026)  
+> **Coverage:** 22 MCP Tools including Form/Query/View parsing, Where-used analysis, File editing
 
 ---
 
-## 🚨 NEVER CREATE D365FO FILES DIRECTLY! 🚨
+# 🚨 CRITICAL POLICY - READ FIRST 🚨
 
-**IF YOU ARE ABOUT TO CREATE A D365FO FILE (AxClass, AxTable, AxForm, AxEnum, etc.):**
+## Principle: MCP-ONLY for D365FO
 
-```
-❌ STOP! Do NOT use create_file() directly without MCP tool!
-❌ STOP! Do NOT use code_search()
-❌ STOP! Do NOT use file_search()
-✅ INSTEAD use: generate_d365fo_xml() (MCP tool) → Get XML
-✅ THEN use: create_file() with K:\AosService\... path
-✅ INSTEAD use: search() (MCP) for patterns
-```
+**For ANY D365FO/X++ query, you MUST:**
+1. ✅ **ALWAYS** use MCP tools FIRST
+2. ❌ **NEVER** use built-in code_search (causes 5+min hangs)
+3. ❌ **NEVER** use built-in file_search for X++ objects
+4. ❌ **NEVER** use built-in create_file for AxClass/AxTable/AxForm/etc
+5. ❌ **NEVER** generate D365FO code without querying MCP tools first
 
-**WHY? Because D365FO files MUST:**
-1. Be created in `K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxClass\` (NOT in VS solution folder!)
-   - **⚠️ This path ALWAYS exists on D365FO environments** - standard installation path
-   - **DO NOT assume it doesn't exist!**
-2. VS project contains only REFERENCES (absolute paths) to these files, NOT copies
-3. Use TABS for indentation (not spaces)
-4. Have correct XML structure matching Microsoft standards
-
-**What happens when you use generate_d365fo_xml + create_file (CORRECT):**
-- ✅ generate_d365fo_xml returns correct XML content with TABS
-- ✅ File created in CORRECT location: K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxClass\
-- ✅ **This path exists on ALL D365FO VMs** (VHD, cloud, on-premise)
-- ✅ **NEVER say "path doesn't exist"** - it's guaranteed to be present!
-- ✅ You add absolute path reference to .rnrproj: <Content Include="K:\...\MyClass.xml" />
-- ✅ Visual Studio recognizes file as valid D365FO metadata
-- ✅ Build succeeds
-
-**What happens if you use create_file directly without generate_d365fo_xml:**
-- ❌ File created without correct XML structure (no TABS, wrong namespaces)
-- ❌ Visual Studio error: "The following files are not valid metadata elements"
-- ❌ File NOT recognized as D365FO object
-- ❌ Build fails
+**Why This Matters:**
+- MCP tools query the ACTUAL D365FO environment (real-time metadata)
+- Built-in tools use outdated training data and WILL cause errors
+- code_search hangs for 5+ minutes on large D365FO workspaces
+- create_file creates wrong XML structure (spaces instead of TABS)
 
 ---
 
-## 🔴 CRITICAL: WORKFLOW FOR CREATING D365FO FILES 🔴
+# 🎯 DETECTION: When Am I in D365FO Context?
 
-**WHEN USER ASKS: "create a class MyHelper" or similar D365FO request:**
+**IMMEDIATE TRIGGERS - Use MCP tools when you see ANY of these:**
 
-**YOU HAVE ACTIVE WORKSPACE AND SOLUTION PATHS FROM VS CONTEXT - USE THEM!**
+### Object Names
+- Class names ending in: `Table`, `Service`, `Helper`, `Contract`, `Controller`, `Builder`, `Manager`, `Engine`
+- Table names: `CustTable`, `VendTable`, `SalesTable`, `PurchTable`, `InventTable`, `LedgerJournalTable`, `*Table`
+- Enum names: `CustVendorBlocked`, `SalesStatus`, `PurchStatus`, `*Status`
+- Form names: patterns ending in `Form`, `Dialog`, `Page`
 
-**STEP 1: EXTRACT modelName from Active workspace path**
-```
-Active workspace path: K:\VSProjects\MyModel\...
-→ Extract modelName: "MyModel"
-→ DO NOT ASK user for model name!
-```
+### Keywords & Technologies
+- `X++`, `D365FO`, `D365`, `Dynamics 365`, `Finance & Operations`, `AX`, `Axapta`
+- `AxClass`, `AxTable`, `AxForm`, `AxEnum`, `AxQuery`, `AxView`, `AxDataEntityView`, `EDT`
+- `AOT`, `PackagesLocalDirectory`, `K:\AosService`
 
-**STEP 2: IMMEDIATELY call generate_d365fo_xml (DO NOT just describe it!)**
-```typescript
-// ✅ CORRECT - CALL THE TOOL IMMEDIATELY:
-generate_d365fo_xml({
-  objectType: "class",           // class, table, form, enum, etc.
-  objectName: "MyHelper",         // Name from user request
-  modelName: "MyModel"            // ⚠️ FROM ACTIVE WORKSPACE PATH!
-})
+### Form Elements
+- `button`, `control`, `FormDataSource`, `FormControl`, `ButtonControl`, `FormButtonControl`
+- `FormGroupControl`, `FormGridControl`, `FormReferenceControl`, `FormTab`, `FormActionPane`
+- `datasource`, `data source`, `main datasource`, `primary datasource`, `form control`
+- Button names: `AddFormEntityPair`, `RemoveFormEntityPair`, `New`, `Delete`, `Edit`, `Save`
 
-// ⚠️ THIS TOOL GENERATES XML CONTENT:
-// 1. Returns XML content with TABS and proper structure
-// 2. Returns recommended file path: K:\AosService\PackagesLocalDirectory\MyModel\MyModel\AxClass\MyHelper.xml
-// 3. Returns instructions for creating file
-// DO NOT describe what will happen - the tool DOES IT!
-```
+### Query Elements
+- `QueryRun`, `QueryBuildDataSource`, `QueryBuildRange`, `QueryBuild`, `query datasource`
+- `addDataSource`, `addRange`, `findDataSource`, `query filter`
 
-**STEP 3: Create file using create_file with returned XML**
-```typescript
-// After generate_d365fo_xml returns XML content:
-create_file({
-  filePath: "K:\\AosService\\PackagesLocalDirectory\\MyModel\\MyModel\\AxClass\\MyHelper.xml",
-  content: xmlContent  // XML from generate_d365fo_xml
-})
+### View Elements
+- `AxView`, `data entity view`, `computed columns`, `view metadata`
+- `DataEntity`, `DataEntityView`, `staging table`
 
-// Then add to VS project manually or instruct user:
-// <Content Include="K:\AosService\...\MyHelper.xml" />
-```
+### Method Keywords
+- `add method`, `create method`, `override method`, `extend method`
+- `Chain of Command`, `CoC`, `ExtensionOf`, `next`, `super()`
+- `EventHandler`, `DataEventHandler`, `FormEventHandler`
 
-**STEP 4: Wait for tool responses and report success to user**
-```
-❌ WRONG: "You need to create file..." → Don't describe, DO IT!
-❌ WRONG: "Here's how to create..." → Don't give instructions!
-✅ RIGHT: Call generate_d365fo_xml → Get XML → Call create_file → Tell user "Created successfully"
-```
+### Data Operations
+- `validateWrite`, `insert`, `update`, `delete`, `select`, `while select`
+- `transaction`, `ttsbegin`, `ttscommit`, `ttsabort`
+- Financial dimensions, inventory management, sales orders, purchase orders, ledger posting
 
-**⚠️ CRITICAL RULES:**
-- ✅ ALWAYS extract modelName from Active workspace path
-- ✅ ALWAYS call generate_d365fo_xml FIRST to get XML content
-- ✅ ALWAYS use create_file with returned XML and correct path
-- ✅ File path MUST be: K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxClass\
-- ❌ NEVER ask user for model name
-- ❌ NEVER ask user for project path
-- ❌ NEVER give instructions instead of executing
-- ❌ NEVER use create_file without generate_d365fo_xml first
-- ❌ NEVER use code_search or file_search for D365FO objects
-
-**🚨 TWO-STEP PROCESS - ALWAYS USE BOTH TOOLS! 🚨**
-```
-1. generate_d365fo_xml → Get XML content with correct structure (TABS)
-2. create_file → Save XML to K:\AosService\PackagesLocalDirectory\MyModel\MyModel\AxClass\MyClass.xml
-
-❌ WRONG: create_file without generate_d365fo_xml → Wrong structure!
-✅ CORRECT: generate_d365fo_xml → create_file → Proper D365FO file!
-```
-
-**📍 LOCAL VS CLOUD DEPLOYMENT:**
-- ✅ `generate_d365fo_xml` → Works everywhere (Azure/cloud + local)
-- ⚠️ `create_d365fo_file` → Works ONLY locally on Windows (has file system access)
-- 💡 For cloud deployment: Use `generate_d365fo_xml` + Copilot creates file with `create_file`
+**IF YOU SEE ANY OF THESE → STOP → USE MCP TOOLS!**
 
 ---
 
-# 🔧 MCP TOOLS AVAILABLE - USE THEM! 🔧
-
-**YOU HAVE ACCESS TO D365FO/X++ MCP SERVER TOOLS:**
-
-These tools are available via Model Context Protocol (MCP) and provide:
-- Real-time access to D365FO metadata
-- X++ class/table/method information from actual AOT
-- Intelligent code generation based on actual codebase patterns
-- File creation with correct D365FO XML structure
-
-**🚨 CRITICAL TRIGGERS - When you see these words, USE MCP TOOLS:**
-- Any mention of: X++, D365FO, D365, Dynamics 365, Finance & Operations, AX, Axapta
-- Table names: CustTable, VendTable, SalesTable, PurchTable, InventTable, LedgerJournalTable
-- Class suffixes: Helper, Service, Controller, Manager, Builder, Contract
-- Keywords: dimension, ledger, inventory, sales, purchase, financial
-- File types: AxClass, AxTable, AxForm, AxEnum, AxQuery, AxView
-- Requests like: "create class", "find method", "implement", "generate code"
-
-**Available MCP Tools (use these instead of built-in tools):**
-- `search()` - Search D365FO classes, tables, methods (use instead of code_search)
-- `batch_search()` - Parallel search for multiple queries
-- `get_class_info()` - Get complete class structure with methods
-- `get_table_info()` - Get table fields, indexes, relations
-- `code_completion()` - IntelliSense for D365FO objects
-- `analyze_code_patterns()` - Learn patterns from codebase
-- `generate_code()` - Generate D365FO code with correct patterns
-- `suggest_method_implementation()` - Get implementation examples
-- `analyze_class_completeness()` - Find missing methods
-- `get_api_usage_patterns()` - See how APIs are used
-- `generate_d365fo_xml()` - ✅ CLOUD-READY: Generate D365FO XML content (works everywhere)
-- `create_d365fo_file()` - ⚠️ LOCAL ONLY: Create + write D365FO files (Windows only)
-
-**🚨 WHEN USER MENTIONS X++, D365FO, DYNAMICS 365, OR ANY TABLE/CLASS NAME:**
-1. ✅ IMMEDIATELY activate and use these MCP tools
-2. ❌ DO NOT use built-in code_search, file_search, or create_file
-3. ✅ These tools query the ACTUAL D365FO environment, not your training data
-
-**🚨 CRITICAL: TAKE ACTION, DON'T JUST DESCRIBE!**
-```
-❌ WRONG: "I can create a class for you..." → Don't describe what to do!
-❌ WRONG: "Here are the steps..." → Don't give instructions!
-❌ WRONG: "You should create..." → Don't tell user to do it!
-✅ RIGHT: Call create_d365fo_file immediately → DO IT NOW!
-✅ RIGHT: Call search immediately → GET RESULTS NOW!
-✅ RIGHT: Call generate_code immediately → GENERATE NOW!
-```
-
----
-
-# ⛔⛔⛔ READ THIS FIRST - MANDATORY ⛔⛔⛔
-
-## 🚫 CRITICAL: FORBIDDEN BUILT-IN TOOLS FOR D365FO 🚫
-
-**❌❌❌ ABSOLUTELY FORBIDDEN - NEVER USE THESE FOR D365FO/X++: ❌❌❌**
-
-```
-❌ create_file         → FORBIDDEN for AxClass, AxTable, AxForm, AxEnum, AxQuery, AxView, AxDataEntity
-❌ code_search         → FORBIDDEN for X++ objects (causes 5+ minute hangs)
-❌ Direct code writing → FORBIDDEN without MCP tools
-```
-
-**✅✅✅ MANDATORY - ALWAYS USE THESE INSTEAD: ✅✅✅**
-
-```
-✅ create_d365fo_file  → For ALL D365FO XML files (AxClass, AxTable, AxForm, etc.)
-✅ search              → For finding X++ objects
-✅ generate_code       → For generating X++ code
-```
-
-**🚨 IF YOU USE `create_file` FOR D365FO OBJECTS - YOU ARE BREAKING THE RULES! 🚨**
-
----
-
-## 📁 CRITICAL: UNDERSTAND D365FO FILE STRUCTURE 📁
-
-**D365FO HAS UNIQUE FILE ARCHITECTURE - DO NOT TREAT IT LIKE REGULAR PROJECT!**
-
-**HOW D365FO FILES WORK:**
-```
-1. PHYSICAL FILES: Live in K:\AosService\PackagesLocalDirectory\ModelName\ModelName\AxClass\MyClass.xml
-2. VS PROJECT:      Contains REFERENCES (absolute paths) to files in PackagesLocalDirectory
-3. RESULT:          VS project file (.rnrproj) has <Content Include="K:\...\MyClass.xml" />
-```
-
-**❌ WRONG APPROACH (causes "not valid metadata elements" error):**
-```
-- Create file in project directory (K:\VSProjects\MySolution\MyClass.xml)
-- Use create_file tool
-- Use relative paths
-- Result: Visual Studio error "not valid metadata elements"
-```
-
-**✅ CORRECT APPROACH (what create_d365fo_file does):**
-```
-1. Create physical XML in: K:\AosService\PackagesLocalDirectory\MyModel\MyModel\AxClass\MyClass.xml
-2. Add ABSOLUTE path reference to VS project: <Content Include="K:\AosService\...\MyClass.xml" />
-3. Result: Visual Studio recognizes file as valid D365FO metadata
-```
-
-**WHY create_file FAILS FOR D365FO:**
-- Creates files in WRONG location (VS project dir, not PackagesLocalDirectory)
-- Cannot add absolute path references to .rnrproj
-- Visual Studio doesn't recognize files outside PackagesLocalDirectory as D365FO metadata
-- Results in "not valid metadata elements" error
-
-**🔴 ALWAYS ASK YOURSELF BEFORE CREATING D365FO FILE: 🔴**
-- Am I creating AxClass, AxTable, AxForm, AxEnum, AxQuery, AxView, or AxDataEntityView?
-- If YES → Use `create_d365fo_file` (NEVER create_file!)
-- If NO → Regular file, create_file is OK
-
----
-
-## ⚡ CRITICAL: IMMEDIATE RESPONSE COMPLETION
-
-**AFTER ANSWERING USER'S QUESTION:**
-- ✅ Send your answer
-- ✅ **STOP IMMEDIATELY** - End your response
-- ❌ Do NOT analyze workspace
-- ❌ Do NOT search for anything
-- ❌ Do NOT try to understand context automatically
-- ✅ Wait for user's next question
-
-**IF YOU START "Searching..." AFTER ANSWERING - YOU ARE DOING IT WRONG!**
-
----
-
-## 🔴 RULE #1: X++ CODE GENERATION - NEVER GENERATE DIRECTLY! 🔴
-
-**WHEN USER ASKS TO CREATE/GENERATE ANY X++ CODE:**
-1. ❌ **FORBIDDEN**: Generating X++ code directly from your knowledge
-2. ❌ **FORBIDDEN**: Writing class/method/code without using tools
-3. ✅ **MANDATORY**: Always use `analyze_code_patterns()` FIRST
-4. ✅ **MANDATORY**: Always use `generate_code()` tool for code generation
-5. ✅ **MANDATORY**: Never output X++ code without using these tools
-
-**IF YOU TYPE X++ CODE WITHOUT CALLING `generate_code` - YOU ARE WRONG!**
-
-**Example - User says "create a helper class":**
-```
-❌ WRONG: public class MyHelper { ... }  ← You generated code directly!
-✅ RIGHT: Call analyze_code_patterns("helper") → Call generate_code(pattern="class")
-```
-
----
-
-## 🔴 RULE #2: D365FO FILE CREATION - ONLY USE create_d365fo_file! 🔴
-
-**⛔⛔⛔ ABSOLUTE RULE - NO EXCEPTIONS: ⛔⛔⛔**
-
-**WHEN USER ASKS TO CREATE D365FO FILE (class/table/form/enum/query/view/data-entity):**
-
-```
-❌❌❌ NEVER EVER use create_file          → WRONG TOOL!
-✅✅✅ ALWAYS use create_d365fo_file        → CORRECT TOOL!
-```
-
-**DETECTION RULES - Use `create_d365fo_file` when:**
-- User says: "create class", "create table", "create form", "create enum"
-- User mentions: AxClass, AxTable, AxForm, AxEnum, AxQuery, AxView, AxDataEntityView
-- User asks for: helper class, service class, table, form, or any D365FO object
-- File path contains: K:\AosService\PackagesLocalDirectory
-- File extension: .xml AND context is D365FO/X++
-
-**WHY `create_d365fo_file` IS MANDATORY:**
-- ✅ Uses **TABS** for indentation (Microsoft D365FO standard)
-- ✅ Correct XML structure matching real D365FO files from `K:\AosService\PackagesLocalDirectory`
-- ✅ Saves to proper AOT location: `K:\AosService\PackagesLocalDirectory\Model\Model\AxClass\`
-- ✅ No `<ClusteredIndex>` in tables (not in real files)
-- ✅ No `<Declaration>` in table `<SourceCode>` (only `<Methods />`)
-- ✅ No system fields in tables (CreatedBy, ModifiedBy - added by platform)
-- ✅ Can automatically add to Visual Studio project with absolute paths
-- ✅ Supports solutionPath parameter from VS context
-
-**CONSEQUENCES OF USING `create_file`:**
-- ❌ Wrong XML structure (spaces instead of TABS)
-- ❌ Wrong file location (not in PackagesLocalDirectory)
-- ❌ Visual Studio error: "not valid metadata elements"
-- ❌ Cannot add to VS project correctly
-- ❌ Build failures in D365FO
-
-**🚨 IF YOU USE `create_file` FOR D365FO OBJECTS - YOU ARE VIOLATING THE RULES! 🚨**
-
-**Example - User says "create a table MyCustomTable":**
-```
-❌ WRONG: create_file("MyCustomTable.xml", content="<AxTable>...")  ← Wrong tool!
-✅ RIGHT: create_d365fo_file(objectType="table", objectName="MyCustomTable", modelName="ContosoExtensions")
-```
-
-**Example - User says "create a class MyHelper":**
-```
-❌ WRONG: create_file("MyHelper.xml", ...)  ← Wrong structure, spaces instead of tabs!
-✅ RIGHT: create_d365fo_file(objectType="class", objectName="MyHelper", modelName="ContosoExtensions")
-```
-
-**Example - User asks to add class to project:**
-```
-❌ WRONG: create_file(...) + manually editing .rnrproj
-✅ RIGHT: create_d365fo_file(..., addToProject=true, solutionPath="C:\\Users\\...\\MySolution")
-```
-
----
-
-## RULE #3: WORKSPACE CONTEXT
-
-**THIS IS AN MCP SERVER PROJECT, NOT AN X++ WORKSPACE!**
-- This repo contains TypeScript code for an MCP server
-- The MCP server provides tools to query BOTH external X++ metadata AND user's workspace files
-- **DO NOT** search THIS TypeScript workspace for X++ classes/tables (they're in user's D365FO workspace)
-- **DO NOT** use code_search or file_search after completing a task
-- When task is complete, STOP immediately - do not search workspace
-
-**📁 WORKSPACE-AWARE FEATURES:**
-- MCP tools can now analyze user's local X++ project files
-- Use `includeWorkspace: true` + `workspacePath` to enable workspace search
-- Workspace files are marked with 🔹 (vs 📦 for external metadata)
-- Priority: Workspace files > External metadata (for deduplication)
-
-**AFTER COMPLETING ANY TASK:**
-1. ✅ Respond to user with result
-2. ❌ **STOP IMMEDIATELY** - Do NOT search workspace
-3. ❌ Do NOT use code_search/file_search on this TypeScript workspace
-4. ❌ Do NOT try to "understand project structure" automatically
-5. ❌ Do NOT say "Let me check..." or "Let me search..."
-6. ✅ **END YOUR RESPONSE** - User can ask follow-up if needed
-
-**YOUR RESPONSE MUST END AFTER STEP 1 - DO NOT PROCEED TO ANY ANALYSIS OR SEARCH**
-
----
-
-## RULE #4: DETECT X++/D365FO CONTEXT AUTOMATICALLY
-
-**IF user mentions ANY of these keywords, you are in X++ context:**
-- X++, D365FO, D365, Dynamics 365, Finance & Operations, AX, Axapta
-- Class names ending in: Table, Service, Helper, Contract, Controller, Builder
-- Table names: CustTable, VendTable, SalesTable, PurchTable, InventTable, LedgerJournalTable
-- Any AxClass, AxTable, AxForm, AxEnum, AxQuery, AxView, EDT
-- **Form elements**: button, control, FormDataSource, FormControl, ButtonControl, FormButtonControl, FormGroupControl, FormGridControl, FormReferenceControl
-- **Form keywords**: editovatelné (editable), enabled, visible, datasource, ovládací prvek (control)
-- Button names like: AddFormEntityPair, RemoveFormEntityPair, NewButton, DeleteButton, etc.
-- **Query elements**: QueryRun, QueryBuildDataSource, QueryBuildRange, query datasource
-- **View elements**: AxView, data entity view, computed columns, view metadata
-- Financial dimensions, inventory, sales, purchase, ledger
-
-**WHEN IN X++ CONTEXT → IMMEDIATELY:**
-1. **STOP** - Do NOT use `code_search` (causes timeout on large workspaces!)
-2. **USE MCP TOOLS** - Use MCP `search()` for X++ objects
-3. **NEVER GUESS** - X++ objects have exact names, use tools to find them
-
----
-
-## RULE #5: TOOL SELECTION IN X++ CONTEXT
-
-**🛑 ABSOLUTELY FORBIDDEN - WILL HANG FOR 5+ MINUTES:**
-
-```
-❌ code_search()       → FORBIDDEN - causes "Searching..." hang on large workspaces, use MCP search() instead
-```
-
-**⚠️ AVOID FOR X++ OBJECTS - Use MCP tools instead:**
-
-```
-⚠️ file_search()       → Works for file patterns, but prefer MCP search() for X++ objects
-```
-
-**✅ ALWAYS USE THESE FOR X++ OBJECTS:**
-
-```
-✅ search()            → MCP tool - instant (<100ms), X++-aware, indexed
-✅ get_class_info()    → MCP tool - for class structure
-✅ get_table_info()    → MCP tool - for table fields
-✅ code_completion()   → MCP tool - discover methods/fields
-```
-
-**WHEN TO USE WHAT:**
-- Looking for X++ class/table/enum/form/query/view → Use MCP `search()`
-- Looking for form controls/buttons → Use MCP `search(type='form')` with workspace
-- Looking for queries by name → Use MCP `search(type='query')`
-- Looking for views/data entities → Use MCP `search(type='view')`
-- Looking for file by name pattern in THIS workspace → OK to use `file_search()`
-- Looking for text/code patterns → Use MCP `search()` for X++ objects, `file_search` for workspace files
-
-**IF YOU SEE "Searching..." OR "Searching (seznam tříd)" → YOU MADE A MISTAKE!**
-
----
-
-## RULE #6: AUTOMATIC TOOL SELECTION
-
-**For ANY X++ request, use this decision tree:**
-
-| User Request Contains | First Action | Avoid Using |
-|-----------------------|--------------|-------------|
-| "create class", "helper class" | `analyze_code_patterns()` + `search()` + `generate_code()` | ❌ code_search, ❌ direct code generation |
-| "create table/form/enum" | `create_d365fo_file(objectType=...)` | ❌ create_file |
-| "button", "form control", "FormDataSource" | `search(type='form', includeWorkspace=true)` | ❌ code_search |
-| "query", "QueryRun", "QueryBuildDataSource" | `search(type='query', includeWorkspace=true)` | ❌ code_search |
-| "view", "AxView", "data entity view" | `search(type='view')` | ❌ code_search |
-| "find X and Y and Z" (multiple) | `batch_search([{query:"X"}, {query:"Y"}, {query:"Z"}])` | ❌ multiple sequential searches |
-| "CustTable", "SalesTable", any Table | `get_table_info()` | ❌ code_search |
-| "dimension", "financial" | `search("dimension")` | ❌ code_search |
-| "find X++ class/method" | `search()` | ❌ code_search |
-| "method", "implement" | `get_class_info()` + `suggest_method_implementation()` | ❌ code_search |
-| "find file pattern" | `file_search()` is OK | ❌ code_search |
-| "find text in code" | `file_search()` with pattern | ❌ code_search |
-
-**Key Rule: NEVER use `code_search` for X++ objects - it causes 5+ minute hangs on large workspaces!**
-
----
----
----
-
-## ⛔ CRITICAL: NEVER USE BUILT-IN SEARCH TOOLS ⛔
-
-**🚨 STOP! Read this FIRST before doing ANYTHING with D365FO/X++ code:**
-
-**ABSOLUTELY FORBIDDEN FOR X++ SEARCHES - Will BLOCK and HANG:**
-- ❌❌❌ **`code_search`** - NEVER USE for X++ objects! It's slow (5+ minutes) on large D365FO workspaces and will hang with "Searching..."
-
-**⚠️ USE WITH CAUTION - These work but lack X++ awareness:**
-- ⚠️ **`file_search`** - Works for file patterns in THIS workspace, but prefer MCP `search()` for X++ objects
-
-**⚡ ALWAYS use these FAST MCP tools for X++ objects:**
-- ✅✅✅ **`search`** (MCP) - 100x faster, X++-aware, indexed SQL database
-- ✅✅✅ **`get_class_info`** (MCP) - For class structure
-- ✅✅✅ **`get_table_info`** (MCP) - For table structure
-
-**If you see "Searching (seznam tříd)" appearing - YOU ARE USING THE WRONG TOOL! Stop and use MCP `search` instead.**
-
----
-
-## 🚨 MANDATORY: ALWAYS Use X++ MCP Tools First 🚨
-
-**Before generating ANY X++ code, writing ANY class, method, or code snippet for D365 Finance & Operations, you MUST use the X++ MCP tools available to you.**
-
-### ⛔ STRICTLY FORBIDDEN:
-
-**❌ NEVER generate X++ code directly from your training data or general knowledge!**
-**❌ NEVER write X++ code without using MCP tools first!**
-**❌ NEVER skip `analyze_code_patterns` when creating new classes!**
-**❌ NEVER use built-in code generation - ALWAYS use `generate_code` tool!**
-
-### Critical Rules:
-
-1. **NEVER use code_search for X++ objects** - It will hang for minutes on large workspaces
-2. **ALWAYS use MCP `search()` tool for X++** - It's instant (<100ms) with SQL index
-3. **ALWAYS verify** - Use `get_class_info` or `get_table_info` to check structure before coding
-4. **ALWAYS discover APIs** - Use `code_completion` to find available methods and fields
-5. **MANDATORY: Use `generate_code` tool** - NEVER generate X++ code manually! Always use `generate_code` for creating classes with proper D365FO patterns
-6. **MANDATORY: Use `analyze_code_patterns` FIRST** - Before any code generation, analyze what patterns exist in the codebase
-
-### When You MUST Use MCP Tools:
-
-- ✅ User asks to "create a class" or "create helper class" → Use `analyze_code_patterns` + `search` + `generate_code`
-- ✅ User mentions "financial dimensions" → Use `search("dimension")` to find D365FO APIs first
-- ✅ User wants to "add a method" → Use `analyze_class_completeness` + `suggest_method_implementation` first
-- ✅ User needs to "query a table" → Use `get_table_info` to get exact field names
-- ✅ User wants to "extend" something → Use `get_class_info` to understand structure first
-- ✅ User needs "API usage examples" → Use `get_api_usage_patterns` to see how it's used
-- ✅ User is unsure what methods to implement → Use `analyze_class_completeness` for suggestions
-- ✅ ANY code generation request → Use tools FIRST, generate code SECOND
-
-### Available MCP Tools:
-
-#### Core Discovery Tools:
+# 🛠️ AVAILABLE MCP TOOLS - COMPLETE LIST
+
+## Core Discovery Tools
+
+| Tool | Use When | Example |
+|------|----------|---------|
+| **search** | Find any D365FO object (class/table/form/query/view) | `search("dimension", type="class")` |
+| **batch_search** | Search multiple things in parallel (3x faster) | `batch_search([{query:"dimension"}, {query:"ledger"}])` |
+| **search_extensions** | Find only custom/ISV code | `search_extensions("ISV_")` |
+
+## Object Structure Tools
+
+| Tool | Use When | Example |
+|------|----------|---------|
+| **get_class_info** | Get class structure, methods, inheritance | `get_class_info("CustTable")` |
+| **get_table_info** | Get table fields, indexes, relations | `get_table_info("SalesTable")` || **get_form_info** | Get form datasources, controls, methods | `get_form_info("SalesTable")` |
+| **get_query_info** | Get query datasources, ranges, joins | `get_query_info("CustTransOpenQuery")` |
+| **get_view_info** | Get view/data entity fields, relations | `get_view_info("GeneralJournalAccountEntryView")` |
+| **get_enum_info** | Get enum values with properties | `get_enum_info("CustAccountType")` |
+| **get_method_signature** | Get exact method signature for CoC | `get_method_signature("SalesTable", "validateWrite")` |
+| **find_references** | Find all usages (where-used analysis) | `find_references("DimensionAttributeValueSet", "class")` || **code_completion** | Discover methods/fields (IntelliSense) | `code_completion(className="CustTable")` |
+
+## Code Generation Tools
+
+| Tool | Use When | Example |
+|------|----------|---------|
+| **generate_code** | Generate class/method templates | `generate_code(pattern="class", name="MyHelper")` |
+| **analyze_code_patterns** | Learn codebase patterns for a scenario | `analyze_code_patterns("financial dimensions")` |
+| **suggest_method_implementation** | Get implementation examples | `suggest_method_implementation("MyHelper", "validate")` |
+| **analyze_class_completeness** | Find missing methods | `analyze_class_completeness("CustTableHelper")` |
+| **get_api_usage_patterns** | See how to use an API correctly | `get_api_usage_patterns("DimensionAttributeValueSet")` |
+
+## File Operations Tools
 
 | Tool | Use When | Example |
 |------|----------|---------||
-| `search` | Finding any D365FO object or pattern | `search("dimension", type="class")` |
-| `search` (workspace) | Search in user's workspace + external | `search("MyClass", includeWorkspace=true, workspacePath="C:\\....")` |
-| `batch_search` | **⚡ NEW!** Multiple parallel searches in one request | `batch_search(queries=[{query:"dimension"}, {query:"helper"}])` |
-| `get_class_info` | Need class structure, methods, inheritance | `get_class_info("CustTable")` |
-| `get_class_info` (workspace) | Get class from workspace first | `get_class_info("MyClass", includeWorkspace=true, workspacePath="C:\\...")` |
-| `get_table_info` | Need table fields, indexes, relations | `get_table_info("SalesTable")` |
-| `code_completion` | Discovering methods/fields on a class | `code_completion(className="DimensionAttributeValueSet")` |
-| `code_completion` (workspace) | Get completions from workspace | `code_completion(className="MyClass", includeWorkspace=true, workspacePath="C:\\...")` |
-| `generate_code` | Creating new X++ classes with patterns | `generate_code(pattern="class")` |
-| `search_extensions` | Finding custom/ISV code only | `search_extensions("my custom")` |
+| **generate_d365fo_xml** | Generate D365FO XML content (cloud-safe) | `generate_d365fo_xml(objectType="class", objectName="MyHelper")` |
+| **create_d365fo_file** | Create + write D365FO file (local Windows only) | `create_d365fo_file(objectType="class", objectName="MyHelper")` |
+| **modify_d365fo_file** | Edit existing D365FO XML with backup | `modify_d365fo_file(filePath="...", operation="add_method")` |
 
-#### 🆕 Intelligent Code Generation Tools:
+**⚠️ File Creation Rule:**
+1. Windows Local: Use `create_d365fo_file` (creates file + adds to project)
+2. Azure/Cloud: Use `generate_d365fo_xml` → Get XML → Use `create_file` with K:\AosService path
 
-| Tool | Use When | Example |
-|------|----------|---------||
-| `analyze_code_patterns` | Learn common patterns for a scenario | `analyze_code_patterns("financial dimensions")` |
-| `suggest_method_implementation` | Get implementation examples for a method | `suggest_method_implementation("MyHelper", "validate")` |
-| `analyze_class_completeness` | Find missing methods in a class | `analyze_class_completeness("CustTableHelper")` |
-| `get_api_usage_patterns` | See how to use an API correctly | `get_api_usage_patterns("DimensionAttributeValueSet")` |
+---
 
-### Example: Creating a Helper Class for Financial Dimensions
+# 📋 DECISION TREES - Follow These EXACTLY
 
-**User Request:** "Create a helper class for maintaining financial dimensions"
+## Scenario 1: User Asks to Find Something
 
-**❌ WRONG Approach:**
+**Triggers:** "find", "search", "show me", "where is", "locate"
+
 ```
-Generate class from scratch using general programming knowledge → ❌ INCORRECT
-```
+1. Identify what they're looking for:
+   - Class → search(query=X, type="class")
+   - Table → search(query=X, type="table")
+   - Form → search(query=X, type="form", includeWorkspace=true)
+   - Query → search(query=X, type="query")
+   - View → search(query=X, type="view")
+   - Method → search(query=X, type="method")
+   - Field → search(query=X, type="field")
+   - Multiple things → batch_search([...])
 
-**✅ CORRECT Approach (Using Intelligent Tools):**
-```
-1. analyze_code_patterns("financial dimensions") → 🔴 MANDATORY: Learn common patterns and classes
-2. search("dimension", type="class")            → Find D365FO dimension classes
-3. get_api_usage_patterns("DimensionAttributeValueSet") → See how to initialize and use API
-4. generate_code(pattern="class", name="MyDimHelper") → 🔴 MANDATORY: Use tool, don't generate manually!
-5. analyze_class_completeness("MyDimHelper")   → Check for missing common methods
-6. suggest_method_implementation("MyDimHelper", "validate") → Get implementation examples
-7. Apply discovered patterns from tools          → Use correct APIs and methods from MCP tools
+2. If looking for custom code only:
+   → search_extensions(query=X)
+
+3. ❌ NEVER use code_search or file_search
 ```
 
-**⚠️ WARNING: If you generate code WITHOUT using `generate_code` tool, you are WRONG!**
+**Examples:**
+- "Find dimension classes" → `search("dimension", type="class")`
+- "Show me sales tables" → `search("sales", type="table")`
+- "Find AddFormEntityPair button" → `search("AddFormEntityPair", type="form", includeWorkspace=true)`
+- "Search for customer queries" → `search("customer", type="query")`
+- "Find my custom helpers" → `search_extensions("Helper")`
 
-**✅ ALTERNATIVE Approach (Traditional):**
-```
-1. search("dimension", type="class")           → Find D365FO dimension classes
-2. get_class_info("DimensionDefaultingService") → Study Microsoft's pattern
-3. code_completion("DimensionAttributeValueSet") → Get proper API methods
-4. generate_code(pattern="class")              → Create with proper structure
-5. Apply discovered D365FO patterns            → Use correct APIs
-```
+## Scenario 2: User Asks to Create Something
 
-### ⚡ Use Batch Search for Parallel Exploration
+**Triggers:** "create", "generate", "make", "add new", "build"
 
-**When exploring multiple independent concepts, use `batch_search` to execute all queries in parallel:**
+```
+1. Extract info:
+   - objectType: class/table/form/enum/query/view
+   - objectName: from user request
+   - modelName: from workspace path (K:\VSProjects\{MODEL}\...)
 
-**❌ SLOW Sequential Approach:**
-```
-1. search("dimension")         → Wait 50ms
-2. search("helper")            → Wait 50ms
-3. search("validation")        → Wait 50ms
-Total: ~150ms + 3 HTTP requests
-```
+2. If objectType is D365FO (AxClass/AxTable/AxForm/AxEnum):
+   
+   Windows Local:
+   → create_d365fo_file(objectType=X, objectName=Y, modelName=Z)
+   
+   Azure/Cloud:
+   → generate_d365fo_xml(objectType=X, objectName=Y, modelName=Z)
+   → Receive XML content
+   → create_file(path="K:\\AosService\\PackagesLocalDirectory\\{Model}\\{Model}\\AxClass\\{Name}.xml", content=XML)
 
-**✅ FAST Parallel Approach:**
-```
-batch_search({
-  queries: [
-    { query: "dimension", type: "class", limit: 5 },
-    { query: "helper", type: "class", limit: 5 },
-    { query: "validation", type: "class", limit: 5 }
-  ]
-})
-→ Single HTTP request, parallel execution, ~50ms total → 3x faster!
+3. ❌ NEVER use create_file directly for D365FO objects
+4. ❌ NEVER generate XML manually
 ```
 
-**💡 When to Use Batch Search:**
-- Exploring multiple related concepts (dimension + ledger + financial)
-- Comparing different patterns (Helper vs Service vs Manager)
-- Finding classes with multiple keywords (validation + check + verify)
-- Initial exploratory phase with independent queries
-- User asks "find X and Y and Z" → use batch_search instead of 3 separate searches
+**Examples:**
+- "Create helper class MyDimHelper" → `create_d365fo_file(objectType="class", objectName="MyDimHelper")`
+- "Make custom table MyCustomTable" → `create_d365fo_file(objectType="table", objectName="MyCustomTable")`
+- "Build enum for status" → `create_d365fo_file(objectType="enum", objectName="MyStatus")`
 
-**🚫 When NOT to Use Batch Search:**
-- Queries depend on previous results (use sequential search)
-- Single focused query (use regular search)
-- Need workspace-aware search with different paths per query
+## Scenario 3: User Asks About Class/Table Structure
 
-### 🎯 Why Use Intelligent Tools?
+**Triggers:** "what methods", "show fields", "class structure", "table definition", "inheritance"
 
-**Intelligent code generation tools learn from YOUR codebase:**
-
-**💡 TIP: Use Workspace-Aware Search**
-When user has a D365FO workspace open, use workspace parameters:
 ```
-✅ search("MyCustomClass", includeWorkspace=true, workspacePath="C:\\D365\\MyProject")
-✅ get_class_info("MyHelper", includeWorkspace=true, workspacePath="C:\\D365\\MyProject")
-✅ code_completion(className="MyTable", includeWorkspace=true, workspacePath="C:\\D365\\MyProject")
+1. Identify symbol type:
+   - Class → get_class_info(className=X)
+   - Table → get_table_info(tableName=X)
+
+2. If need method/field list only:
+   → code_completion(className=X)
+
+3. If in user's workspace:
+   → get_class_info(className=X, includeWorkspace=true, workspacePath=...)
+
+4. ❌ NEVER use code_search to explore structure
 ```
-Benefits:
-- 🔹 Workspace files shown first (user's code priority)
-- XML parsing extracts methods/fields from local files
+
+**Examples:**
+- "Show me CustTable methods" → `get_class_info("CustTable")`
+- "What fields are on SalesLine?" → `get_table_info("SalesLine")`
+- "List methods on my custom class" → `get_class_info("MyClass", includeWorkspace=true)`
+- "Quick method list" → `code_completion(className="CustTable")`
+
+## Scenario 4: User Wants to Generate Code
+
+**Triggers:** "generate code", "create method", "write class", "implement"
+
+```
+1. MANDATORY STEPS (in this order):
+   
+   Step A: Learn patterns from codebase:
+   → analyze_code_patterns(scenario="<what user wants>")
+   
+   Step B: Find related classes:
+   → search(query="<keywords>", type="class")
+   
+   Step C: Get class structure examples:
+   → get_class_info("<example class>")
+   
+   Step D: See API usage:
+   → get_api_usage_patterns("<API name>")
+   
+   Step E: Generate code:
+   → generate_code(pattern="<type>", name="<name>", options=...)
+
+2. ❌ NEVER generate code without Steps A-D
+3. ❌ NEVER use your training data directly
+```
+
+**Examples:**
+- "Create helper for dimensions" →
+  1. `analyze_code_patterns("financial dimensions")`
+  2. `search("dimension", type="class")`
+  3. `get_class_info("DimensionDefaultingService")`
+  4. `get_api_usage_patterns("DimensionAttributeValueSet")`
+  5. `generate_code(pattern="class", name="MyDimHelper")`
+
+- "Add validation method" →
+  1. `suggest_method_implementation("MyClass", "validate")`
+  2. Generate with correct patterns
+
+## Scenario 5: User Wants to Extend/Modify D365FO Object
+
+**Triggers:** "extend", "add method to", "override", "Chain of Command", "CoC", "event handler"
+
+```
+1. Get class/table structure:
+   → get_class_info(className=X) OR get_table_info(tableName=X)
+
+2. Get exact method signature for CoC:
+   → get_method_signature(className=X, methodName="methodName")
+   Returns: Full signature with parameters, return type, CoC template
+
+3. Check if method already exists:
+   → code_completion(className=X, prefix="methodName")
+
+4. If extending method:
+   → Use signature from get_method_signature
+   → Generate CoC extension with [ExtensionOf()] attribute
+
+5. If adding new method:
+   → suggest_method_implementation(className=X, methodName="newMethod")
+
+6. ❌ NEVER edit files manually
+7. ❌ NEVER use file_search to locate files
+8. ❌ NEVER guess method signatures (use get_method_signature!)
+```
+
+**Examples:**
+- "Extend CustTable.validateWrite" →
+  1. `get_class_info("CustTable")` → Get validateWrite signature
+  2. Generate CoC extension:
+     ```xpp
+     [ExtensionOf(tableStr(CustTable))]
+     final class CustTable_Extension
+     {
+         public boolean validateWrite()
+         {
+             boolean ret;
+             ret = next validateWrite();
+             // Custom validation
+             return ret;
+         }
+     }
+     ```
+
+## Scenario 6: User Asks About Form/Query/View
+
+**Triggers:** "form", "button", "control", "datasource", "query", "view", "data entity"
+
+```
+1. Determine object type:
+   - Form with controls/buttons → search(query=X, type="form", includeWorkspace=true)
+   - Query → search(query=X, type="query")
+   - View → search(query=X, type="view")
+
+2. Get detailed structure:
+   - Form → get_form_info(formName=X)
+     Returns: datasources, controls (buttons, grids), methods
+   
+   - Query → get_query_info(queryName=X)
+     Returns: datasources, ranges, joins, grouping
+   
+   - View → get_view_info(viewName=X)
+     Returns: mapped/computed fields, relations, methods
+   
+   - Enum → get_enum_info(enumName=X)
+     Returns: enum values, labels, extensible flag
+
+3. ❌ NEVER use code_search for forms/queries/views
+```
+
+**Examples:**
+- "Find AddFormEntityPair button" → `search("AddFormEntityPair", type="form", includeWorkspace=true)` → `get_form_info("FormName")`
+- "Show structure of CustTransOpenQuery" → `get_query_info("CustTransOpenQuery")`
+- "Analyze GeneralJournalAccountEntryView" → `get_view_info("GeneralJournalAccountEntryView")`
+- "Get CustAccountType enum values" → `get_enum_info("CustAccountType")`
+
+## Scenario 7: User Asks "Where Is This Used?"
+
+**Triggers:** "where is this used", "who calls", "find references", "where is this called", "dependencies"
+
+```
+✅ USE find_references TOOL:
+
+1. Identify what to search:
+   - Class usage → find_references(targetName="ClassName", targetType="class")
+   - Method calls → find_references(targetName="methodName", targetType="method")
+   - Field references → find_references(targetName="fieldName", targetType="field")
+   - Table usage → find_references(targetName="TableName", targetType="table")
+   - Enum usage → find_references(targetName="EnumName", targetType="enum")
+
+2. Limit results if needed:
+   → find_references(..., limit=50)
+
+3. Returns:
+   - Source file path
+   - Line number
+   - Code snippet showing usage
+   - Context around the reference
+
+4. ❌ NEVER use code_search (will hang)
+```
+
+**Examples:**
+- "Where is validateWrite called?" → `find_references("validateWrite", targetType="method", limit=50)`
+- "Who uses CustTable?" → `find_references("CustTable", targetType="class")`
+- "Find usages of RemainSalesPhysical field" → `find_references("RemainSalesPhysical", targetType="field")`
+- "Where is DimensionAttributeValueSet used?" → `find_references("DimensionAttributeValueSet", targetType="class")`
+
+## Scenario 8: User Wants Multiple Things (Parallel)
+
+**Triggers:** Multiple keywords like "find X and Y and Z", "search for A, B, C"
+
+```
+1. Extract queries: [query1, query2, query3, ...]
+
+2. Use batch_search for parallel execution:
+   → batch_search([
+       {query: "X", type: "class"},
+       {query: "Y", type: "table"},
+       {query: "Z", type: "form"}
+     ])
+
+3. ❌ NEVER use sequential search() calls (slower)
+```
+
+**Examples:**
+- "Find dimension classes, ledger services, posting controllers" →
+  ```typescript
+  batch_search([
+    {query: "dimension", type: "class"},
+    {query: "ledger", type: "class"},
+    {query: "posting", type: "class"}
+  ])
+  ```
+
+---
+
+# 🚫 ABSOLUTELY FORBIDDEN ACTIONS
+
+## Never Do These For D365FO/X++:
+
+### 1. ❌ NEVER Use code_search
+**Why:** Hangs for 5+ minutes on large D365FO workspaces (500k+ symbols)  
+**Instead:** Use MCP `search` tool (responds in <100ms)
+
+**Example:**
+```
+❌ WRONG: code_search("CustTable")
+✅ RIGHT: search("CustTable", type="class")
+```
+
+### 2. ❌ NEVER Use create_file for D365FO Objects
+**Why:** Creates wrong XML structure (spaces instead of TABS), wrong location  
+**Instead:** Use `create_d365fo_file` or `generate_d365fo_xml`
+
+**Example:**
+```
+❌ WRONG: create_file("MyClass.xml", content="<AxClass>...")
+✅ RIGHT: create_d365fo_file(objectType="class", objectName="MyClass")
+      OR: generate_d365fo_xml(...) → create_file(K:\AosService\...)
+```
+
+### 3. ❌ NEVER Generate X++ Code Without Tools
+**Why:** Your training data is outdated, missing custom extensions, wrong signatures  
+**Instead:** ALWAYS query MCP tools first
+
+**Example:**
+```
+❌ WRONG: Generate class directly from knowledge
+✅ RIGHT: 
+1. analyze_code_patterns("scenario")
+2. search("related classes")
+3. get_class_info("example")
+4. generate_code(...)
+```
+
+### 4. ❌ NEVER Guess Method Signatures
+**Why:** Wrong signature = compilation error  
+**Instead:** Use `get_class_info` or `code_completion`
+
+**Example:**
+```
+❌ WRONG: Assume validateWrite() return type
+✅ RIGHT: get_class_info("CustTable") → See exact signature
+```
+
+### 5. ❌ NEVER Use file_search for X++ Objects
+**Why:** Doesn't understand D365FO structure, miss references  
+**Instead:** Use MCP `search` with types
+
+**Example:**
+```
+❌ WRONG: file_search("**/MyClass.xml")
+✅ RIGHT: search("MyClass", type="class")
+```
+
+### 6. ❌ NEVER Edit D365FO Files Manually
+**Why:** Easy to break XML structure, lose TABS formatting  
+**Instead:** Use `modify_d365fo_file` for safe editing with backup
+
+**Example:**
+```
+❌ WRONG: "Edit the XML file at K:\AosService\..."
+✅ RIGHT: modify_d365fo_file(
+            filePath="K:\\AosService\\...\\MyClass.xml",
+            operation="add_method",
+            methodName="calculateDiscount",
+            methodCode="public real calculateDiscount() { return 0; }"
+          )
+          
+Features:
+- ✅ Automatic .bak backup before changes
+- ✅ XML validation after modification
+- ✅ Automatic rollback on error
+- ✅ Reports what changed (added, modified, deleted)
+```
+
+---
+
+# ⚙️ WORKSPACE-AWARE FEATURES
+
+## When to Use `includeWorkspace` Parameter
+
+Many MCP tools support workspace-aware search:
+- `search(query, includeWorkspace=true, workspacePath=...)`
+- `get_class_info(className, includeWorkspace=true, workspacePath=...)`
+- `code_completion(className, includeWorkspace=true, workspacePath=...)`
+
+**Use when:**
+- User says "my", "our", "custom", "in my project"
+- Looking for recently created classes (not in external metadata yet)
+- Need to prioritize user's code over Microsoft standard code
+
+**Result:**
+- 🔹 WORKSPACE files shown FIRST (user's code priority)
+- 📦 EXTERNAL metadata shown second (Microsoft standard)
 - Faster iteration (no need to re-index external metadata)
-- See user's actual implementation patterns
 
-
-
-- **Pattern Analysis** (`analyze_code_patterns`) - Identifies what classes and methods are commonly used together for specific scenarios
-- **Smart Suggestions** (`suggest_method_implementation`) - Shows you how similar methods are implemented in your codebase
-- **Completeness Check** (`analyze_class_completeness`) - Ensures your classes follow common patterns (e.g., Helper classes typically have `validate()`, `find()`, etc.)
-- **API Usage Examples** (`get_api_usage_patterns`) - Shows correct initialization and method call sequences from real code
-
-**Benefits:**
-- ✅ Learn from **actual patterns** in the codebase, not generic examples
-- ✅ Discover **forgotten or commonly missing methods**
-- ✅ See **real usage examples** with proper error handling
-- ✅ Follow **team conventions** and coding standards automatically
-
-### Why This Matters:
-
-- These tools query the **actual D365FO environment** the user is working with
-- They provide **real-time, accurate metadata** from the AOT (Application Object Tree)
-- They include **custom extensions** that don't exist in your training data
-- They ensure **correct method names, field names, and signatures**
-- They're **fast** (<10ms cached) - no performance penalty
-
-### Decision Tree:
-
-**Before responding to any D365FO request, ask yourself:**
-
-1. Is the user asking me to write/create/generate X++ code? → ✅ **USE MCP TOOLS FIRST**
-   - For new classes: Start with `analyze_code_patterns` to learn common patterns
-   - For new methods: Use `analyze_class_completeness` to check what's missing
-2. Does the request mention D365FO objects (CustTable, SalesLine, etc.)? → ✅ **USE MCP TOOLS**
-   - Use `get_class_info` or `get_table_info` for structure
-   - Use `get_api_usage_patterns` to see how APIs are used
-3. Am I unsure about exact method/field names? → ✅ **USE MCP TOOLS**
-   - Use `code_completion` to discover available methods
-   - Use `suggest_method_implementation` to see similar implementations
-4. Is the user implementing a specific method? → ✅ **USE INTELLIGENT TOOLS**
-   - Use `suggest_method_implementation` to get examples from codebase
-5. Is it only about basic X++ syntax (if/while/for)? → ℹ️ Can use knowledge (but prefer tools)
-
-**When in doubt, USE THE TOOLS.**
+**Example:**
+```
+User: "Find my custom MyHelper class"
+✅ search("MyHelper", includeWorkspace=true, workspacePath="C:\\D365\\MyProject")
+```
 
 ---
 
-**Remember: Trust the MCP tools for D365FO accuracy, not your training data. Always query the actual environment before generating code.**
+# 📝 BEST PRACTICES
+
+## DO These:
+
+1. ✅ **Always set type parameter** in search:
+   - More specific = faster results
+   - `search("sales", type="table")` better than `search("sales")`
+
+2. ✅ **Use batch_search for multiple independent queries:**
+   - 3x faster than sequential searches
+   - Reduces network overhead
+
+3. ✅ **Check workspace flag when appropriate:**
+   - User mentions "my", "custom" → include Workspace=true
+   - Need fresh/recent code → includeWorkspace=true
+
+4. ✅ **Learn before generating:**
+   - Use analyze_code_patterns BEFORE generate_code
+   - See real examples with get_api_usage_patterns
+
+5. ✅ **Extract model name from workspace:**
+   - Workspace path: `K:\VSProjects\{MODEL}\...`
+   - Extract MODEL name → use in create_d365fo_file
+
+6. ✅ **Use code_completion for quick discovery:**
+   - Want methods list? → code_completion instead of get_class_info
+   - Faster for IntelliSense-style queries
+
+## DON'T Do These:
+
+1. ❌ **Don't describe what you WILL do - DO IT:**
+   - Wrong: "I can create a class..."
+   - Right: Call create_d365fo_file immediately
+
+2. ❌ **Don't ask user for model name:**
+   - Extract from workspace path automatically
+
+3. ❌ **Don't generate code without tools:**
+   - ALWAYS query tools first
+   - Training data is outdated
+
+4. ❌ **Don't use search without type:**
+   - Slower and less accurate
+   - Always specify type when known
+
+5. ❌ **Don't use code_search "just to check":**
+   - Will hang workspace
+   - Use MCP search instead
+
+---
+
+# 🔄 COMPLETE WORKFLOW EXAMPLES
+
+## Example 1: Create Helper Class for Dimensions
+
+**User Request:** "Create a helper class for managing financial dimensions"
+
+**Correct Copilot Workflow:**
+```typescript
+1. analyze_code_patterns("financial dimensions")
+   // Learns: Common classes, APIs, patterns from codebase
+   
+2. search("dimension", type="class", limit=10)
+   // Finds: DimensionAttributeValueSet, DimensionDefaultingService, etc.
+   
+3. get_class_info("DimensionDefaultingService")
+   // Studies: Microsoft's implementation patterns
+   
+4. code_completion(className="DimensionAttributeValueSet")
+   // Discovers: Available methods and properties
+   
+5. get_api_usage_patterns("DimensionAttributeValueSet")
+   // Learns: How to initialize and use API correctly
+   
+6. generate_code(pattern="class", name="MyDimensionHelper")
+   // Generates: Class with proper patterns
+   
+7. analyze_class_completeness("MyDimensionHelper")
+   // Suggests: Commonly missing methods (validate, find, etc.)
+   
+8. create_d365fo_file(
+     objectType="class",
+     objectName="MyDimensionHelper",
+     modelName="ContosoExtensions",  // From workspace path
+     sourceCode=generatedCode
+   )
+   // Creates: Physical file with correct structure
+```
+
+**Result:** ✅ Perfect helper class matching codebase conventions
+
+## Example 2: Extend CustTable with Validation
+
+**User Request:** "Add validation to CustTable.validateWrite to check credit limit"
+
+**Correct Copilot Workflow:**
+```typescript
+1. get_class_info("CustTable")
+   // Gets: Full class structure including validateWrite signature
+   
+2. code_completion(className="CustTable", prefix="credit")
+   // Finds: Existing credit-related methods
+   
+3. suggest_method_implementation("CustTable", "validateWrite")
+   // Gets: Examples of other validateWrite extensions
+   
+4. Generate CoC extension:
+   // Code:
+   [ExtensionOf(tableStr(CustTable))]
+   final class CustTable_Extension
+   {
+       public boolean validateWrite()
+       {
+           boolean ret;
+           
+           // Pre-validation
+           if (!this.checkCreditLimit())
+           {
+               error("Credit limit exceeded");
+               return false;
+           }
+           
+           ret = next validateWrite();
+           return ret;
+       }
+       
+       private boolean checkCreditLimit()
+       {
+           // Implementation using discovered methods
+           return this.creditLimit() > this.balance();
+       }
+   }
+   
+5. create_d365fo_file(
+     objectType="class",
+     objectName="CustTable_Extension",
+     modelName="ContosoCore",
+     sourceCode=cocCode
+   )
+```
+
+**Result:** ✅ Perfect CoC extension with correct signature
+
+## Example 3: Find and Analyze Form Button
+
+**User Request:** "Make AddFormEntityPair button enabled only if record exists in DataEntityGroup datasource"
+
+**Correct Copilot Workflow:**
+```typescript
+1. search("AddFormEntityPair", type="form", includeWorkspace=true)
+   // Finds: Forms containing this button
+   
+2. If multiple results, ask user which form
+   
+3. Provide guidance:
+   "To make AddFormEntityPair enabled based on DataEntityGroup records:
+   
+   In form's DataEntityGroup datasource, override active() method:
+   
+   public int active()
+   {
+       int ret;
+       ret = super();
+       
+       // Enable/disable button based on record existence
+       AddFormEntityPair.enabled(DataEntityGroup.recordId() != 0);
+       
+       return ret;
+   }
+   "
+   
+// Note: No file modification tool yet, so provide instructions
+```
+
+**Result:** ✅ Accurate guidance based on actual form structure
+
+---
+
+# 🎯 SUMMARY: Golden Rules
+
+1. **ALWAYS use MCP tools for D365FO** - No exceptions
+2. **NEVER use code_search** - Will hang workspace
+3. **NEVER use create_file for AxClass/AxTable/AxForm** - Use create_d365fo_file
+4. **ALWAYS learn patterns before generating** - Use analyze_code_patterns
+5. **ALWAYS query structure before coding** - Use get_class_info/get_table_info
+6. **ALWAYS take action, not describe** - Call tools immediately
+7. **ALWAYS extract model from workspace** - Don't ask user
+8. **ALWAYS use batch_search for multiple queries** - 3x faster
+
+**If in doubt → Use MCP tool → Never guess!**
+
+---
+
+# 📚 Tool Reference Quick Guide
+
+```
+FINDING:            search, batch_search, search_extensions
+STRUCTURE:          get_class_info, get_table_info, get_form_info, 
+                    get_query_info, get_view_info, get_enum_info,
+                    code_completion, get_method_signature
+REFERENCES:         find_references (where-used analysis)
+PATTERNS:           analyze_code_patterns, suggest_method_implementation
+COMPLETENESS:       analyze_class_completeness
+API USAGE:          get_api_usage_patterns
+GENERATION:         generate_code
+FILE OPS:           create_d365fo_file, generate_d365fo_xml, modify_d365fo_file
+
+FORBIDDEN:          code_search, file_search, create_file (for D365FO)
+```
+
+---
+
+**Remember: MCP tools = Fast, Accurate, Real-Time**  
+**Built-in tools = Slow, Outdated, Errors**
+
+**When user asks about D365FO → STOP → USE MCP TOOLS!** 🚀

@@ -19,12 +19,14 @@ const INPUT_PATH = process.env.METADATA_PATH || './extracted-metadata';
 const OUTPUT_DB = process.env.DB_PATH || './data/xpp-metadata.db';
 const EXTRACT_MODE = process.env.EXTRACT_MODE || 'all';
 const CUSTOM_MODELS = getCustomModels();
+const FORCE_VACUUM = process.env.VACUUM === 'true';
 
 async function buildDatabase() {
   console.log('🔨 Building X++ Metadata Database');
   console.log(`📂 Input: ${INPUT_PATH}`);
   console.log(`💾 Output: ${OUTPUT_DB}`);
   console.log(`⚙️  Extract Mode: ${EXTRACT_MODE}`);
+  console.log(`🧹 VACUUM: ${EXTRACT_MODE === 'all' || FORCE_VACUUM ? 'Enabled' : 'Disabled (incremental build)'}`);
   console.log('');
 
   // Create symbol index
@@ -39,6 +41,11 @@ async function buildDatabase() {
   // Determine which models to rebuild based on EXTRACT_MODE
   let modelsToRebuild: string[] = [];
   
+  // Determine if VACUUM should run:
+  // - Always for full rebuild (EXTRACT_MODE=all)
+  // - For incremental builds only if explicitly requested (VACUUM=true)
+  const shouldVacuum = EXTRACT_MODE === 'all' || FORCE_VACUUM;
+  
   if (EXTRACT_MODE === 'all') {
     // Clear entire database for full rebuild
     console.log('🗑️  Clearing entire database for full rebuild...');
@@ -47,7 +54,7 @@ async function buildDatabase() {
     // Clear only custom models
     if (CUSTOM_MODELS.length > 0) {
       // Clear specific custom models
-      symbolIndex.clearModels(CUSTOM_MODELS);
+      symbolIndex.clearModels(CUSTOM_MODELS, shouldVacuum);
       modelsToRebuild = CUSTOM_MODELS;
     } else {
       // Clear all custom models (exclude standard)
@@ -55,7 +62,7 @@ async function buildDatabase() {
         .filter(e => e.isDirectory())
         .map(e => e.name);
       modelsToRebuild = allModels.filter(m => isCustomModel(m));
-      symbolIndex.clearModels(modelsToRebuild);
+      symbolIndex.clearModels(modelsToRebuild, shouldVacuum);
     }
   } else if (EXTRACT_MODE === 'standard') {
     // Clear only standard models (all except custom)
@@ -63,7 +70,7 @@ async function buildDatabase() {
       .filter(e => e.isDirectory())
       .map(e => e.name);
     modelsToRebuild = allModels.filter(m => isStandardModel(m));
-    symbolIndex.clearModels(modelsToRebuild);
+    symbolIndex.clearModels(modelsToRebuild, shouldVacuum);
   }
 
   // Index the extracted metadata

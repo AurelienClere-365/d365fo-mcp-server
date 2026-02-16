@@ -118,7 +118,13 @@ This MCP server provides GitHub Copilot with complete knowledge of your D365 F&O
 | **`batch_search`** | Execute multiple searches in parallel for faster exploration |
 | **`get_class_info`** | View complete class structure: methods, properties, inheritance hierarchy |
 | **`get_table_info`** | View table schema: fields, indexes, relations, and configuration |
+| **`get_form_info`** | Parse form metadata: datasources, controls, and methods |
+| **`get_query_info`** | Parse query structure: datasources, ranges, and joins |
+| **`get_view_info`** | Parse view/data entity metadata: fields, relations, and methods |
+| **`get_enum_info`** | Extract enum values with integer values and properties (extensible, base type) |
 | **`code_completion`** | Get method and field suggestions while typing (IntelliSense-style) |
+| **`get_method_signature`** | Extract exact method signatures for Chain of Command extensions |
+| **`find_references`** | Find all usages of classes, methods, tables, fields, or enums (where-used analysis) |
 
 #### Intelligent Code Generation
 
@@ -130,12 +136,13 @@ This MCP server provides GitHub Copilot with complete knowledge of your D365 F&O
 | **`analyze_class_completeness`** | Check if a class is missing common methods (validate, find, etc.) |
 | **`get_api_usage_patterns`** | See real examples of how to initialize and use D365FO APIs |
 
-#### File Creation
+#### File Operations
 
 | Tool | Deployment | Description |
 |------|------------|-------------|
 | **`generate_d365fo_xml`** | ☁️ Cloud + 💻 Local | Generate D365FO XML files (classes, tables, forms, enums). Works everywhere - Azure, local, containers. Returns XML content for Copilot to create file. |
 | **`create_d365fo_file`** | 💻 Local only | Full automation: creates file + adds to Visual Studio project. Only works on local Windows D365FO VM with K:\ drive access. |
+| **`modify_d365fo_file`** | 💻 Local only | Edit existing D365FO XML files with automatic backup and validation. Adds/modifies/deletes methods, fields, or properties safely. |
 
 ### 🔹 Workspace-Aware Features
 

@@ -6,6 +6,13 @@
 import { z } from 'zod';
 import type { XppSymbolIndex } from '../metadata/symbolIndex.js';
 import type { XppMetadataParser } from '../metadata/xmlParser.js';
+import { findReferencesToolDefinition } from './findReferences.js';
+import { modifyD365FileToolDefinition } from './modifyD365File.js';
+import { getMethodSignatureToolDefinition } from './methodSignature.js';
+import { getFormInfoToolDefinition } from './formInfo.js';
+import { getQueryInfoToolDefinition } from './queryInfo.js';
+import { getViewInfoToolDefinition } from './viewInfo.js';
+import { getEnumInfoToolDefinition } from './enumInfo.js';
 
 // ============================================
 // Tool Input Schemas
@@ -805,5 +812,12 @@ export const toolDefinitions: ToolDefinition[] = [
     name: 'get_api_usage_patterns',
     description: 'Get common usage patterns for a specific API or class. Shows how other code in the codebase uses this class, including initialization patterns and method call sequences.',
     inputSchema: GetApiUsagePatternsSchema
-  }
+  },
+  findReferencesToolDefinition,
+  modifyD365FileToolDefinition,
+  getMethodSignatureToolDefinition,
+  getFormInfoToolDefinition,
+  getQueryInfoToolDefinition,
+  getViewInfoToolDefinition,
+  getEnumInfoToolDefinition
 ];
