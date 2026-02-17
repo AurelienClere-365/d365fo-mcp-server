@@ -339,45 +339,83 @@ workspacePath and includeWorkspace parameters.`,
         },
         {
           name: 'modify_d365fo_file',
-          description: '⚠️ WINDOWS ONLY: Safely modifies an existing D365FO XML file (class, table, enum, etc.). Supports adding/updating/deleting methods, fields, and properties. Creates automatic backup (.bak) before changes and validates XML after modification. IMPORTANT: This tool MUST run locally on Windows D365FO VM - it CANNOT work through Azure HTTP proxy (Linux).',
+          description: '⚠️ WINDOWS ONLY: Safely modifies an existing D365FO XML file (class, table, enum, form, query, view). Supports adding/removing methods and fields, modifying properties. Creates automatic backup (.bak) before changes and validates XML after modification. IMPORTANT: This tool MUST run locally on Windows D365FO VM - it CANNOT work through Azure HTTP proxy (Linux).',
           inputSchema: {
             type: 'object',
             properties: {
-              filePath: {
+              objectType: {
                 type: 'string',
-                description: 'Full path to the D365FO XML file (e.g., K:\\AosService\\PackagesLocalDirectory\\Model\\Model\\AxClass\\MyClass.xml)'
+                enum: ['class', 'table', 'form', 'enum', 'query', 'view'],
+                description: 'Type of D365FO object to modify'
+              },
+              objectName: {
+                type: 'string',
+                description: 'Name of the object to modify (e.g., CustTable, SalesTable)'
               },
               operation: {
                 type: 'string',
-                enum: ['add_method', 'update_method', 'delete_method', 'add_field', 'update_property'],
+                enum: ['add-method', 'add-field', 'modify-property', 'remove-method', 'remove-field'],
                 description: 'Type of modification to perform'
               },
               methodName: {
                 type: 'string',
-                description: 'Method name (required for add_method, update_method, delete_method)'
+                description: 'Method name (required for add-method, remove-method)'
               },
               methodCode: {
                 type: 'string',
-                description: 'Method source code (required for add_method, update_method)'
+                description: 'X++ code for the method body (required for add-method)'
+              },
+              methodModifiers: {
+                type: 'string',
+                description: 'Method modifiers (e.g., "public static")'
+              },
+              methodReturnType: {
+                type: 'string',
+                description: 'Return type of method (e.g., "void", "str", "boolean")'
+              },
+              methodParameters: {
+                type: 'string',
+                description: 'Method parameters (e.g., "str _param1, int _param2")'
               },
               fieldName: {
                 type: 'string',
-                description: 'Field name (required for add_field)'
+                description: 'Field name (required for add-field, remove-field)'
               },
               fieldType: {
                 type: 'string',
-                description: 'Field data type (required for add_field)'
+                description: 'Extended data type or base type (required for add-field)'
               },
-              propertyName: {
+              fieldMandatory: {
+                type: 'boolean',
+                description: 'Is field mandatory (for add-field)'
+              },
+              fieldLabel: {
                 type: 'string',
-                description: 'Property name (required for update_property)'
+                description: 'Field label (for add-field)'
+              },
+              propertyPath: {
+                type: 'string',
+                description: 'Path to property (e.g., "Table1.Visible", for modify-property)'
               },
               propertyValue: {
                 type: 'string',
-                description: 'Property value (required for update_property)'
+                description: 'New property value (required for modify-property)'
+              },
+              createBackup: {
+                type: 'boolean',
+                description: 'Create backup before modification (default: true)',
+                default: true
+              },
+              modelName: {
+                type: 'string',
+                description: 'Model name (auto-detected if not provided)'
+              },
+              workspacePath: {
+                type: 'string',
+                description: 'Path to workspace for finding file'
               },
             },
-            required: ['filePath', 'operation'],
+            required: ['objectType', 'objectName', 'operation'],
           },
         },
         {

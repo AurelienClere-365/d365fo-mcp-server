@@ -45,8 +45,12 @@
 ### Form Elements
 - `button`, `control`, `FormDataSource`, `FormControl`, `ButtonControl`, `FormButtonControl`
 - `FormGroupControl`, `FormGridControl`, `FormReferenceControl`, `FormTab`, `FormActionPane`
-- `datasource`, `data source`, `main datasource`, `primary datasource`, `form control`
+- `datasource`, `data source`, `main datasource`, `primary datasource`, `form datasource`
+- `add method to datasource`, `override datasource method`, `form datasource active`
+- `enable button`, `disable button`, `button enabled based on`, `control visibility`
 - Button names: `AddFormEntityPair`, `RemoveFormEntityPair`, `New`, `Delete`, `Edit`, `Save`
+- Form methods: `init`, `run`, `close`, `canClose`, `active`
+- Datasource methods: `active`, `validateWrite`, `validateDelete`, `create`, `write`, `delete`, `init`, `executeQuery`
 
 ### Query Elements
 - `QueryRun`, `QueryBuildDataSource`, `QueryBuildRange`, `QueryBuild`, `query datasource`
@@ -314,6 +318,119 @@
 - "Analyze GeneralJournalAccountEntryView" → `get_view_info("GeneralJournalAccountEntryView")`
 - "Get CustAccountType enum values" → `get_enum_info("CustAccountType")`
 
+## Scenario 6a: User Wants to Modify Form (Add Method to Datasource)
+
+**Triggers:** 
+- "add method to form", "přidej metodu do formuláře", "add method to datasource", "přidej do datového zdroje metodu"
+- "override form datasource method", "form datasource active", "enable/disable button based on"
+- "modify form behavior", "customize form", "extend form datasource"
+- "hlavní datový zdroj", "main datasource", "primary datasource"
+- "formulář metoda active", "form active method", "datasource active"
+
+**CRITICAL: This is a FORM CUSTOMIZATION request - use get_form_info FIRST!**
+
+**Common User Questions:**
+- "Přidej do formuláře metodu active do hlavního datového zdroje"
+- "Add method active to main datasource of SalesTable form"
+- "Override active method on form datasource to enable button"
+- "Enable button based on datasource record"
+- "Add validation to form datasource validateWrite"
+
+```
+1. Identify the form name from context or ask user
+   
+2. Get form structure:
+   → get_form_info(formName=X, includeWorkspace=true)
+   Returns: datasources list, main datasource, controls, methods
+
+3. Identify target datasource:
+   - User mentions "main datasource" → use primary/first datasource from get_form_info
+   - User mentions specific name → find it in datasources list
+   - Common datasources: table name (e.g., SalesTable, CustTable)
+
+4. Determine method to override:
+   - "active()" → Triggers when user changes record (for button enable/disable)
+   - "validateWrite()" → Validation before saving
+   - "init()" → Form initialization
+   - "create()" → New record creation
+   - "delete()" → Record deletion
+
+5. Generate form extension code:
+   - RECOMMENDED: Use [FormDataSourceEventHandler] for event-based extensions
+   - Show both event-based and direct override approaches
+   - Use exact datasource name from get_form_info results
+
+6. Provide guidance to user:
+   - ❌ DO NOT use modify_d365fo_file automatically
+   - ❌ DO NOT use run_in_terminal to edit files
+   - ✅ ONLY provide generated code and explanation
+   - ✅ Let user decide how to implement (VS extension, XML edit, etc.)
+```
+
+**Complete Example Workflow:**
+
+User asks: "Add method active to main datasource of SalesTable form to enable button"
+
+```typescript
+// Step 1: Find and analyze form
+search("SalesTable", type="form", includeWorkspace=true)
+
+// Step 2: Get form structure
+get_form_info("SalesTable")
+// Returns:
+// - Datasources: [SalesTable (primary), SalesLine, CustTable]
+// - Controls: [AddLine button, DeleteLine button, ...]
+// - Main datasource: SalesTable
+
+// Step 3: Generate extension code
+// OPTION A: Event-based (recommended for most scenarios)
+[Form]
+public class SalesTable_Extension
+{
+    [FormDataSourceEventHandler(formDataSourceStr(SalesTable, SalesTable), FormDataSourceEventType::Activated)]
+    public static void SalesTable_OnActivated(FormDataSource sender, FormDataSourceEventArgs e)
+    {
+        FormRun formRun = sender.formRun();
+        
+        // Enable/disable button based on condition
+        FormButtonControl addLineButton = formRun.design().controlName(formControlStr(SalesTable, AddLine));
+        addLineButton.enabled(sender.cursor().RecId != 0);
+    }
+}
+
+// OPTION B: Direct datasource method override (for complex logic)
+// Note: Requires form XML modification
+public void active()
+{
+    super();
+    
+    // Enable/disable button based on datasource state
+    AddLineButton.enabled(SalesTable.RecId != 0);
+}
+
+// Step 4: Provide code and guidance (DO NOT modify files automatically!)
+"Here's how to add active() method to SalesTable datasource:
+
+RECOMMENDED APPROACH: Event-based extension (shown in code above)
+- Create new X++ class with [Form] attribute
+- No XML modification needed
+- Cleaner and more maintainable
+
+ALTERNATIVE: Direct datasource override
+- Requires manual XML editing in Visual Studio
+- User must add method to form datasource in AOT
+
+⚠️ IMPORTANT: Do not automatically modify files - provide code only!"
+```
+
+**Key Points for Form Datasource Methods:**
+- ✅ ALWAYS call get_form_info first to get datasource names
+- ✅ Generate extension code using exact datasource name from get_form_info
+- ✅ Show both event-based and direct override approaches
+- ❌ NEVER automatically modify files (no modify_d365fo_file, no run_in_terminal)
+- ❌ NEVER run PowerShell scripts to edit XML files
+- ✅ ONLY provide generated code and let user implement it
+
 ## Scenario 7: User Asks "Where Is This Used?"
 
 **Triggers:** "where is this used", "who calls", "find references", "where is this called", "dependencies"
@@ -432,6 +549,25 @@
 ```
 ❌ WRONG: file_search("**/MyClass.xml")
 ✅ RIGHT: search("MyClass", type="class")
+```
+
+### 6. ❌ NEVER Edit D365FO Files Automatically
+**Why:** User needs to decide implementation approach (VS extension vs XML edit)  
+**Instead:** Provide generated code and instructions, let user implement
+
+**Example:**
+```
+❌ WRONG: modify_d365fo_file(...) without asking
+❌ WRONG: run_in_terminal with PowerShell to edit XML
+✅ RIGHT: Generate code + provide instructions → user implements
+```
+
+**For Form Datasource Methods:**
+```
+❌ WRONG: "I'll add the method to the form XML using PowerShell..."
+✅ RIGHT: "Here's the extension code. You can implement it by:
+           Option A: Create X++ extension class (recommended)
+           Option B: Manually add to form XML in Visual Studio"
 ```
 
 ### 6. ❌ NEVER Edit D365FO Files Manually
