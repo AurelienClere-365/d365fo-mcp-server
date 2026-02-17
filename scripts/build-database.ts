@@ -53,9 +53,33 @@ async function buildDatabase() {
   } else if (EXTRACT_MODE === 'custom') {
     // Clear only custom models
     if (CUSTOM_MODELS.length > 0) {
-      // Clear specific custom models
-      symbolIndex.clearModels(CUSTOM_MODELS, shouldVacuum);
-      modelsToRebuild = CUSTOM_MODELS;
+      // Expand wildcards in custom models
+      const allModels = fsSync.readdirSync(INPUT_PATH, { withFileTypes: true })
+        .filter(e => e.isDirectory())
+        .map(e => e.name);
+      
+      // Expand patterns (e.g., "Asl*" → ["AslCore", "AslFinanceCore", ...])
+      const expandedModels: string[] = [];
+      for (const pattern of CUSTOM_MODELS) {
+        if (pattern.includes('*')) {
+          // Wildcard pattern - match against all models
+          const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$', 'i');
+          const matched = allModels.filter(m => regex.test(m));
+          expandedModels.push(...matched);
+        } else {
+          // Exact model name
+          if (allModels.includes(pattern)) {
+            expandedModels.push(pattern);
+          }
+        }
+      }
+      
+      modelsToRebuild = [...new Set(expandedModels)]; // Remove duplicates
+      console.log(`🗑️  Cleared symbols for models: ${CUSTOM_MODELS.join(', ')}`);
+      if (modelsToRebuild.length !== CUSTOM_MODELS.length) {
+        console.log(`   📌 Expanded to ${modelsToRebuild.length} models: ${modelsToRebuild.slice(0, 5).join(', ')}${modelsToRebuild.length > 5 ? '...' : ''}`);
+      }
+      symbolIndex.clearModels(modelsToRebuild, shouldVacuum);
     } else {
       // Clear all custom models (exclude standard)
       const allModels = fsSync.readdirSync(INPUT_PATH, { withFileTypes: true })
