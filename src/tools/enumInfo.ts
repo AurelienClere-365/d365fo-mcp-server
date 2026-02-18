@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { XppServerContext } from '../types/context.js';
 import { promises as fs } from 'fs';
 import { parseStringPromise } from 'xml2js';
+import { readEnumRawXml, buildXmlNotAvailableMessage } from '../utils/metadataResolver.js';
 
 const GetEnumInfoArgsSchema = z.object({
   enumName: z.string().describe('Name of the enum or EDT'),
@@ -70,9 +71,29 @@ export async function getEnumInfoTool(request: CallToolRequest, context: XppServ
       throw new Error(`Enum or EDT "${enumName}" not found. Make sure it's indexed.`);
     }
 
-    // 2. Parse XML
-    const xmlContent = await fs.readFile(enumRow.file_path, 'utf-8');
-    const xmlObj = await parseStringPromise(xmlContent);
+    // 2. Get raw XML — try extracted-metadata JSON first, then XML file at DB path
+    let rawXml: string | null = null;
+
+    // Primary: extracted-metadata JSON (always available, no file-path issues)
+    rawXml = await readEnumRawXml(enumRow.model, enumName);
+
+    // Secondary: actual XML file (works only on D365FO VM)
+    if (!rawXml) {
+      try {
+        rawXml = await fs.readFile(enumRow.file_path, 'utf-8');
+      } catch {
+        // Build-agent path not accessible
+      }
+    }
+
+    if (!rawXml) {
+      return {
+        content: [{ type: 'text', text: buildXmlNotAvailableMessage('enum', enumName, enumRow.file_path) }],
+        isError: true,
+      };
+    }
+
+    const xmlObj = await parseStringPromise(rawXml);
 
     // 3. Extract enum/EDT info
     const enumInfo: EnumInfo = {

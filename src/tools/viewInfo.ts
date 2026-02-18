@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { XppServerContext } from '../types/context.js';
 import { promises as fs } from 'fs';
 import { parseStringPromise } from 'xml2js';
+import { buildXmlNotAvailableMessage } from '../utils/metadataResolver.js';
 
 const GetViewInfoArgsSchema = z.object({
   viewName: z.string().describe('Name of the view or data entity'),
@@ -108,8 +109,16 @@ export async function getViewInfoTool(request: CallToolRequest, context: XppServ
       throw new Error(`View "${viewName}" not found. Make sure it's indexed or provide workspacePath for local views.`);
     }
 
-    // 2. Parse XML
-    const xmlContent = await fs.readFile(viewRow.file_path, 'utf-8');
+    // 2. Parse XML (file_path may point to build-agent path — not accessible on this server)
+    let xmlContent: string;
+    try {
+      xmlContent = await fs.readFile(viewRow.file_path, 'utf-8');
+    } catch {
+      return {
+        content: [{ type: 'text', text: buildXmlNotAvailableMessage('view', viewName, viewRow.file_path) }],
+        isError: true,
+      };
+    }
     const xmlObj = await parseStringPromise(xmlContent);
 
     // 3. Extract view info

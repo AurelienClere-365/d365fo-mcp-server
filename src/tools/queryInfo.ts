@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { XppServerContext } from '../types/context.js';
 import { promises as fs } from 'fs';
 import { parseStringPromise } from 'xml2js';
+import { buildXmlNotAvailableMessage } from '../utils/metadataResolver.js';
 
 const GetQueryInfoArgsSchema = z.object({
   queryName: z.string().describe('Name of the query'),
@@ -104,8 +105,16 @@ export async function getQueryInfoTool(request: CallToolRequest, context: XppSer
       throw new Error(`Query "${queryName}" not found. Make sure it's indexed or provide workspacePath for local queries.`);
     }
 
-    // 2. Parse XML
-    const xmlContent = await fs.readFile(queryRow.file_path, 'utf-8');
+    // 2. Parse XML (file_path may point to build-agent path — not accessible on this server)
+    let xmlContent: string;
+    try {
+      xmlContent = await fs.readFile(queryRow.file_path, 'utf-8');
+    } catch {
+      return {
+        content: [{ type: 'text', text: buildXmlNotAvailableMessage('query', queryName, queryRow.file_path) }],
+        isError: true,
+      };
+    }
     const xmlObj = await parseStringPromise(xmlContent);
 
     // 3. Extract query info

@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { XppServerContext } from '../types/context.js';
 import { promises as fs } from 'fs';
 import { parseStringPromise } from 'xml2js';
+import { buildXmlNotAvailableMessage } from '../utils/metadataResolver.js';
 
 const GetFormInfoArgsSchema = z.object({
   formName: z.string().describe('Name of the form'),
@@ -112,8 +113,16 @@ export async function getFormInfoTool(request: CallToolRequest, context: XppServ
       throw new Error(`Form "${formName}" not found. Make sure it's indexed or provide workspacePath for local forms.`);
     }
 
-    // 2. Parse XML
-    const xmlContent = await fs.readFile(formRow.file_path, 'utf-8');
+    // 2. Parse XML (file_path may point to build-agent path — not accessible on this server)
+    let xmlContent: string;
+    try {
+      xmlContent = await fs.readFile(formRow.file_path, 'utf-8');
+    } catch {
+      return {
+        content: [{ type: 'text', text: buildXmlNotAvailableMessage('form', formName, formRow.file_path) }],
+        isError: true,
+      };
+    }
     const xmlObj = await parseStringPromise(xmlContent);
 
     // 3. Extract form info

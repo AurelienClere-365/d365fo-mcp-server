@@ -9,6 +9,8 @@ import { z } from 'zod';
 import type { XppServerContext } from '../types/context.js';
 import { promises as fs } from 'fs';
 import { parseStringPromise } from 'xml2js';
+import { readMethodMetadata, type ExtractedMethod } from '../utils/metadataResolver.js';
+
 
 const GetMethodSignatureArgsSchema = z.object({
   className: z.string().describe('Name of the class containing the method'),
@@ -78,20 +80,30 @@ export async function getMethodSignatureTool(request: CallToolRequest, context: 
       throw new Error(`Method "${methodName}" not found in class "${className}".`);
     }
 
-    // 3. Parse XML to get exact signature
-    const xmlContent = await fs.readFile(classRow.file_path, 'utf-8');
-    const xmlObj = await parseStringPromise(xmlContent);
-
-    // 4. Extract method details
-    const methodSignature = extractMethodSignature(xmlObj, methodName);
-
-    if (!methodSignature) {
-      // Fallback to database info if XML parsing fails
-      const fallbackSignature = buildFallbackSignature(methodRow);
-      return formatOutput(className, methodName, fallbackSignature, classRow.model);
+    // 3a. PRIMARY: extracted-metadata JSON (always available, no file path issues)
+    const extractedMethod = await readMethodMetadata(classRow.model, className, methodName);
+    if (extractedMethod) {
+      const jsonSignature = buildSignatureFromExtractedMethod(extractedMethod);
+      return formatOutput(className, methodName, jsonSignature, classRow.model);
     }
 
-    return formatOutput(className, methodName, methodSignature, classRow.model);
+    // 3b. SECONDARY: XML file (only works when running on D365FO VM with correct paths)
+    let methodSignature: MethodSignature | null = null;
+    try {
+      const xmlContent = await fs.readFile(classRow.file_path, 'utf-8');
+      const xmlObj = await parseStringPromise(xmlContent);
+      methodSignature = extractMethodSignature(xmlObj, methodName);
+    } catch {
+      // File not accessible (build-agent path) — fall through to DB fallback
+    }
+
+    if (methodSignature) {
+      return formatOutput(className, methodName, methodSignature, classRow.model);
+    }
+
+    // 3c. FALLBACK: reconstruct from DB signature column
+    const fallbackSignature = buildFallbackSignature(methodRow as any);
+    return formatOutput(className, methodName, fallbackSignature, classRow.model);
 
   } catch (error) {
     return {
@@ -104,6 +116,29 @@ export async function getMethodSignatureTool(request: CallToolRequest, context: 
       isError: true,
     };
   }
+}
+
+/**
+ * Build a MethodSignature from an ExtractedMethod (JSON metadata).
+ * This is the most accurate source — structured data, no regex parsing.
+ */
+function buildSignatureFromExtractedMethod(method: ExtractedMethod): MethodSignature {
+  const modifiers: string[] = [];
+  if (method.visibility && method.visibility !== 'public') modifiers.push(method.visibility);
+  else if (method.visibility === 'public') modifiers.push('public');
+  if (method.isStatic) modifiers.push('static');
+
+  const returnType = method.returnType || 'void';
+  const parameters = method.parameters.map(p => ({
+    type: p.type,
+    name: p.name,
+    ...(p.defaultValue ? { defaultValue: p.defaultValue } : {}),
+  }));
+
+  const signature = buildSignatureString(modifiers, returnType, method.name, parameters);
+  const cocTemplate = buildCoCTemplate(modifiers, returnType, method.name, parameters);
+
+  return { modifiers, returnType, methodName: method.name, parameters, signature, cocTemplate };
 }
 
 /**
