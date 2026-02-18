@@ -8,7 +8,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 
-[Getting Started](#-getting-started) &bull; [What It Does](#-what-it-does) &bull; [Setup](#-visual-studio-2022-setup) &bull; [Docs](#-documentation)
+[Getting Started](#getting-started) &bull; [What It Does](#what-it-does) &bull; [Setup](#visual-studio-2022-setup) &bull; [Docs](#documentation)
 
 </div>
 
