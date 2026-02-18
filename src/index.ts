@@ -13,7 +13,7 @@ import { XppMetadataParser } from './metadata/xmlParser.js';
 import { RedisCacheService } from './cache/redisCache.js';
 import { WorkspaceScanner } from './workspace/workspaceScanner.js';
 import { HybridSearch } from './workspace/hybridSearch.js';
-import { downloadDatabaseFromBlob } from './database/download.js';
+import { initializeDatabase } from './database/download.js';
 import { initializeConfig } from './utils/configManager.js';
 import * as fs from 'fs/promises';
 
@@ -75,11 +75,11 @@ async function initializeServices() {
     }
     serverState.cache = cache;
 
-    // Download database from blob storage if configured
+    // Download database from blob storage if configured (only if remote is newer than local)
     if (process.env.AZURE_STORAGE_CONNECTION_STRING && process.env.BLOB_CONTAINER_NAME) {
       try {
-        serverState.statusMessage = 'Downloading database from Azure Blob Storage...';
-        await downloadDatabaseFromBlob();
+        serverState.statusMessage = 'Checking database version...';
+        await initializeDatabase();
       } catch (error) {
         console.error('⚠️  Failed to download database from blob storage:', error);
         console.log('   Will attempt to use existing local database...');
