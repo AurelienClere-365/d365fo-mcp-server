@@ -17,6 +17,13 @@ trigger:
       - 'tsconfig.json'
       - '.azure-pipelines/d365fo-mcp-app-deploy.yml'
 
+# Allow manual run from Azure DevOps UI (Queue build button)
+parameters:
+  - name: forceRedeploy
+    displayName: 'Force redeploy (even without code changes)'
+    type: boolean
+    default: false
+
 pool:
   vmImage: 'ubuntu-latest'
 

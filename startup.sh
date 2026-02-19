@@ -14,29 +14,14 @@ if [ ! -d "dist" ]; then
   exit 1
 fi
 
-# Rebuild better-sqlite3 if it was compiled for a different Node.js version.
-# NODE_MODULE_VERSION is stamped into the binary at compile time and must match
-# the running Node.js version exactly. A version drift (e.g. deploy with Node 22,
-# run with Node 24) causes ERR_DLOPEN_FAILED / "Module did not self-register".
-EXPECTED_NMV=$(node -e "process.stdout.write(String(process.versions.modules))")
-ADDON="node_modules/better-sqlite3/build/Release/better_sqlite3.node"
-if [ -f "$ADDON" ]; then
-  ACTUAL_NMV=$(node -e "
-    try {
-      const b = require('fs').readFileSync('$ADDON');
-      const idx = b.indexOf('NODE_MODULE_VERSION');
-      const m = b.slice(idx, idx + 40).toString().match(/NODE_MODULE_VERSION (\\d+)/);
-      process.stdout.write(m ? m[1] : '0');
-    } catch(e) { process.stdout.write('0'); }
-  ")
-  if [ "$ACTUAL_NMV" != "$EXPECTED_NMV" ]; then
-    echo "Rebuilding better-sqlite3 (binary NMV=$ACTUAL_NMV, runtime NMV=$EXPECTED_NMV)..."
-    npm rebuild better-sqlite3
-    echo "Rebuild complete."
-  fi
-else
-  echo "better-sqlite3 binary not found, running npm rebuild..."
-  npm rebuild better-sqlite3
+# Verify better-sqlite3 native addon is loadable.
+# If this fails, the deployment was done without pre-compiled node_modules.
+# Fix: run the d365fo-mcp-app-deploy pipeline which compiles on ubuntu-latest
+# and ships pre-built binaries — App Service has no make/gcc to rebuild here.
+if ! node -e "require('better-sqlite3')" 2>/dev/null; then
+  echo "FATAL: better-sqlite3 binary is incompatible with Node $(node --version)."
+  echo "Deploy using the d365fo-mcp-app-deploy pipeline to ship pre-built binaries."
+  exit 1
 fi
 
 # Start the server (database download happens within the app if configured)
