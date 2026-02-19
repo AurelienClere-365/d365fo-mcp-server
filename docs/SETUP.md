@@ -134,7 +134,7 @@ az webapp create \
   --name xpp-mcp-server \
   --plan xpp-mcp-plan \
   --resource-group your-rg \
-  --runtime "NODE:22-lts"
+  --runtime "NODE:24-lts"
 ```
 
 For a development/test server B1 SKU is sufficient. For production use P0v3 or higher.
@@ -156,13 +156,23 @@ az webapp config appsettings set \
 
 ```bash
 npm run build
-Compress-Archive -Path dist/* -DestinationPath deploy.zip
+
+# Include package.json and package-lock.json so App Service can run
+# npm ci at deploy time and compile better-sqlite3 for its own environment.
+# Do NOT include node_modules — Oryx builds them on the server.
+Compress-Archive -Path dist, package.json, package-lock.json, startup.sh `
+  -DestinationPath deploy.zip
 
 az webapp deployment source config-zip \
   --resource-group your-rg \
   --name xpp-mcp-server \
   --src deploy.zip
 ```
+
+> `SCM_DO_BUILD_DURING_DEPLOYMENT=true` (set in the Bicep template) tells Oryx
+> to run `npm ci` after the zip is unpacked. This compiles native addons such as
+> `better-sqlite3` against the exact Node.js version running on App Service,
+> avoiding the *"Module did not self-register"* error.
 
 ### 4. Verify
 
