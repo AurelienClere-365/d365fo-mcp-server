@@ -7,6 +7,7 @@ This is a D365FO workspace. Always use MCP tools for any X++ code task. Never us
 - NEVER call read_file on .xml or .xpp files — always fails with path errors.
 - NEVER call read_file AFTER an MCP tool — MCP result is complete and final. If incomplete, call the MCP tool again.
 - NEVER call replace_string_in_file or multi_replace_string_in_file on .xml D365FO files — always use modify_d365fo_file().
+- NEVER edit D365FO code with replace_string_in_file — ONLY modify_d365fo_file() is allowed for .xml files.
 - NEVER guess method signatures — always call get_method_signature() before any CoC extension.
 - NEVER call create_file for D365FO objects — always use create_d365fo_file().
 - NEVER use search(type="form|query|view") — use get_form_info / get_query_info / get_view_info.
@@ -41,6 +42,8 @@ Always call create_d365fo_file(). The tool auto-detects the correct model from .
 If create_d365fo_file() returns "requires file system access", fall back to generate_d365fo_xml() and save with create_file().
 
 ## Editing D365FO files
+
+⚠️ **CRITICAL: For ANY edit to D365FO XML files (.xml), you MUST use modify_d365fo_file(). NEVER use replace_string_in_file or multi_replace_string_in_file.**
 
 **ALWAYS** use modify_d365fo_file() for editing D365FO XML files (.xml). **NEVER** use replace_string_in_file or multi_replace_string_in_file — they break XML structure.
 
