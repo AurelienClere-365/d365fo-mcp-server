@@ -16,7 +16,7 @@ param location string = resourceGroup().location
 param appServiceSku string = 'P0v3'
 
 @description('Node.js version')
-param nodeVersion string = '22-lts'
+param nodeVersion string = '24-lts'
 
 @description('Storage account SKU')
 @allowed([
@@ -121,7 +121,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         }
         {
           name: 'WEBSITE_NODE_DEFAULT_VERSION'
-          value: '~20'
+          value: '~24'
         }
       ]
       appCommandLine: 'bash startup.sh'

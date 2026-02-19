@@ -16,7 +16,7 @@ Complete guide for installing and deploying the D365 F&O MCP Server.
 ## What You Need
 
 ### Software
-- **Node.js** 22.x or later (LTS recommended)
+- **Node.js** 24.x or later (LTS recommended)
 - **Git**
 - **Azure CLI** (for Azure deployment only)
 
