@@ -40,18 +40,31 @@ export class XppSymbolIndex {
     this.db.pragma('cache_size = -64000'); // 64MB cache (negative = kibibytes)
     this.db.pragma('temp_store = MEMORY'); // Store temp tables in memory
     this.db.pragma('mmap_size = 268435456'); // 256MB memory-mapped I/O
-    this.db.pragma('page_size = 8192'); // Optimal page size for modern systems
-    this.db.pragma('optimize'); // Run query optimizer
+    // Note: page_size is a no-op on an existing database; only applies to new DBs
+    // Note: optimize and ANALYZE are intentionally NOT run here — they are slow
+    //       (seconds on 500K+ rows) and the pre-built DB already has persisted stats.
+    //       Call runPostBuildTasks() from build scripts instead.
     
     this.loadStandardModels();
     this.initializeDatabase();
-    
-    // Analyze database after initialization for better query plans
+  }
+
+  /**
+   * Run post-build maintenance tasks: ANALYZE + optimize.
+   * Call this at the END of build scripts (after all data is loaded and WAL mode is set).
+   * Do NOT call from the production server startup — the pre-built DB already has stats.
+   */
+  runPostBuildTasks(): void {
+    console.log('🔧 Running post-build database optimization (ANALYZE + optimize)...');
+    const start = Date.now();
     try {
       this.db.pragma('analysis_limit = 1000');
       this.db.exec('ANALYZE');
+      this.db.pragma('optimize');
+      const elapsed = ((Date.now() - start) / 1000).toFixed(2);
+      console.log(`✅ Post-build optimization complete in ${elapsed}s`);
     } catch (e) {
-      // ANALYZE might fail on empty DB, ignore
+      console.warn('⚠️  Post-build optimization failed (non-fatal):', e);
     }
   }
 
@@ -318,6 +331,11 @@ export class XppSymbolIndex {
    * Sanitize a user query for FTS5 to prevent syntax errors.
    * FTS5 operators (AND, OR, NOT, NEAR, quotes, parens, *) can crash the engine
    * when they appear in raw user input. Wraps each token as a quoted prefix term.
+   *
+   * Performance: restricts the MATCH to the small/fast columns only.
+   * source_snippet and inline_comments hold full X++ source code (100-2000 chars per
+   * method × 300K+ methods) — including them in every FTS scan is the single biggest
+   * cause of slow symbol searches after table-method indexing was added.
    */
   private sanitizeFtsQuery(query: string): string {
     const trimmed = query.trim();
@@ -325,18 +343,26 @@ export class XppSymbolIndex {
     // Strip FTS5 special characters – keep alphanumeric, underscore and spaces
     const cleaned = trimmed.replace(/[^\w\s]/g, ' ').trim();
     const tokens = cleaned.split(/\s+/).filter(t => t.length > 0);
-    if (tokens.length === 0) return `"${trimmed}"`;
-    // "token"* gives prefix-match semantics inside FTS5
-    return tokens.map(t => `"${t}"*`).join(' ');
+    const baseQuery = tokens.length === 0 ? `"${trimmed}"` : tokens.map(t => `"${t}"*`).join(' ');
+    // Column-set filter: FTS5 searches only these columns, skipping source_snippet
+    // and inline_comments. This is valid FTS5 syntax and uses the same index.
+    return `{name type parent_name signature description tags} : ${baseQuery}`;
   }
 
   /**
    * Search symbols by query with full-text search
+   * PERFORMANCE: Only select essential columns (name, type, parent_name, signature, model, file_path)
+   * Uses prepared statement caching for common queries
    */
   searchSymbols(query: string, limit: number = 20, types?: string[]): XppSymbol[] {
     const ftsQuery = this.sanitizeFtsQuery(query);
+    
+    // PERFORMANCE: Cache prepared statements for common search patterns
+    const cacheKey = types?.length ? `search_typed_${types.join('_')}` : 'search_all';
+    
+    // PERFORMANCE: Select only essential columns, not s.* (avoids loading large text fields)
     let sql = `
-      SELECT s.*
+      SELECT s.id, s.name, s.type, s.parent_name, s.signature, s.file_path, s.model, s.description
       FROM symbols_fts fts
       JOIN symbols s ON s.id = fts.rowid
       WHERE symbols_fts MATCH ?
@@ -353,12 +379,18 @@ export class XppSymbolIndex {
     params.push(limit);
 
     try {
-      const stmt = this.db.prepare(sql);
+      let stmt = this.stmtCache.get(cacheKey);
+      if (!stmt) {
+        stmt = this.db.prepare(sql);
+        this.stmtCache.set(cacheKey, stmt);
+      }
       const rows = stmt.all(...params) as any[];
       return rows.map(row => this.rowToSymbol(row));
     } catch {
       // FTS5 syntax error (e.g. user typed *, ", (, ), -) — fall back to LIKE contains search
-      let fallbackSql = `SELECT s.* FROM symbols s WHERE s.name LIKE ?`;
+      // PERFORMANCE: Also select only essential columns in fallback
+      const fallbackCacheKey = types?.length ? `fallback_typed_${types.join('_')}` : 'fallback_all';
+      let fallbackSql = `SELECT s.id, s.name, s.type, s.parent_name, s.signature, s.file_path, s.model, s.description FROM symbols s WHERE s.name LIKE ?`;
       const fallbackParams: any[] = [`%${query.replace(/[%_]/g, '\\$&')}%`];
       if (types && types.length > 0) {
         fallbackSql += ` AND s.type IN (${types.map(() => '?').join(',')})`;
@@ -366,17 +398,23 @@ export class XppSymbolIndex {
       }
       fallbackSql += ` ORDER BY s.name LIMIT ?`;
       fallbackParams.push(limit);
-      const fallbackStmt = this.db.prepare(fallbackSql);
+      
+      let fallbackStmt = this.stmtCache.get(fallbackCacheKey);
+      if (!fallbackStmt) {
+        fallbackStmt = this.db.prepare(fallbackSql);
+        this.stmtCache.set(fallbackCacheKey, fallbackStmt);
+      }
       return (fallbackStmt.all(...fallbackParams) as any[]).map(r => this.rowToSymbol(r));
     }
   }
 
   /**
    * Search symbols by prefix (for autocomplete)
+   * PERFORMANCE: Only select essential columns
    */
   searchByPrefix(prefix: string, types?: string[], limit: number = 20): XppSymbol[] {
     let sql = `
-      SELECT *
+      SELECT id, name, type, parent_name, signature, file_path, model, description
       FROM symbols
       WHERE name LIKE ?
     `;
@@ -1630,42 +1668,58 @@ export class XppSymbolIndex {
   }> {
     const { language = 'en-US', model, limit = 30 } = opts;
 
+    // labels_fts only indexes en-US rows. For any other language, skip straight to
+    // LIKE-based search — attempting FTS would always produce 0 results and then
+    // fall through to LIKE anyway, wasting two round-trips.
+    if (language !== 'en-US') {
+      return this.searchLabelsLike(query, opts);
+    }
+
     // Sanitize query for FTS5 (escape special chars)
     const ftsQuery = query.replace(/['"*()]/g, ' ').trim();
     if (!ftsQuery) return [];
 
-    let sql: string;
-    const params: any[] = [];
+    // Cache the two SQL variants (with / without model filter) so SQLite doesn't
+    // have to re-parse and re-plan on every call.
+    let stmt: Database.Statement;
+    const params: any[] = [ftsQuery];
 
     if (model) {
-      sql = `
-        SELECT l.label_id, l.label_file_id, l.model, l.language, l.text, l.comment, l.file_path,
-               f.rank
-        FROM labels_fts f
-        JOIN labels l ON l.id = f.rowid
-        WHERE labels_fts MATCH ?
-          AND l.model = ?
-          AND l.language = ?
-        ORDER BY f.rank
-        LIMIT ?
-      `;
-      params.push(ftsQuery, model, language, limit);
+      let s = this.stmtCache.get('searchLabels_model');
+      if (!s) {
+        s = this.db.prepare(`
+          SELECT l.label_id, l.label_file_id, l.model, l.language, l.text, l.comment, l.file_path,
+                 f.rank
+          FROM labels_fts f
+          JOIN labels l ON l.id = f.rowid
+          WHERE labels_fts MATCH ?
+            AND l.model = ?
+          ORDER BY f.rank
+          LIMIT ?
+        `);
+        this.stmtCache.set('searchLabels_model', s);
+      }
+      stmt = s;
+      params.push(model, limit);
     } else {
-      sql = `
-        SELECT l.label_id, l.label_file_id, l.model, l.language, l.text, l.comment, l.file_path,
-               f.rank
-        FROM labels_fts f
-        JOIN labels l ON l.id = f.rowid
-        WHERE labels_fts MATCH ?
-          AND l.language = ?
-        ORDER BY f.rank
-        LIMIT ?
-      `;
-      params.push(ftsQuery, language, limit);
+      let s = this.stmtCache.get('searchLabels_nomodel');
+      if (!s) {
+        s = this.db.prepare(`
+          SELECT l.label_id, l.label_file_id, l.model, l.language, l.text, l.comment, l.file_path,
+                 f.rank
+          FROM labels_fts f
+          JOIN labels l ON l.id = f.rowid
+          WHERE labels_fts MATCH ?
+          ORDER BY f.rank
+          LIMIT ?
+        `);
+        this.stmtCache.set('searchLabels_nomodel', s);
+      }
+      stmt = s;
+      params.push(limit);
     }
 
     try {
-      const stmt = this.db.prepare(sql);
       return stmt.all(...params) as any[];
     } catch {
       // FTS query syntax error — fallback to LIKE
@@ -1683,19 +1737,25 @@ export class XppSymbolIndex {
     const { language = 'en-US', model, limit = 30 } = opts;
     const pattern = `%${query}%`;
     const params: any[] = [pattern, pattern, language];
-    let sql = `
-      SELECT label_id, label_file_id, model, language, text, comment, file_path, 0 as rank
-      FROM labels
-      WHERE (text LIKE ? OR label_id LIKE ?)
-        AND language = ?
-    `;
-    if (model) {
-      sql += ` AND model = ?`;
-      params.push(model);
+
+    const stmtKey = model ? 'searchLabelsLike_model' : 'searchLabelsLike_nomodel';
+    let stmt = this.stmtCache.get(stmtKey);
+    if (!stmt) {
+      let sql = `
+        SELECT label_id, label_file_id, model, language, text, comment, file_path, 0 as rank
+        FROM labels
+        WHERE (text LIKE ? OR label_id LIKE ?)
+          AND language = ?
+      `;
+      if (model) sql += ` AND model = ?`;
+      sql += ` LIMIT ?`;
+      stmt = this.db.prepare(sql);
+      this.stmtCache.set(stmtKey, stmt);
     }
-    sql += ` LIMIT ?`;
+
+    if (model) params.push(model);
     params.push(limit);
-    return this.db.prepare(sql).all(...params) as any[];
+    return stmt.all(...params) as any[];
   }
 
   /**

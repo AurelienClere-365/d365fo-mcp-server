@@ -83,12 +83,12 @@ async function extractModelNameFromProject(projectPath: string): Promise<string 
  * Detect D365FO project information from workspace path
  * This is automatically called when GitHub Copilot provides workspace context
  */
-export async function detectD365Project(workspacePath: string): Promise<D365ProjectInfo | null> {
+export async function detectD365Project(workspacePath: string, maxDepth: number = 5): Promise<D365ProjectInfo | null> {
   try {
     console.error(`[WorkspaceDetector] Searching for .rnrproj files in: ${workspacePath}`);
 
     // Find all .rnrproj files in workspace
-    const projectFiles = await findProjectFiles(workspacePath);
+    const projectFiles = await findProjectFiles(workspacePath, maxDepth);
 
     if (projectFiles.length === 0) {
       console.error('[WorkspaceDetector] No .rnrproj files found in workspace');
@@ -156,6 +156,29 @@ export async function autoDetectD365Project(
     console.error(`[WorkspaceDetector] Trying WORKSPACE_PATH env var: ${envWorkspace}`);
     const envResult = await detectD365Project(envWorkspace);
     if (envResult) return envResult;
+  }
+
+  // Priority 3.5: Common D365FO Visual Studio project directories on Windows
+  // The MCP server's process.cwd() is the server directory, not the VS project —
+  // so we probe well-known locations where developers typically keep VS solutions.
+  const knownDevPaths = [
+    'K:\\VSProjects',
+    'C:\\VSProjects',
+    'D:\\VSProjects',
+    path.join(process.env.USERPROFILE || '', 'VSProjects'),
+    path.join(process.env.USERPROFILE || '', 'source', 'VSProjects'),
+  ].filter(Boolean);
+
+  for (const devPath of knownDevPaths) {
+    try {
+      // Quick existence check before scanning to avoid ENOENT noise
+      await fs.access(devPath);
+      console.error(`[WorkspaceDetector] Scanning known dev path: ${devPath}`);
+      const devResult = await detectD365Project(devPath, 4);
+      if (devResult) return devResult;
+    } catch {
+      // Path doesn't exist — skip silently
+    }
   }
 
   // Priority 4: Extract model name directly from a PackagesLocalDirectory path

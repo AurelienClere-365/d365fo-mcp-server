@@ -44,6 +44,34 @@ export function createXppMcpServer(context: XppServerContext): Server {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
       tools: [
+        // ⚠️ CRITICAL WARNING FOR FILE CREATION
+        {
+          name: '⚠️_IMPORTANT_READ_FIRST_⚠️',
+          description: `🚨 CRITICAL: NEVER USE BUILT-IN create_file FOR D365FO OBJECTS! 🚨
+
+FOR D365FO FILES (.xml, .xpp) - MUST USE create_d365fo_file:
+❌ NEVER: create_file() → Will CORRUPT metadata, break project integration, wrong XML structure
+✅ ALWAYS: create_d365fo_file() → Correct AOT structure, UTF-8 BOM, auto-adds to VS project
+
+CREATING D365FO OBJECTS (classes, tables, enums, forms):
+1. generate_code(pattern, name) → Get X++ source code
+2. create_d365fo_file(objectType, objectName, sourceCode, addToProject=true) → Create file
+
+Keywords that mean "use create_d365fo_file":
+- "vytvoř" / "create" / "build" / "implement" + class/table/enum/form
+- "dávková úloha" = batch-job class
+- "pomocná třída" = helper class
+- ANY D365FO object creation
+
+This is NOT a callable tool - it's a reminder to use the correct tool!`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              reminder: { type: 'string', description: 'This tool cannot be called - use create_d365fo_file instead' }
+            },
+            required: []
+          }
+        },
         {
           name: 'search',
           description: `🔍 Search 584,799+ pre-indexed D365FO objects by exact name (e.g., "CustTable", "SalesFormLetter") or keywords (e.g., "dimension helper", "validation table"). Returns basic info: name, type, model.
@@ -271,30 +299,33 @@ Examples:
         },
         {
           name: 'generate_code',
-          description: `🛠️ Generate X++ boilerplate code for common D365FO patterns. Provides starter templates following Microsoft best practices.
+          description: `🎯 GENERATE X++ CODE - Call this FIRST when user asks to CREATE/BUILD D365FO objects!
 
-Available patterns:
-- class: Standard class with typical structure
-- runnable: Class for batch jobs/operations
-- form-handler: Form event handler class  
-- data-entity: Data entity with staging table
-- batch-job: Batch job with parm methods and contract
-- table-extension: Chain of Command (CoC) table extension [ExtensionOf(tableStr(...))]
+WHEN TO USE (keywords):
+- "vytvoř" / "create" / "build" / "implement" / "add new" / "generate" / "make"
+- "dávková úloha" = batch-job, "pomocná třída" = helper class, "runnable" = runnable class
+- ANY request to create NEW D365FO class, batch job, form handler, data entity
 
-RECOMMENDED WORKFLOW:
-1. Call analyze_code_patterns("description") FIRST → learn from YOUR existing code
-2. Call generate_code(pattern, name) → get template
-3. Customize template based on patterns from step 1
+WORKFLOW (ALWAYS follow):
+1. Call analyze_code_patterns("description") → learn from existing code patterns
+2. Call generate_code(pattern, name) → get X++ source code template
+3. Call create_d365fo_file(objectType="class", objectName=name, sourceCode=<from step 2>, addToProject=true)
 
-Use WHEN:
-- Starting a new class from scratch
-- Need correct class structure for specific pattern
-- Want Microsoft-recommended boilerplate
+PATTERNS:
+- "batch-job" → Dávková úloha (extends RunBaseBatch) with dialog, pack/unpack, contract class
+- "class" → Standard helper/utility class
+- "runnable" → Runnable class with main() method
+- "form-handler" → Form event handler (datasource/control event subscribers)
+- "data-entity" → Data entity with staging table
+- "table-extension" → Table extension [ExtensionOf(tableStr(TableName))]
 
-Examples:
-- generate_code("class", "MySalesHelper") → basic class template
-- generate_code("batch-job", "OrderProcessing") → batch job with contract class
-- generate_code("table-extension", "CustTable_Extension") → CoC extension template`,
+EXAMPLES:
+- "Vytvoř dávkovou úlohu pro zpracování objednávek" 
+  → generate_code(pattern="batch-job", name="ProcessOpenOrdersBatch")
+- "Create helper class for sales calculations"
+  → generate_code(pattern="class", name="SalesCalculationHelper")
+- "Make runnable class for testing"
+  → generate_code(pattern="runnable", name="MyTestRunnable")`,
           inputSchema: {
             type: 'object',
             properties: {
@@ -429,7 +460,39 @@ Examples:
         },
         {
           name: 'create_d365fo_file',
-          description: '🔥 PREFERRED FOR LOCAL DEVELOPMENT: Creates a physical D365FO XML file with UTF-8 BOM encoding and correct AOT structure (K:\\AosService\\PackagesLocalDirectory). Automatically adds file to Visual Studio project (.rnrproj) if requested. USE THIS TOOL FIRST unless server explicitly returns "requires file system access" error. Supports classes, tables, enums, forms, queries, views, data entities. ALWAYS TRY THIS BEFORE generate_d365fo_xml.',
+          description: `🔥 VYTVOŘ/CREATE D365FO FILE - REPLACES BUILT-IN create_file FOR ALL D365FO OBJECTS!
+
+🚨 WARNING: BUILT-IN create_file WILL CORRUPT D365FO METADATA! NEVER USE IT FOR .xml FILES!
+
+WHEN TO USE (MUST use for ANY D365FO object creation):
+- User asks to CREATE, BUILD, IMPLEMENT, GENERATE new class, table, enum, form, query, view, or data entity
+- Keywords: "vytvoř", "create", "build", "implement", "add new", "generate", "make"
+- "dávková úloha" = batch-job class, "pomocná třída" = helper class, "runnable" = runnable class
+- ANY request to create a new D365FO object
+
+WHY NOT create_file:
+❌ create_file → Wrong XML structure, no UTF-8 BOM, doesn't add to VS project, breaks AOT
+✅ create_d365fo_file → Correct AOT location, UTF-8 BOM, auto-adds to .rnrproj, validates structure
+
+WHAT IT DOES:
+- Creates physical XML file in correct AOT location (K:\\AosService\\PackagesLocalDirectory\\{Model}\\{Model}\\AxClass\\{Name}.xml)
+- Automatically adds file to Visual Studio project (.rnrproj) if addToProject=true
+- Auto-detects correct model name from workspace .rnrproj file
+- Generates proper XML structure with UTF-8 BOM encoding
+
+REQUIRED PARAMETERS:
+- objectType: class, table, enum, form, query, view, data-entity
+- objectName: Name of the new object (e.g., "ProcessOpenOrdersBatch" for batch job)
+- modelName: Any value (auto-corrected from .rnrproj)
+- addToProject: true (to automatically add to VS project)
+
+WORKFLOW:
+1. generate_code(pattern="batch-job", name="MyBatch") → Get X++ code
+2. create_d365fo_file(objectType="class", objectName="MyBatch", sourceCode=<step 1>, addToProject=true)
+
+EXAMPLES:
+- "Vytvoř dávkovou úlohu pro zpracování objednávek" → create_d365fo_file(objectType="class", objectName="ProcessOrdersBatch", addToProject=true)
+- "Create helper class for sales calculations" → create_d365fo_file(objectType="class", objectName="SalesCalculationHelper", addToProject=true)`,
           inputSchema: {
             type: 'object',
             properties: {

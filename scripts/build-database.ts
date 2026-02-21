@@ -203,6 +203,11 @@ async function buildDatabase() {
     symbolIndex.db.pragma('journal_mode = WAL');     // Enable WAL for runtime
     symbolIndex.db.pragma('synchronous = NORMAL');   // Balance speed/safety
     console.log('✅ Database converted to WAL mode');
+
+    // ANALYZE + optimize: persist query-planner stats into the DB so the production
+    // server can open it with zero warmup cost (skipped when SKIP_FTS=true because
+    // build-fts will run these tasks at the end of phase 2).
+    symbolIndex.runPostBuildTasks();
   }
 
   // Show breakdown by type

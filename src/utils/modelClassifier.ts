@@ -23,6 +23,13 @@ export function registerCustomModel(modelName: string): void {
 }
 
 /**
+ * Clear all auto-detected custom models (for test isolation)
+ */
+export function clearAutoDetectedModels(): void {
+  autoDetectedCustomModels.clear();
+}
+
+/**
  * Check if a model is registered as auto-detected custom
  */
 export function isAutoDetectedCustomModel(modelName: string): boolean {

@@ -698,25 +698,43 @@ export async function handleCreateD365File(
         `[create_d365fo_file] ⚠️ Add projectPath or solutionPath to .mcp.json config to auto-extract correct ModelName from .rnrproj!`
       );
       
-      // Extra validation: Check for suspicious model names
+      // Extra validation: Check for suspicious/placeholder model names
       const suspiciousNames = ['auto', 'test', 'example', 'temp', 'undefined', 'null'];
-      if (suspiciousNames.includes(actualModelName.toLowerCase())) {
-        const errorMsg = `❌ ERROR: modelName "${actualModelName}" appears to be a placeholder value, not a real D365FO model!\n\n` +
-          `To fix this issue:\n` +
-          `1. Create a .mcp.json file with your actual D365FO project paths:\n` +
-          `   {\n` +
-          `     "servers": {\n` +
-          `       "context": {\n` +
-          `         "projectPath": "K:\\\\VSProjects\\\\YourSolution\\\\YourProject\\\\YourProject.rnrproj",\n` +
-          `         "packagePath": "K:\\\\AosService\\\\PackagesLocalDirectory"\n` +
-          `       }\n` +
-          `     }\n` +
-          `   }\n\n` +
-          `2. Or provide projectPath/solutionPath in the tool call arguments\n\n` +
-          `3. Or specify the actual modelName of your custom D365FO model (e.g., "AslCore", "MyCustomModel")`;
-        
+      // Known Microsoft standard D365FO models — NEVER use for custom code
+      const knownMicrosoftModels = [
+        'applicationsuite', 'applicationcommon', 'applicationfoundation', 'applicationplatform',
+        'applicationwebcomponents', 'applicationworkspaces', 'foundation',
+        'directory', 'dimensions', 'currency', 'calendar', 'casemanagement',
+        'contactperson', 'datasharing', 'dataupgrade', 'datamaintenance',
+        'electronicreporting', 'electronicreportingcore',
+        'banktype', 'banktypes', 'benefitsmanagement', 'creditmanagement',
+      ];
+      const modelLower = actualModelName.toLowerCase();
+      const isPlaceholder = suspiciousNames.includes(modelLower);
+      const isMicrosoftModel = knownMicrosoftModels.includes(modelLower);
+
+      if (isPlaceholder || isMicrosoftModel) {
+        const reason = isPlaceholder
+          ? `"${actualModelName}" is a placeholder value, not a real D365FO model`
+          : `"${actualModelName}" is a Microsoft standard model — custom code must NEVER be created there`;
+        const errorMsg =
+          `❌ ERROR: ${reason}\n\n` +
+          `Root cause: No projectPath or solutionPath was found (not in tool args, not in .mcp.json config).\n` +
+          `Without projectPath, the tool uses the modelName parameter AS-IS, which is wrong.\n\n` +
+          `To fix — add projectPath to .mcp.json (in the MCP server directory)::\n` +
+          `  {\n` +
+          `    "servers": {\n` +
+          `      "context": {\n` +
+          `        "projectPath": "K:\\\\VSProjects\\\\YourSolution\\\\YourProject\\\\YourProject.rnrproj",\n` +
+          `        "solutionPath": "K:\\\\VSProjects\\\\YourSolution",\n` +
+          `        "packagePath": "K:\\\\AosService\\\\PackagesLocalDirectory"\n` +
+          `      }\n` +
+          `    }\n` +
+          `  }\n\n` +
+          `Or pass projectPath explicitly in the tool call arguments.`;
+
         console.error(`[create_d365fo_file] ${errorMsg}`);
-        
+
         return {
           content: [
             {
@@ -974,6 +992,17 @@ export async function handleCreateD365File(
           );
           projectMessage = `\n⚠️ File created but failed to add to project:\n${projectError instanceof Error ? projectError.message : 'Unknown error'}\n`;
         }
+      } else if (!projectMessage) {
+        // No projectPath found from any source — surface this in the response so AI and user see it
+        projectMessage = `\n⚠️ addToProject=true but no projectPath could be resolved.\n` +
+          `The file was created on disk but was NOT added to the Visual Studio project.\n\n` +
+          `To fix this, add projectPath to your .mcp.json:\n` +
+          `  {\n` +
+          `    "servers": { "context": {\n` +
+          `      "projectPath": "K:\\\\VSProjects\\\\YourSolution\\\\YourModel\\\\YourModel.rnrproj"\n` +
+          `    } }\n` +
+          `  }\n` +
+          `Until then, add the file manually in Visual Studio: right-click project → Add Existing Item → ${normalizedFullPath}\n`;
       }
     }
 
