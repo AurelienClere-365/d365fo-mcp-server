@@ -123,7 +123,7 @@ export class XppMetadataParser {
         fields: this.parseFields(axTable.Fields?.AxTableField),
         indexes: this.parseIndexes(axTable.Indexes?.AxTableIndex),
         relations: this.parseRelations(axTable.Relations?.AxTableRelation),
-        methods: this.parseMethods(axTable.Methods?.Method, tableName),
+        methods: this.parseMethods(axTable.SourceCode?.Methods?.Method, tableName),
       };
 
       return { success: true, data: tableInfo };
