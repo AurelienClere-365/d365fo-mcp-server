@@ -24,6 +24,10 @@ const FORCE_VACUUM = process.env.VACUUM === 'true';
 // Labels are indexed from PackagesLocalDirectory directly (not from extracted-metadata)
 const PACKAGES_PATH = process.env.PACKAGES_PATH || 'K:\\AosService\\PackagesLocalDirectory';
 const INCLUDE_LABELS = process.env.INCLUDE_LABELS !== 'false'; // default: true
+// Two-phase CI build: Phase 1 indexes symbols only (SKIP_FTS=true), Phase 2 runs build-fts
+const SKIP_FTS = process.env.SKIP_FTS === 'true';
+// Resume interrupted build: skip already-indexed models (progress tracked in _build_progress table)
+const RESUME = process.env.RESUME === 'true';
 
 async function buildDatabase() {
   console.log('🔨 Building X++ Metadata Database');
@@ -50,10 +54,15 @@ async function buildDatabase() {
   // - For incremental builds only if explicitly requested (VACUUM=true)
   const shouldVacuum = EXTRACT_MODE === 'all' || FORCE_VACUUM;
   
-  if (EXTRACT_MODE === 'all') {
+  if (RESUME) {
+    // Resume mode: skip clearing, continue from progress checkpoint
+    const done = symbolIndex.getIndexedModels();
+    console.log(`♻️  Resume mode: ${done.size} model(s) already indexed, continuing from checkpoint`);
+  } else if (EXTRACT_MODE === 'all') {
     // Clear entire database for full rebuild
     console.log('🗑️  Clearing entire database for full rebuild...');
     symbolIndex.clear();
+    symbolIndex.clearProgressTracking();
   } else if (EXTRACT_MODE === 'custom') {
     // Clear only custom models
     if (CUSTOM_MODELS.length > 0) {
@@ -138,7 +147,9 @@ async function buildDatabase() {
   console.log(`📊 Total symbols: ${count}`);
 
   // ── Label Indexing ─────────────────────────────────────────────────────────
-  if (INCLUDE_LABELS) {
+  if (SKIP_FTS) {
+    console.log('\n⏭️  Skipping label indexing (SKIP_FTS=true) — will be indexed by build-fts step');
+  } else if (INCLUDE_LABELS) {
     console.log(`\n🏷️  Indexing AxLabelFile labels from: ${PACKAGES_PATH}`);
     if (!fsSync.existsSync(PACKAGES_PATH)) {
       console.log(`   ⚠️  PackagesLocalDirectory not found at "${PACKAGES_PATH}" — skipping labels.`);
@@ -182,12 +193,17 @@ async function buildDatabase() {
     console.log('\n⏭️  Skipping label indexing (INCLUDE_LABELS=false)');
   }
 
-  // Convert to WAL mode for production use (better concurrency)
-  console.log('\n🔄 Converting database to WAL mode for production...');
-  symbolIndex.db.pragma('locking_mode = NORMAL');  // Re-enable shared access
-  symbolIndex.db.pragma('journal_mode = WAL');     // Enable WAL for runtime
-  symbolIndex.db.pragma('synchronous = NORMAL');   // Balance speed/safety
-  console.log('✅ Database converted to WAL mode');
+  if (SKIP_FTS) {
+    console.log('\n⏭️  Skipping WAL conversion (database will be finalized by build-fts step)');
+    console.log('   ℹ️  Upload this database as a pipeline artifact, then run: npm run build-fts');
+  } else {
+    // Convert to WAL mode for production use (better concurrency)
+    console.log('\n🔄 Converting database to WAL mode for production...');
+    symbolIndex.db.pragma('locking_mode = NORMAL');  // Re-enable shared access
+    symbolIndex.db.pragma('journal_mode = WAL');     // Enable WAL for runtime
+    symbolIndex.db.pragma('synchronous = NORMAL');   // Balance speed/safety
+    console.log('✅ Database converted to WAL mode');
+  }
 
   // Show breakdown by type
   const breakdown = symbolIndex.getSymbolCountByType();

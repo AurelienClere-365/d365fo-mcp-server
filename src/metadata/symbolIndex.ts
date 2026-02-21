@@ -205,7 +205,7 @@ export class XppSymbolIndex {
         ON labels(label_id, label_file_id, model, language);
     `);
 
-    // FTS5 full-text search for labels (text + comment, searched across all languages)
+    // FTS5 full-text search for labels (en-US text only – primary search language)
     this.db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS labels_fts USING fts5(
         label_id,
@@ -216,17 +216,21 @@ export class XppSymbolIndex {
       );
     `);
 
+    // Only index en-US rows to keep FTS compact (~5x smaller on typical installs)
     this.db.exec(`
-      CREATE TRIGGER IF NOT EXISTS labels_ai AFTER INSERT ON labels BEGIN
+      CREATE TRIGGER IF NOT EXISTS labels_ai AFTER INSERT ON labels WHEN new.language = 'en-US' BEGIN
         INSERT INTO labels_fts(rowid, label_id, text, comment)
         VALUES (new.id, new.label_id, new.text, new.comment);
       END;
-      CREATE TRIGGER IF NOT EXISTS labels_ad AFTER DELETE ON labels BEGIN
-        DELETE FROM labels_fts WHERE rowid = old.id;
+      CREATE TRIGGER IF NOT EXISTS labels_ad AFTER DELETE ON labels WHEN old.language = 'en-US' BEGIN
+        INSERT INTO labels_fts(labels_fts, rowid, label_id, text, comment)
+        VALUES ('delete', old.id, old.label_id, old.text, old.comment);
       END;
-      CREATE TRIGGER IF NOT EXISTS labels_au AFTER UPDATE ON labels BEGIN
-        UPDATE labels_fts SET label_id = new.label_id, text = new.text, comment = new.comment
-        WHERE rowid = new.id;
+      CREATE TRIGGER IF NOT EXISTS labels_au AFTER UPDATE ON labels WHEN old.language = 'en-US' OR new.language = 'en-US' BEGIN
+        INSERT INTO labels_fts(labels_fts, rowid, label_id, text, comment)
+        VALUES ('delete', old.id, old.label_id, old.text, old.comment);
+        INSERT INTO labels_fts(rowid, label_id, text, comment)
+        VALUES (new.id, new.label_id, new.text, new.comment);
       END;
     `);
   }
@@ -612,86 +616,155 @@ export class XppSymbolIndex {
    * Uses single transaction for all models - fastest approach with 8GB heap
    */
   async indexMetadataDirectory(metadataPath: string, modelName?: string): Promise<void> {
-    const models = modelName ? [modelName] : await this.getModelDirectories(metadataPath);
+    const skipFts = process.env.SKIP_FTS === 'true';
+    const resumable = process.env.RESUME === 'true';
+
+    const allModels = modelName ? [modelName] : await this.getModelDirectories(metadataPath);
+
+    // Sort largest models first — ensures Foundation (56K files) is indexed before any CI timeout
+    let models = allModels;
+    if (!modelName) {
+      models = this.sortModelsBySize(metadataPath, allModels);
+    }
+
+    // Skip already-indexed models when resuming (RESUME=true)
+    if (resumable) {
+      const done = this.getIndexedModels();
+      const skipped = models.filter(m => done.has(m));
+      models = models.filter(m => !done.has(m));
+      if (skipped.length > 0) {
+        console.log(`   ♻️  Resuming build: skipping ${skipped.length} already-indexed model(s)`);
+      }
+    }
 
     const startTime = Date.now();
 
-    // PERFORMANCE BOOST: Disable FTS triggers during bulk insert
-    // FTS5 triggers are the main bottleneck (3-5x slower than plain INSERT)
-    // We'll rebuild FTS index at the end using 'rebuild'
+    // Disable FTS triggers during bulk insert — we rebuild FTS once at the end
     this.db.exec('DROP TRIGGER IF EXISTS symbols_ai;');
     this.db.exec('DROP TRIGGER IF EXISTS symbols_au;');
     this.db.exec('DROP TRIGGER IF EXISTS symbols_ad;');
 
-    // Wrap everything in a single transaction for maximum performance
-    // With 8GB heap, this handles all 358 models without memory issues
-    // Result: 1 transaction = 1 disk fsync = ~4 minutes (original speed)
-    const transaction = this.db.transaction(() => {
-      let modelIndex = 0;
-      for (const model of models) {
-        modelIndex++;
-        const modelPath = path.join(metadataPath, model);
-        const modelStartTime = Date.now();
-        
-        // Index classes
+    // Prepare progress statement (executes inside each model's transaction)
+    const markProgress = resumable
+      ? this.db.prepare(`INSERT OR REPLACE INTO _build_progress (model, indexed_at) VALUES (?, ?)`)
+      : null;
+
+    // Per-model transactions instead of one giant transaction.
+    // Benefits vs. single transaction:
+    //   • Peak memory = 1 model's inserts (not 100K files × full dataset in MEMORY journal)
+    //   • Progress is committed to disk after each model — safe to resume on timeout
+    //   • Foundation (56K files) no longer holds 7+ GB in RAM before first commit
+    let modelIndex = 0;
+    for (const model of models) {
+      modelIndex++;
+      const modelPath = path.join(metadataPath, model);
+      const modelStartTime = Date.now();
+
+      const tx = this.db.transaction(() => {
         const classesPath = path.join(modelPath, 'classes');
-        if (fs.existsSync(classesPath)) {
-          this.indexClasses(classesPath, model);
-        }
+        if (fs.existsSync(classesPath)) this.indexClasses(classesPath, model);
 
-        // Index tables
         const tablesPath = path.join(modelPath, 'tables');
-        if (fs.existsSync(tablesPath)) {
-          this.indexTables(tablesPath, model);
-        }
+        if (fs.existsSync(tablesPath)) this.indexTables(tablesPath, model);
 
-        // Index forms
         const formsPath = path.join(modelPath, 'forms');
-        if (fs.existsSync(formsPath)) {
-          this.indexForms(formsPath, model);
-        }
+        if (fs.existsSync(formsPath)) this.indexForms(formsPath, model);
 
-        // Index queries
         const queriesPath = path.join(modelPath, 'queries');
-        if (fs.existsSync(queriesPath)) {
-          this.indexQueries(queriesPath, model);
-        }
+        if (fs.existsSync(queriesPath)) this.indexQueries(queriesPath, model);
 
-        // Index views
         const viewsPath = path.join(modelPath, 'views');
-        if (fs.existsSync(viewsPath)) {
-          this.indexViews(viewsPath, model);
-        }
+        if (fs.existsSync(viewsPath)) this.indexViews(viewsPath, model);
 
-        // Index enums
         const enumsPath = path.join(modelPath, 'enums');
-        if (fs.existsSync(enumsPath)) {
-          this.indexEnums(enumsPath, model);
-        }
-        
-        // Compact progress output: one line per model with time
-        const modelDuration = ((Date.now() - modelStartTime) / 1000).toFixed(1);
-        const progressPercent = ((modelIndex / models.length) * 100).toFixed(0);
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
-        console.log(`   📦 [${progressPercent}%] ${model} - ${modelDuration}s (${elapsed}s total)`);
-      }
-    });
+        if (fs.existsSync(enumsPath)) this.indexEnums(enumsPath, model);
 
-    // Execute the entire indexing in one transaction
-    transaction();
-    
+        // Mark model as done atomically with its data (same transaction)
+        markProgress?.run(model, Date.now());
+      });
+      tx();
+
+      const modelDuration = ((Date.now() - modelStartTime) / 1000).toFixed(1);
+      const progressPercent = ((modelIndex / models.length) * 100).toFixed(0);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+      console.log(`   📦 [${progressPercent}%] ${model} - ${modelDuration}s (${elapsed}s total)`);
+    }
+
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    
-    // Rebuild FTS index from scratch (much faster than triggers)
-    const ftsStartTime = Date.now();
+
+    if (skipFts) {
+      // Phase 1 of two-phase CI build: symbols only, FTS deferred to build-fts step
+      console.log(`   ⏭️  Skipping FTS rebuild (SKIP_FTS=true) — run 'npm run build-fts' to finish`);
+      this.createFTSTriggers();
+      console.log(`   ✅ Indexed ${models.length} model(s) in ${duration}s`);
+    } else {
+      // Rebuild FTS index from scratch (much faster than per-insert triggers)
+      const ftsStartTime = Date.now();
+      this.db.exec("INSERT INTO symbols_fts(symbols_fts) VALUES('rebuild');");
+      const ftsDuration = ((Date.now() - ftsStartTime) / 1000).toFixed(1);
+      this.createFTSTriggers();
+      console.log(`   ✅ Indexed ${models.length} model(s) in ${duration}s (FTS rebuilt in ${ftsDuration}s)`);
+    }
+  }
+
+  /**
+   * Sort models by JSON file count descending.
+   * Ensures the largest models (e.g. Foundation with 56K files) are indexed first,
+   * so the most data is committed to disk before any CI pipeline timeout.
+   */
+  private sortModelsBySize(metadataPath: string, models: string[]): string[] {
+    const subdirs = ['classes', 'tables', 'forms', 'queries', 'views', 'enums'];
+    const sized = models.map(model => {
+      let count = 0;
+      const modelPath = path.join(metadataPath, model);
+      for (const sub of subdirs) {
+        const p = path.join(modelPath, sub);
+        if (fs.existsSync(p)) {
+          count += fs.readdirSync(p).filter(f => f.endsWith('.json')).length;
+        }
+      }
+      return { model, count };
+    });
+    return sized.sort((a, b) => b.count - a.count).map(s => s.model);
+  }
+
+  /**
+   * Get the set of models already indexed (for RESUME=true builds).
+   */
+  getIndexedModels(): Set<string> {
+    try {
+      const rows = this.db.prepare(`SELECT model FROM _build_progress`).all() as { model: string }[];
+      return new Set(rows.map(r => r.model));
+    } catch {
+      return new Set();
+    }
+  }
+
+  /**
+   * Clear progress tracking checkpoint (call before a fresh full rebuild).
+   */
+  clearProgressTracking(): void {
+    try {
+      this.db.exec(`DELETE FROM _build_progress`);
+    } catch {
+      // Table may not exist yet
+    }
+  }
+
+  /**
+   * Rebuild the FTS index for symbols from scratch.
+   * Use this as a standalone step after a SKIP_FTS=true build (Phase 2 of two-phase CI).
+   */
+  rebuildFTS(): void {
+    console.log('🔍 Rebuilding symbols FTS index...');
+    this.db.exec('DROP TRIGGER IF EXISTS symbols_ai;');
+    this.db.exec('DROP TRIGGER IF EXISTS symbols_au;');
+    this.db.exec('DROP TRIGGER IF EXISTS symbols_ad;');
+    const start = Date.now();
     this.db.exec("INSERT INTO symbols_fts(symbols_fts) VALUES('rebuild');");
-    const ftsDuration = ((Date.now() - ftsStartTime) / 1000).toFixed(1);
-    
-    // Re-create FTS triggers for runtime updates
+    const duration = ((Date.now() - start) / 1000).toFixed(1);
     this.createFTSTriggers();
-    
-    // Summary: indexed X model(s) in Y.Ys (FTS rebuilt in Z.Zs)
-    console.log(`   ✅ Indexed ${models.length} model(s) in ${duration}s (FTS rebuilt in ${ftsDuration}s)`);
+    console.log(`✅ Symbols FTS index rebuilt in ${duration}s`);
   }
 
   private async getModelDirectories(metadataPath: string): Promise<string[]> {
@@ -1466,7 +1539,9 @@ export class XppSymbolIndex {
   }
 
   /**
-   * Bulk-insert labels (skips FTS triggers for speed; call rebuildLabelsFts() after)
+   * Bulk-insert labels (drops FTS triggers for speed).
+   * Pass `{ skipFtsRebuild: true }` when indexing many models sequentially;
+   * the caller must then invoke `rebuildLabelsFts()` once after all models are done.
    */
   bulkAddLabels(
     entries: Array<{
@@ -1478,6 +1553,7 @@ export class XppSymbolIndex {
       comment?: string;
       filePath: string;
     }>,
+    opts?: { skipFtsRebuild?: boolean },
   ): void {
     // Disable FTS triggers during bulk insert
     this.db.exec(`DROP TRIGGER IF EXISTS labels_ai`);
@@ -1497,30 +1573,43 @@ export class XppSymbolIndex {
 
     insertMany(entries);
 
-    // Rebuild FTS
-    this.rebuildLabelsFts();
+    // Rebuild FTS unless the caller will do a single rebuild after all batches
+    if (!opts?.skipFtsRebuild) {
+      this.rebuildLabelsFts();
+    }
 
-    // Re-create triggers
+    // Re-create triggers (en-US only to keep FTS compact)
     this.db.exec(`
-      CREATE TRIGGER IF NOT EXISTS labels_ai AFTER INSERT ON labels BEGIN
+      CREATE TRIGGER IF NOT EXISTS labels_ai AFTER INSERT ON labels WHEN new.language = 'en-US' BEGIN
         INSERT INTO labels_fts(rowid, label_id, text, comment)
         VALUES (new.id, new.label_id, new.text, new.comment);
       END;
-      CREATE TRIGGER IF NOT EXISTS labels_ad AFTER DELETE ON labels BEGIN
-        DELETE FROM labels_fts WHERE rowid = old.id;
+      CREATE TRIGGER IF NOT EXISTS labels_ad AFTER DELETE ON labels WHEN old.language = 'en-US' BEGIN
+        INSERT INTO labels_fts(labels_fts, rowid, label_id, text, comment)
+        VALUES ('delete', old.id, old.label_id, old.text, old.comment);
       END;
-      CREATE TRIGGER IF NOT EXISTS labels_au AFTER UPDATE ON labels BEGIN
-        UPDATE labels_fts SET label_id = new.label_id, text = new.text, comment = new.comment
-        WHERE rowid = new.id;
+      CREATE TRIGGER IF NOT EXISTS labels_au AFTER UPDATE ON labels WHEN old.language = 'en-US' OR new.language = 'en-US' BEGIN
+        INSERT INTO labels_fts(labels_fts, rowid, label_id, text, comment)
+        VALUES ('delete', old.id, old.label_id, old.text, old.comment);
+        INSERT INTO labels_fts(rowid, label_id, text, comment)
+        VALUES (new.id, new.label_id, new.text, new.comment);
       END;
     `);
   }
 
   /**
-   * Rebuild the FTS index for labels from scratch
+   * Rebuild the FTS index for labels from scratch.
+   * Only indexes en-US rows — the primary search language — keeping the
+   * index ~(N_languages)x smaller compared to indexing all translations.
    */
   rebuildLabelsFts(): void {
-    this.db.exec(`INSERT INTO labels_fts(labels_fts) VALUES('rebuild')`);
+    // Clear existing FTS index
+    this.db.exec(`INSERT INTO labels_fts(labels_fts) VALUES('delete-all')`);
+    // Re-populate with en-US rows only
+    this.db.exec(`
+      INSERT INTO labels_fts(rowid, label_id, text, comment)
+      SELECT id, label_id, text, comment FROM labels WHERE language = 'en-US'
+    `);
   }
 
   /**

@@ -39,16 +39,21 @@ stages:
   - stage: ExtractAndUpload
     displayName: 'Extract Standard Metadata and Upload to Blob'
     jobs:
-      - job: ProcessJob
-        displayName: 'Download → Extract → Upload'
+      # ──────────────────────────────────────────────────────────────────────
+      # Job 1 – Download, extract, build symbol rows only  (Phase 1)
+      # FTS rebuild is deferred to Job 2 so each job fits within 120 min.
+      # ──────────────────────────────────────────────────────────────────────
+      - job: BuildSymbols
+        displayName: 'Phase 1: Download → Extract → Build Symbols'
+        timeoutInMinutes: 120
         steps:
           # ========== Checkout MCP Server code from GitHub ==========
           - checkout: mcpServer
             displayName: 'Checkout MCP Server code from GitHub'
             path: mcp-server
 
-          # ========== Step 1: Install Node.js and Dependencies ==========
-          
+          # ========== Install Node.js and Dependencies ==========
+
           - task: NodeTool@0
             displayName: 'Install Node.js'
             inputs:
@@ -58,8 +63,8 @@ stages:
             displayName: 'Install NPM dependencies'
             workingDirectory: '$(MCP_SERVER_PATH)'
 
-          # ========== Step 2: Download PackagesLocalDirectory.zip from Azure Blob ==========
-          
+          # ========== Download PackagesLocalDirectory.zip ==========
+
           - script: |
               echo "Downloading $(PACKAGES_DIR_NAME).zip from Azure Blob Storage..."
               az storage blob download \
@@ -68,26 +73,23 @@ stages:
                 --name $(PACKAGES_DIR_NAME).zip \
                 --file $(PACKAGES_ZIP_PATH) \
                 --output table
-              
               echo "Download completed successfully"
               ls -lh $(PACKAGES_ZIP_PATH)
             displayName: 'Download $(PACKAGES_DIR_NAME).zip from Azure Blob'
             env:
               AZURE_STORAGE_CONNECTION_STRING: $(AZURE_STORAGE_CONNECTION_STRING)
 
-          # ========== Step 3: Extract PackagesLocalDirectory.zip ==========
-          
+          # ========== Extract PackagesLocalDirectory.zip ==========
+
           - script: |
               echo "Extracting $(PACKAGES_DIR_NAME).zip..."
               unzip -q $(PACKAGES_ZIP_PATH) -d $(Pipeline.Workspace)
-              
               echo "Extraction completed successfully"
-              echo "Contents of extracted directory:"
               ls -la $(Pipeline.Workspace)/$(PACKAGES_DIR_NAME)
             displayName: 'Extract $(PACKAGES_DIR_NAME).zip'
 
-          # ========== Step 4: Extract Metadata ==========
-          
+          # ========== Extract Metadata ==========
+
           - script: npm run extract-metadata
             displayName: 'Extract standard metadata from packages'
             workingDirectory: '$(MCP_SERVER_PATH)'
@@ -96,8 +98,8 @@ stages:
               METADATA_PATH: $(METADATA_PATH)
               EXTRACT_MODE: 'standard'
 
-          # ========== Step 5: Upload Metadata to Blob Storage ==========
-          
+          # ========== Upload Metadata to Blob Storage ==========
+
           - script: npm run blob-manager upload-standard
             displayName: 'Upload standard metadata to Azure Blob'
             workingDirectory: '$(MCP_SERVER_PATH)'
@@ -106,22 +108,78 @@ stages:
               BLOB_CONTAINER_NAME: $(BLOB_CONTAINER_NAME)
               METADATA_PATH: $(METADATA_PATH)
 
-          # ========== Step 6: Build Database ==========
-          
+          # ========== Phase 1: Build symbol rows, skip FTS ==========
+          # SKIP_FTS=true defers the FTS rebuild to Job 2 (build-fts).
+          # INCLUDE_LABELS=false — PackagesLocalDirectory not available in Job 2.
+          # Models are sorted largest-first (Foundation 56K files → first commit).
+
           - script: npm run build-database
-            displayName: 'Build database from standard metadata'
+            displayName: 'Build symbols database (Phase 1 – SKIP_FTS=true)'
             workingDirectory: '$(MCP_SERVER_PATH)'
-            timeoutInMinutes: 120  # Increase timeout to 2 hours for 350+ models
+            timeoutInMinutes: 110
             env:
               METADATA_PATH: $(METADATA_PATH)
               DB_PATH: $(DB_PATH)
               EXTRACT_MODE: 'standard'
-              COMPUTE_STATS: 'false'  # Disable usage statistics computation (1-2 minutes overhead)
-              ENABLE_SEARCH_SUGGESTIONS: 'false'  # Disable suggestions in CI/CD to reduce memory usage
-              NODE_OPTIONS: '--max-old-space-size=4096 --expose-gc'  # 4GB heap for single-transaction indexing
+              SKIP_FTS: 'true'
+              INCLUDE_LABELS: 'false'
+              COMPUTE_STATS: 'false'
+              ENABLE_SEARCH_SUGGESTIONS: 'false'
+              NODE_OPTIONS: '--max-old-space-size=4096 --expose-gc'
 
-          # ========== Step 7: Upload Database to Blob Storage ==========
-          
+          # ========== Pass partial DB to Job 2 via pipeline artifact ==========
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish partial database artifact'
+            inputs:
+              targetPath: '$(MCP_SERVER_PATH)/database/xpp-metadata.db'
+              artifact: 'xpp-metadata-db'
+              publishLocation: 'pipeline'
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Job 2 – Rebuild FTS index, finalize, upload  (Phase 2)
+      # Runs on a fresh agent after Job 1 completes.
+      # ──────────────────────────────────────────────────────────────────────
+      - job: BuildFTS
+        displayName: 'Phase 2: Rebuild FTS Index → Upload'
+        dependsOn: BuildSymbols
+        timeoutInMinutes: 120
+        steps:
+          - checkout: mcpServer
+            displayName: 'Checkout MCP Server code from GitHub'
+            path: mcp-server
+
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - script: npm ci
+            displayName: 'Install NPM dependencies'
+            workingDirectory: '$(MCP_SERVER_PATH)'
+
+          # ========== Download partial DB from Job 1 ==========
+
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download partial database artifact'
+            inputs:
+              artifact: 'xpp-metadata-db'
+              targetPath: '$(MCP_SERVER_PATH)/database'
+
+          # ========== Phase 2: FTS rebuild + WAL conversion ==========
+          # INCLUDE_LABELS=false: PackagesLocalDirectory not available on this agent.
+
+          - script: npm run build-fts
+            displayName: 'Rebuild FTS index + finalize database (Phase 2)'
+            workingDirectory: '$(MCP_SERVER_PATH)'
+            timeoutInMinutes: 110
+            env:
+              DB_PATH: $(DB_PATH)
+              INCLUDE_LABELS: 'false'
+              NODE_OPTIONS: '--max-old-space-size=4096 --expose-gc'
+
+          # ========== Upload Final Database ==========
+
           - script: npm run blob-manager upload-database
             displayName: 'Upload compiled database to Azure Blob'
             workingDirectory: '$(MCP_SERVER_PATH)'
@@ -138,20 +196,16 @@ stages:
               action: 'Restart Azure App Service'
               webAppName: '$(AZURE_APP_SERVICE_NAME)'
 
-          # ========== Step 8: Log Completion ==========
-          
           - script: |
               echo ""
               echo "============================================"
               echo "Standard metadata extraction completed!"
               echo "============================================"
               echo ""
-              echo "✅ $(PACKAGES_DIR_NAME).zip downloaded from Azure Blob"
-              echo "✅ Package extracted"
-              echo "✅ Metadata extracted"
-              echo "✅ Metadata uploaded to: metadata/standard/"
-              echo "✅ Database built"
+              echo "✅ Metadata extracted and uploaded (Phase 1)"
+              echo "✅ FTS index rebuilt (Phase 2)"
               echo "✅ Database uploaded to Azure Blob"
+              echo "✅ App Service restarted"
               echo ""
               echo "Next step: Run custom pipeline to update custom models"
               echo "============================================"

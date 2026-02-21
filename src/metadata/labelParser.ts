@@ -131,11 +131,16 @@ export async function discoverLabelFiles(
 /**
  * Index all label files for a single model into the symbol index.
  * Returns the number of label entries inserted.
+ *
+ * Pass `{ skipFtsRebuild: true }` when calling in a loop over many models;
+ * the caller is responsible for calling `symbolIndex.rebuildLabelsFts()` once
+ * after all models have been indexed.
  */
 export async function indexModelLabels(
   symbolIndex: XppSymbolIndex,
   modelDir: string,
   model: string,
+  opts?: { skipFtsRebuild?: boolean },
 ): Promise<number> {
   const labelFiles = await discoverLabelFiles(modelDir);
   if (labelFiles.length === 0) return 0;
@@ -165,7 +170,7 @@ export async function indexModelLabels(
   }
 
   if (allEntries.length > 0) {
-    symbolIndex.bulkAddLabels(allEntries);
+    symbolIndex.bulkAddLabels(allEntries, opts);
   }
 
   return allEntries.length;
@@ -203,11 +208,17 @@ export async function indexAllLabels(
     const modelDir = path.join(packagesPath, model, model);
     if (!fsSync.existsSync(modelDir)) continue;
 
-    const count = await indexModelLabels(symbolIndex, modelDir, model);
+    // Skip per-model FTS rebuild; do a single rebuild after all models are indexed
+    const count = await indexModelLabels(symbolIndex, modelDir, model, { skipFtsRebuild: true });
     if (count > 0) {
       totalLabels += count;
       modelsIndexed++;
     }
+  }
+
+  // Single FTS rebuild after all models — avoids O(N²) cost of rebuilding per model
+  if (totalLabels > 0) {
+    symbolIndex.rebuildLabelsFts();
   }
 
   return { totalLabels, modelsIndexed };

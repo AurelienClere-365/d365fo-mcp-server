@@ -40,8 +40,12 @@ stages:
   - stage: PlatformUpgrade
     displayName: 'Complete Platform Upgrade'
     jobs:
-      - job: UpgradeJob
-        displayName: 'Download → Extract Standard → Extract Custom → Build → Upload'
+      # ──────────────────────────────────────────────────────────────────────────
+      # Job 1 – Download, extract both standard+custom, build symbol rows only
+      # ──────────────────────────────────────────────────────────────────────────
+      - job: BuildSymbols
+        displayName: 'Phase 1: Download → Extract → Build Symbols'
+        timeoutInMinutes: 120
         steps:
           # ========== Step 1: Checkout MCP Server code from GitHub ==========
           - checkout: mcpServer
@@ -117,19 +121,73 @@ stages:
               BLOB_CONTAINER_NAME: $(BLOB_CONTAINER_NAME)
               METADATA_PATH: $(METADATA_PATH)
 
-          # ========== Step 8: Build Database ==========
-          
+          # ========== Step 8: Phase 1 – Build symbols, skip FTS ==========
+          # SKIP_FTS=true defers the expensive FTS rebuild to Job 2.
+          # Models are sorted largest-first so most data is committed early.
+
           - script: npm run build-database
-            displayName: 'Build database (standard + custom)'
+            displayName: 'Build symbols database (Phase 1 – SKIP_FTS=true)'
             workingDirectory: '$(MCP_SERVER_PATH)'
+            timeoutInMinutes: 110
             env:
               METADATA_PATH: $(METADATA_PATH)
               DB_PATH: $(DB_PATH)
-              COMPUTE_STATS: 'false'  # Disable usage statistics computation (saves 1-2 minutes)
-              ENABLE_SEARCH_SUGGESTIONS: 'false'  # Disable suggestions in CI/CD to reduce memory usage
-              NODE_OPTIONS: '--max-old-space-size=4096 --expose-gc'  # Increase heap to 8GB for single-transaction indexing
+              SKIP_FTS: 'true'
+              INCLUDE_LABELS: 'false'
+              COMPUTE_STATS: 'false'
+              ENABLE_SEARCH_SUGGESTIONS: 'false'
+              NODE_OPTIONS: '--max-old-space-size=4096 --expose-gc'
 
-          # ========== Step 9: Upload Database to Blob Storage ==========
+          # ========== Pass partial DB to Job 2 ==========
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish partial database artifact'
+            inputs:
+              targetPath: '$(MCP_SERVER_PATH)/database/xpp-metadata.db'
+              artifact: 'xpp-metadata-db'
+              publishLocation: 'pipeline'
+
+      # ──────────────────────────────────────────────────────────────────────────
+      # Job 2 – Rebuild FTS index, finalize, upload  (Phase 2)
+      # ──────────────────────────────────────────────────────────────────────────
+      - job: BuildFTS
+        displayName: 'Phase 2: Rebuild FTS Index → Upload → Restart'
+        dependsOn: BuildSymbols
+        timeoutInMinutes: 120
+        steps:
+          - checkout: mcpServer
+            displayName: 'Checkout MCP Server code from GitHub'
+            path: mcp-server
+
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - script: npm ci
+            displayName: 'Install NPM dependencies'
+            workingDirectory: '$(MCP_SERVER_PATH)'
+
+          # ========== Download partial DB from Job 1 ==========
+
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download partial database artifact'
+            inputs:
+              artifact: 'xpp-metadata-db'
+              targetPath: '$(MCP_SERVER_PATH)/database'
+
+          # ========== Phase 2: FTS rebuild + WAL conversion ==========
+
+          - script: npm run build-fts
+            displayName: 'Rebuild FTS index + finalize database (Phase 2)'
+            workingDirectory: '$(MCP_SERVER_PATH)'
+            timeoutInMinutes: 110
+            env:
+              DB_PATH: $(DB_PATH)
+              INCLUDE_LABELS: 'false'
+              NODE_OPTIONS: '--max-old-space-size=4096 --expose-gc'
+
+          # ========== Upload Database to Blob Storage ==========
 
           - script: npm run blob-manager upload-database
             displayName: 'Upload compiled database to Azure Blob'
@@ -139,7 +197,7 @@ stages:
               BLOB_CONTAINER_NAME: $(BLOB_CONTAINER_NAME)
               DB_PATH: $(DB_PATH)
 
-          # ========== Step 10: Restart App Service ==========
+          # ========== Restart App Service ==========
 
           - task: AzureAppServiceManage@0
             displayName: 'Restart App Service'
@@ -148,19 +206,17 @@ stages:
               action: 'Restart Azure App Service'
               webAppName: '$(AZURE_APP_SERVICE_NAME)'
 
-          # ========== Step 11: Log Completion ==========
-          
           - script: |
               echo ""
               echo "============================================"
               echo "D365 Platform Upgrade Completed!"
               echo "============================================"
               echo ""
-              echo "✅ $(PACKAGES_DIR_NAME).zip downloaded from Azure Blob"
-              echo "✅ Package extracted"
-              echo "✅ Standard metadata extracted and uploaded"
-              echo "✅ Custom metadata downloaded from Blob"
-              echo "✅ Database built and uploaded"
+              echo "✅ Standard metadata extracted and uploaded (Phase 1)"
+              echo "✅ Custom metadata downloaded (Phase 1)"
+              echo "✅ Symbols indexed (Phase 1)"
+              echo "✅ FTS index rebuilt (Phase 2)"
+              echo "✅ Database uploaded to Azure Blob"
               echo "✅ App Service restarted"
               echo ""
               echo "Your MCP server is now running with the latest D365 version"
