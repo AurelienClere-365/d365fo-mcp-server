@@ -28,6 +28,8 @@ class ConfigManager {
   private runtimeContext: Partial<McpContext> = {};
   private autoDetectedProject: D365ProjectInfo | null = null;
   private autoDetectionAttempted: boolean = false;
+  // Cache auto-detection results per workspace path (PERFORMANCE FIX)
+  private autoDetectionCache = new Map<string, D365ProjectInfo | null>();
 
   constructor(configPath?: string) {
     // Default to .mcp.json in current directory or parent directories
@@ -37,17 +39,32 @@ class ConfigManager {
   /**
    * Auto-detect D365FO project from workspace
    * Called automatically when projectPath/solutionPath is requested but not configured
+   * PERFORMANCE: Results are cached per workspace path
    */
   private async autoDetectProject(workspacePath?: string): Promise<void> {
     if (this.autoDetectionAttempted) {
-      return; // Only attempt once
+      return; // Only attempt once per workspace
     }
 
     this.autoDetectionAttempted = true;
+    
+    // Check cache first (PERFORMANCE FIX)
+    const cacheKey = workspacePath || 'default';
+    if (this.autoDetectionCache.has(cacheKey)) {
+      this.autoDetectedProject = this.autoDetectionCache.get(cacheKey) || null;
+      if (this.autoDetectedProject) {
+        console.error(`[ConfigManager] ⚡ Using cached auto-detection for: ${cacheKey}`);
+      }
+      return;
+    }
+
     console.error('[ConfigManager] Auto-detecting D365FO project from workspace...');
 
     // Try to detect from provided workspace path or current directory
     const detectedProject = await autoDetectD365Project(workspacePath);
+    
+    // Store in cache (PERFORMANCE FIX)
+    this.autoDetectionCache.set(cacheKey, detectedProject);
     
     if (detectedProject) {
       this.autoDetectedProject = detectedProject;
@@ -66,13 +83,27 @@ class ConfigManager {
   /**
    * Set runtime context (e.g., from GitHub Copilot workspace detection)
    * This allows dynamic context that overrides .mcp.json configuration
+   * PERFORMANCE: Uses cache, only resets when workspace differs from cached value.
    */
   setRuntimeContext(context: Partial<McpContext>): void {
+    const workspaceChanged = context.workspacePath &&
+      context.workspacePath !== this.runtimeContext.workspacePath;
+    const projectChanged = context.projectPath &&
+      context.projectPath !== this.runtimeContext.projectPath;
+
     this.runtimeContext = { ...this.runtimeContext, ...context };
-    console.error(
-      `[ConfigManager] Runtime context updated:`,
-      JSON.stringify(context)
-    );
+
+    // Only reset if workspace changed AND not in cache (PERFORMANCE FIX)
+    if (workspaceChanged || projectChanged) {
+      const cacheKey = context.workspacePath || context.projectPath || 'default';
+      if (!this.autoDetectionCache.has(cacheKey)) {
+        this.autoDetectionAttempted = false;
+        this.autoDetectedProject = null;
+        console.error(
+          `[ConfigManager] New workspace — will auto-detect: ${cacheKey}`
+        );
+      }
+    }
   }
 
   /**

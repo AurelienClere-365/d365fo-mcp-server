@@ -10,6 +10,73 @@ import type { JSONRPCMessage, JSONRPCRequest } from '@modelcontextprotocol/sdk/t
 import type { Express, Request, Response } from 'express';
 import { apiRateLimiter } from '../middleware/rateLimiter.js';
 import type { XppServerContext } from '../types/context.js';
+import { getConfigManager } from '../utils/configManager.js';
+
+/**
+ * Extract workspace folder path from GitHub Copilot MCP request.
+ * Copilot can pass workspace info via HTTP headers or _meta in params.
+ * Returns a local file-system path (converts file:// URI → path).
+ */
+function extractWorkspaceFromRequest(req: Request, requestBody: JSONRPCRequest): string | null {
+  // 1. Check known VS Code / GitHub Copilot HTTP headers
+  const headerCandidates = [
+    req.headers['x-vscode-workspace-folder-uris'],
+    req.headers['x-vscode-workspace-folder'],
+    req.headers['x-github-copilot-workspace'],
+    req.headers['x-workspace-folder'],
+    req.headers['x-workspace'],
+  ];
+  for (const h of headerCandidates) {
+    const val = Array.isArray(h) ? h[0] : h;
+    if (val) {
+      const path = fileUriToPath(val.split(',')[0].trim());
+      if (path) return path;
+    }
+  }
+
+  // 2. Check params._meta for workspace folder URIs (tool calls and initialize)
+  const meta = (requestBody as any).params?._meta;
+  if (meta) {
+    // Array form: workspaceFolders / workspaceFolderUris
+    for (const key of ['workspaceFolders', 'workspaceFolderUris', 'roots']) {
+      const val = meta[key];
+      if (Array.isArray(val) && val.length > 0) {
+        const first = typeof val[0] === 'string' ? val[0] : val[0]?.uri;
+        const path = fileUriToPath(first);
+        if (path) return path;
+      }
+    }
+    // Single string form
+    for (const key of ['workspaceFolderUri', 'workspaceFolder', 'workspacePath']) {
+      const val = meta[key];
+      if (typeof val === 'string') {
+        const path = fileUriToPath(val);
+        if (path) return path;
+      }
+    }
+  }
+
+  return null;
+}
+
+/** Convert file:// URI to a local path, or return the string as-is if not a URI */
+function fileUriToPath(uri: string | undefined): string | null {
+  if (!uri) return null;
+  if (uri.startsWith('file:///')) {
+    // file:///K:/VSProjects/... → K:/VSProjects/...
+    const decoded = decodeURIComponent(uri.slice('file:///'.length));
+    // Normalize Windows path separators
+    return decoded.replace(/\//g, '\\');
+  }
+  if (uri.startsWith('file://')) {
+    return decodeURIComponent(uri.slice('file://'.length)).replace(/\//g, '\\');
+  }
+  // Already a local path
+  if (uri.length > 2 && (uri[1] === ':' || uri.startsWith('\\\\'))) {
+    return uri;
+  }
+  return null;
+}
 
 export class CustomHttpTransport implements Transport {
   private server: Server;
@@ -79,11 +146,17 @@ export class CustomHttpTransport implements Transport {
     // MCP endpoint - direct JSON-RPC
     this.app.post('/mcp', async (req: Request, res: Response): Promise<void> => {
       try {
-        // Disable Keep-Alive to close connection after each response
-        res.setHeader('Connection', 'close');
+        // Set response headers (keep-alive enabled for performance)
+        res.setHeader('Content-Type', 'application/json');
         
         const request = req.body as JSONRPCRequest;
-        
+
+        // Extract GitHub Copilot workspace path and update ConfigManager runtime context
+        const workspacePath = extractWorkspaceFromRequest(req, request);
+        if (workspacePath) {
+          getConfigManager().setRuntimeContext({ workspacePath });
+        }
+
         if (!request.jsonrpc || !request.method) {
           res.status(400).json({
             jsonrpc: '2.0',
@@ -129,11 +202,26 @@ export class CustomHttpTransport implements Transport {
         // Handle requests - send to MCP server via onmessage
         // Wait for response via Promise
         if (this.onmessage) {
-          // Log incoming request
+          // MCP capability-probe methods that always return "Method not found" — log silently
+          const SILENT_PROBES = new Set([
+            'resources/templates/list',
+            'resources/list',
+            'prompts/list',
+            'logging/setLevel',
+            'completion/complete',
+          ]);
+          const isSilentProbe = SILENT_PROBES.has(request.method);
+
+          // Log incoming request (skip silent probes)
           const toolName = (request as any).params?.name || request.method;
           const args = (request as any).params?.arguments;
           const argsSummary = args ? ` (${Object.keys(args).join(', ')})` : '';
-          process.stdout.write(`\n→ ${toolName}${argsSummary}\n`);
+          // Short request ID tag for disambiguating concurrent requests in the log
+          const reqId = String(request.id).slice(-4);
+          const tag = `[${reqId}]`;
+          if (!isSilentProbe) {
+            process.stdout.write(`\n→ ${tag} ${toolName}${argsSummary}\n`);
+          }
 
           const responsePromise = new Promise<JSONRPCMessage>((resolve, reject) => {
             this.pendingRequests.set(request.id, resolve);
@@ -153,21 +241,39 @@ export class CustomHttpTransport implements Transport {
           // Wait for response from send()
           const response = await responsePromise;
           
-          // Log response
-          if ('result' in response) {
-            const content = (response as any).result?.content?.[0]?.text;
-            if (content) {
-              const firstLine = content.split('\n')[0].substring(0, 80);
-              process.stdout.write(`← ${firstLine}\n`);
-            } else {
-              process.stdout.write(`← Success\n`);
+          // Log response (skip silent probes)
+          if (!isSilentProbe) {
+            if ('result' in response) {
+              const content = (response as any).result?.content?.[0]?.text;
+              const isError = (response as any).result?.isError === true;
+              if (content) {
+                const lines = content.split('\n').filter((l: string) => l.trim());
+                if (isError) {
+                  // For errors show up to 4 lines so type-mismatch hints are visible
+                  const preview = lines.slice(0, 4).map((l: string) => l.substring(0, 100)).join(' | ');
+                  process.stdout.write(`← ${tag} ❌ ${preview}\n`);
+                } else {
+                  const firstLine = lines[0].substring(0, 100);
+                  // For file-creation tools also append the path/warning line so it's visible
+                  const extraLine = lines.find((l: string) =>
+                    l.startsWith('📁 Path:') || l.startsWith('⚠️ addToProject'));
+                  const extra = extraLine ? ` | ${extraLine.substring(0, 100)}` : '';
+                  process.stdout.write(`← ${tag} ${firstLine}${extra}\n`);
+                }
+              } else {
+                process.stdout.write(`← ${tag} ✓ Success\n`);
+              }
+            } else if ('error' in response) {
+              const errorMsg = (response as any).error?.message || 'Unknown error';
+              process.stdout.write(`← ${tag} ❌ ${errorMsg.substring(0, 100)}\n`);
             }
-          } else if ('error' in response) {
-            const errorMsg = (response as any).error?.message || 'Unknown error';
-            process.stdout.write(`← Error: ${errorMsg.substring(0, 80)}\n`);
           }
           
-          res.json(response);
+          // Send JSON response and explicitly close to signal completion
+          res.status(200)
+            .setHeader('Content-Type', 'application/json')
+            .send(JSON.stringify(response))
+            .end();
           this.currentResponse = null;
         } else {
           res.status(500).json({

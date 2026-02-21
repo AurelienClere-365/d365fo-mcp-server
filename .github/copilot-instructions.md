@@ -107,7 +107,7 @@ The following built-in tools **MUST NOT** be used on D365FO metadata files (.xml
 | Tool | Replaces Built-in | Description | When to Use |
 |------|-------------------|-------------|-------------|
 | `generate_d365fo_xml(objectType, objectName, ...)` | None | Returns D365FO XML content as text. Use with `create_d365fo_file()` for file creation, or alone for inspection/review | Get XML content before creating file, or inspect XML structure |
-| `create_d365fo_file(objectType, objectName, modelName, addToProject?)` | `create_file` | **ONLY tool for creating D365FO files.** Creates physical file in correct AOT location and optionally adds to Visual Studio project. Auto-detects model from .rnrproj. Can accept XML content from `generate_d365fo_xml()` | Creating ANY D365FO object (class, table, form, enum, etc.) |
+| `create_d365fo_file(objectType, objectName, modelName, projectPath?, solutionPath?, addToProject?)` | `create_file` | **ONLY tool for creating D365FO files.** Creates physical file in correct AOT location and optionally adds to Visual Studio project. ⚠️ ALWAYS provide `projectPath` (path to `.rnrproj`) or `solutionPath` — tool auto-extracts correct ModelName from the project file. Without them the `modelName` parameter is used AS-IS, which may create files in a Microsoft standard model! | Creating ANY D365FO object (class, table, form, enum, etc.) |
 | `modify_d365fo_file(objectType, objectName, operation, ...)` | `edit_file`, `apply_patch`, `replace_string_in_file` | Safely edits D365FO XML with automatic backup (.bak), validation, and rollback on error. Supports: add-method, remove-method, add-field, remove-field, modify-property | Local Windows VM with K:\ drive access |
 
 ## Common Workflows
@@ -118,16 +118,42 @@ The following built-in tools **MUST NOT** be used on D365FO metadata files (.xml
 1. Call `analyze_code_patterns("description of what you're building")` — learn from existing patterns
 2. Call `generate_code(pattern, name)` or get related examples
 3. **ALWAYS call `create_d365fo_file(objectType, objectName, modelName, addToProject=true)`** — creates file and adds to project
-   - The tool auto-detects the correct model from .rnrproj in the workspace
+   - The tool auto-detects the correct model from `.rnrproj` in the workspace
    - Works in all environments (local, cloud, Azure)
    - Optional: call `generate_d365fo_xml()` first, then pass XML to `create_d365fo_file()`
    - **NEVER use `create_file()` for D365FO objects - always use `create_d365fo_file()`**
+
+> ⚠️ **CRITICAL — `projectPath` or `solutionPath` MUST be provided** when calling `create_d365fo_file`:
+> - GitHub Copilot **automatically passes the active workspace path** to the MCP server — the server extracts `projectPath` from it by scanning for `.rnrproj` files. **You typically don't need to specify `projectPath` explicitly.**
+> - The server also scans well-known dev directories (`K:\VSProjects`, `C:\VSProjects`, etc.) as a fallback.
+> - If auto-detection still fails: add `projectPath` to `.mcp.json` (see **📁 File Paths and Model Name** section below).
+> - **WITHOUT any resolved `projectPath`**: the tool uses `modelName` AS-IS → file may be created in a **Microsoft standard model** (e.g. `ApplicationSuite`) instead of your custom model!
 
 **Example:**
 ```
 Step 1: analyze_code_patterns("sales order helper class")
 Step 2: generate_code(pattern="class", name="MySalesHelper")
-Step 3: create_d365fo_file(objectType="class", objectName="MySalesHelper", modelName="auto", addToProject=true)
+Step 3: create_d365fo_file(objectType="class", objectName="MySalesHelper",
+          modelName="any",       ← doesn't matter, auto-corrected from .rnrproj
+          projectPath="K:\VSProjects\MySolution\MyProject\MyProject.rnrproj",
+          addToProject=true)
+```
+
+**❌ Wrong — missing `projectPath`:**
+```
+create_d365fo_file(objectType="class", objectName="MySalesHelper",
+  modelName="ApplicationSuite")   ← ❌ No projectPath → file lands in Microsoft's model!
+```
+
+**✅ Correct — `projectPath` provided:**
+```
+create_d365fo_file(objectType="class", objectName="MySalesHelper",
+  modelName="whatever",           ← ignored, auto-corrected
+  projectPath="K:\VSProjects\MySolution\MyProject\MyProject.rnrproj",
+  addToProject=true)
+→ Tool reads MyProject.rnrproj → extracts ModelName (e.g. "AslCore")
+→ File created at K:\AosService\PackagesLocalDirectory\AslCore\AslCore\AxClass\MySalesHelper.xml ✅
+→ Added to MyProject.rnrproj ✅
 ```
 
 ### Editing an Existing D365FO Object
@@ -242,6 +268,52 @@ Step 4: Use @AslCore:MyNewField in code or XML
 
 ## Best Practices
 
+### 📁 File Paths and Model Name
+
+AOT path structure on the local Windows VM:
+```
+K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxClass\{Name}.xml
+K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxTable\{Name}.xml
+K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxForm\{Name}.xml
+K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxEnum\{Name}.xml
+K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxQuery\{Name}.xml
+K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxView\{Name}.xml
+```
+
+**ModelName is automatically extracted from the `.rnrproj` file** (`PropertyGroup/ModelName`)
+
+| Situation | Result |
+|-----------|--------|
+| `projectPath` or `solutionPath` provided | ✅ Tool reads correct `ModelName` from `.rnrproj` |
+| Neither provided, `modelName="ApplicationSuite"` | ❌ File created in Microsoft's standard model — WRONG! |
+| Neither provided, `modelName="AslCore"` | ✅ Only if value happens to match actual model name |
+
+**Rules:**
+- ✅ **ALWAYS provide `projectPath` or `solutionPath`** when calling `create_d365fo_file`
+- ❌ **NEVER ask the user for `modelName`** — pass any value, it will be auto-corrected from `.rnrproj`
+- ❌ **NEVER manually extract `modelName` from workspace path** — workspace path ≠ AOT path
+- ❌ **NEVER call `create_d365fo_file(modelName="ApplicationSuite", ...)`** without `projectPath`/`solutionPath`!
+- `ApplicationSuite` is a **Microsoft standard model** — never add custom code there!
+
+**`.mcp.json` configuration** (fallback when GitHub Copilot auto-detection is unavailable):
+```json
+{
+  "servers": {
+    "context": {
+      "projectPath": "K:\\VSProjects\\MySolution\\MyProject\\MyProject.rnrproj",
+      "solutionPath": "K:\\VSProjects\\MySolution",
+      "packagePath": "K:\\AosService\\PackagesLocalDirectory"
+    }
+  }
+}
+```
+⚠️ This file must be placed **in the MCP server directory** (next to `package.json`), NOT in the VS solution folder — the MCP server process reads it from its own working directory.
+
+**XML formatting rules:**
+- ✅ TABs for indentation (Microsoft D365FO standard — not spaces!)
+- ❌ NEVER spaces — causes XML deserialization errors in Visual Studio
+- ✅ CDATA for X++ source code: `<![CDATA[ ... ]]>`
+
 ### ✅ DO:
 - Use MCP tools for ALL D365FO metadata operations
 - Call `get_method_signature()` before creating CoC extensions
@@ -259,6 +331,7 @@ Step 4: Use @AslCore:MyNewField in code or XML
 - Never use `replace_string_in_file` on D365FO XML — it corrupts metadata
 - **Never create D365FO files with generic `create_file` — ONLY use `create_d365fo_file()`**
 - **Never combine `generate_d365fo_xml()` + `create_file()` — use `generate_d365fo_xml()` + `create_d365fo_file()` instead**
+- **Never call `create_d365fo_file()` without `projectPath` or `solutionPath`** — without them `modelName` is used AS-IS and the file may end up in a Microsoft standard model!
 - Don't use vague search terms — be specific about what you're looking for
 - Don't call `search()` after you already have the complete object from `get_class_info()`
 - **Never edit .label.txt files with `edit_file` or `replace_string_in_file`** — use `create_label()` which maintains sort order and updates the index

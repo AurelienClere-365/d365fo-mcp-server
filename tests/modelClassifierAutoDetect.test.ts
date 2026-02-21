@@ -8,10 +8,15 @@ import {
   isStandardModel, 
   registerCustomModel,
   isAutoDetectedCustomModel,
+  clearAutoDetectedModels,
   getCustomModels 
 } from '../src/utils/modelClassifier.js';
 
 describe('ModelClassifier with Auto-Detection', () => {
+  beforeEach(() => {
+    // Reset auto-detected models between tests to avoid cross-test contamination
+    clearAutoDetectedModels();
+  });
   
   describe('Standard Microsoft Models', () => {
     it('should recognize ApplicationSuite as standard', () => {
@@ -32,7 +37,8 @@ describe('ModelClassifier with Auto-Detection', () => {
 
   describe('Auto-Detected Custom Models', () => {
     it('should register and recognize auto-detected model as custom', () => {
-      const testModel = 'AslCore';
+      // Use a unique name to avoid collision with models registered by concurrent test files
+      const testModel = 'AutoDetect_' + Date.now();
       
       // Before registration - should be standard (unknown model)
       expect(isCustomModel(testModel)).toBe(false);

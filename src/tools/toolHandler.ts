@@ -1,7 +1,50 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { XppServerContext } from '../types/context.js';
+import { getConfigManager } from '../utils/configManager.js';
 import { searchTool } from './search.js';
+
+/**
+ * Extract workspace path from GitHub Copilot _meta and apply it to ConfigManager.
+ * Called before every tool dispatch so workspace is always up-to-date.
+ */
+function extractAndApplyWorkspaceFromMeta(meta: any): void {
+  if (!meta) return;
+
+  let rawUri: string | undefined;
+
+  // workspaceFolders / workspaceFolderUris / roots — array of { uri } or strings
+  for (const key of ['workspaceFolders', 'workspaceFolderUris', 'roots']) {
+    const arr = meta[key];
+    if (Array.isArray(arr) && arr.length > 0) {
+      rawUri = typeof arr[0] === 'string' ? arr[0] : arr[0]?.uri;
+      break;
+    }
+  }
+
+  // Single-string fallbacks
+  if (!rawUri) {
+    for (const key of ['workspaceFolderUri', 'workspaceFolder', 'workspacePath']) {
+      if (typeof meta[key] === 'string') {
+        rawUri = meta[key];
+        break;
+      }
+    }
+  }
+
+  if (!rawUri) return;
+
+  // Convert file:// URI → local path
+  let localPath = rawUri;
+  if (rawUri.startsWith('file:///')) {
+    localPath = decodeURIComponent(rawUri.slice('file:///'.length)).replace(/\//g, '\\');
+  } else if (rawUri.startsWith('file://')) {
+    localPath = decodeURIComponent(rawUri.slice('file://'.length)).replace(/\//g, '\\');
+  }
+
+  // Apply workspace context (debug logging removed for performance)
+  getConfigManager().setRuntimeContext({ workspacePath: localPath });
+}
 import { batchSearchTool } from './batchSearch.js';
 import { classInfoTool } from './classInfo.js';
 import { tableInfoTool } from './tableInfo.js';
@@ -31,6 +74,12 @@ import { createLabelTool } from './createLabel.js';
 export function registerToolHandler(server: Server, context: XppServerContext): void {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const toolName = request.params.name;
+
+    // Extract workspace path from _meta (GitHub Copilot injects workspace context here)
+    // This is a secondary extraction path — transport.ts does the primary one from HTTP headers.
+    // Having it here ensures it also works when transport-level extraction missed it.
+    extractAndApplyWorkspaceFromMeta((request as any).params?._meta);
+    extractAndApplyWorkspaceFromMeta((request.params as any)._meta);
 
     switch (toolName) {
       case 'search':

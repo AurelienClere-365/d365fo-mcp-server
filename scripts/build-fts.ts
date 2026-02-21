@@ -105,6 +105,10 @@ async function buildFts(): Promise<void> {
   symbolIndex.db.pragma('synchronous = NORMAL');
   console.log('✅ Database converted to WAL mode');
 
+  // Persist ANALYZE stats + optimizer hints into the DB so the production
+  // server can open it instantly without re-running expensive maintenance.
+  symbolIndex.runPostBuildTasks();
+
   const totalDuration = ((Date.now() - totalStart) / 1000).toFixed(1);
   const symbolCount = symbolIndex.getSymbolCount();
   const labelCount = symbolIndex.getLabelCount();
