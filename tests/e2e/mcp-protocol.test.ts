@@ -13,7 +13,6 @@ import { XppSymbolIndex } from '../../src/metadata/symbolIndex';
 import { RedisCacheService } from '../../src/cache/redisCache';
 import { XppMetadataParser } from '../../src/metadata/xmlParser';
 import supertest from 'supertest';
-import fs from 'fs';
 import path from 'path';
 
 describe('MCP Protocol E2E Tests', () => {
@@ -25,17 +24,12 @@ describe('MCP Protocol E2E Tests', () => {
   let hasData = false;
 
   beforeAll(async () => {
-    // Check if test database exists
+    // Use real DB if available, otherwise fall back to an empty in-memory-like DB
+    // so the server still starts and structural tests can run (data tests skip).
     const dbPath = path.join(process.cwd(), 'data', 'xpp-metadata.db');
     const labelsDbPath = path.join(process.cwd(), 'data', 'xpp-metadata-labels.db');
-    
-    if (!fs.existsSync(dbPath)) {
-      throw new Error(
-        `Test database not found at ${dbPath}. Run 'npm run build-database' first.`
-      );
-    }
 
-    // Initialize real components
+    // Initialize real components (XppSymbolIndex creates an empty DB if file doesn't exist)
     symbolIndex = new XppSymbolIndex(dbPath, labelsDbPath);
     const cache = new RedisCacheService(); // Disable Redis for e2e tests
     const parser = new XppMetadataParser();
