@@ -437,13 +437,14 @@ class ProjectFileManager {
   /**
    * Add file reference to Visual Studio project
    * D365FO projects use ABSOLUTE paths to XML files in PackagesLocalDirectory
+   * Returns true if file was added, false if file already exists in project
    */
   async addToProject(
     projectPath: string,
     objectType: string,
     objectName: string,
     absoluteXmlPath: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     console.error(
       `[ProjectFileManager] Adding to project: ${projectPath}, type: ${objectType}, name: ${objectName}`
     );
@@ -526,7 +527,10 @@ class ProjectFileManager {
     );
 
     if (fileExists) {
-      throw new Error(`File ${objectName} is already in the project`);
+      console.error(
+        `[ProjectFileManager] File ${objectName} is already in the project - skipping`
+      );
+      return false; // File already exists in project
     }
 
     // Add file reference
@@ -546,6 +550,7 @@ class ProjectFileManager {
     await fs.writeFile(projectPath, updatedXml, 'utf-8');
 
     console.error(`[ProjectFileManager] Project file saved successfully`);
+    return true; // File successfully added
   }
 
   /**
@@ -923,29 +928,31 @@ export async function handleCreateD365File(
     let projectMessage = '';
     if (args.addToProject) {
       console.error(
-        `[create_d365fo_file] addToProject requested, solutionPath: ${args.solutionPath}, projectPath: ${args.projectPath}`
+        `[create_d365fo_file] addToProject requested, solutionPath: ${solutionPathToUse}, projectPath: ${projectPathToUse}`
       );
 
       // Try to find project file if not explicitly specified
-      let projectPath = args.projectPath;
+      // Use projectPathToUse which includes values from .mcp.json config
+      let projectPath = projectPathToUse;
       
-      if (!projectPath && args.solutionPath) {
+      if (!projectPath && solutionPathToUse) {
         // Try to find project in solution directory
+        // Use solutionPathToUse which includes values from .mcp.json config
         console.error(
-          `[create_d365fo_file] Searching for .rnrproj in solution: ${args.solutionPath}, model: ${args.modelName}`
+          `[create_d365fo_file] Searching for .rnrproj in solution: ${solutionPathToUse}, model: ${actualModelName}`
         );
         const detectedPath = await ProjectFileFinder.findProjectInSolution(
-          args.solutionPath,
-          args.modelName
+          solutionPathToUse,
+          actualModelName
         );
 
         if (!detectedPath) {
           console.error(
             `[create_d365fo_file] No .rnrproj found in solution directory`
           );
-          projectMessage = `\n⚠️ Could not find .rnrproj file for model '${args.modelName}' in solution directory.\n` +
-            `Searched in: ${args.solutionPath}\n` +
-            `Please specify projectPath parameter explicitly.\n`;
+          projectMessage = `\n⚠️ Could not find .rnrproj file for model '${actualModelName}' in solution directory.\n` +
+            `Searched in: ${solutionPathToUse}\n` +
+            `Please specify projectPath parameter explicitly or add it to .mcp.json.\n`;
         } else {
           console.error(
             `[create_d365fo_file] Found project file: ${detectedPath}`
@@ -954,6 +961,7 @@ export async function handleCreateD365File(
         }
       } else if (!projectPath) {
         projectMessage = `\n⚠️ Cannot add to project: either projectPath or solutionPath must be specified.\n` +
+          `Add projectPath or solutionPath to .mcp.json config, or pass as tool arguments.\n` +
           `Tip: GitHub Copilot can provide solutionPath from active VS solution context.\n`;
       }
 
@@ -976,15 +984,20 @@ export async function handleCreateD365File(
 
           // Add to project
           const projectManager = new ProjectFileManager();
-          await projectManager.addToProject(
+          const wasAdded = await projectManager.addToProject(
             projectPath,
             args.objectType,
             args.objectName,
             absoluteXmlPath
           );
 
-          console.error(`[create_d365fo_file] Successfully added to project`);
-          projectMessage = `\n✅ Successfully added to Visual Studio project:\n📋 Project: ${projectPath}\n`;
+          if (wasAdded) {
+            console.error(`[create_d365fo_file] Successfully added to project`);
+            projectMessage = `\n✅ Successfully added to Visual Studio project:\n📋 Project: ${projectPath}\n`;
+          } else {
+            console.error(`[create_d365fo_file] File already exists in project`);
+            projectMessage = `\n✅ File already exists in Visual Studio project:\n📋 Project: ${projectPath}\n`;
+          }
         } catch (projectError) {
           console.error(
             `[create_d365fo_file] Failed to add to project:`,
