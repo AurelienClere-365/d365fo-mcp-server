@@ -1001,38 +1001,9 @@ export async function handleCreateD365File(
           projectPath = detectedPath;
         }
       } else if (!projectPath) {
-        // Last resort: scan well-known VS project directories on Windows
-        const knownDevPaths = [
-          'K:\\VSProjects',
-          'C:\\VSProjects',
-          'D:\\VSProjects',
-          process.env.USERPROFILE ? `${process.env.USERPROFILE}\\VSProjects` : null,
-          process.env.USERPROFILE ? `${process.env.USERPROFILE}\\source\\VSProjects` : null,
-        ].filter(Boolean) as string[];
-
-        console.error(
-          `[create_d365fo_file] No projectPath or solutionPath available — scanning well-known VS project directories`
-        );
-
-        for (const devPath of knownDevPaths) {
-          try {
-            await fs.access(devPath);
-            const found = await ProjectFileFinder.findProjectInSolution(devPath, actualModelName);
-            if (found) {
-              console.error(`[create_d365fo_file] Found .rnrproj in well-known path: ${found}`);
-              projectPath = found;
-              break;
-            }
-          } catch {
-            // Path doesn't exist — skip
-          }
-        }
-
-        if (!projectPath) {
-          projectMessage = `\n⚠️ Cannot add to project: projectPath could not be resolved.\n` +
-            `Add projectPath to .mcp.json config, or pass it as a tool argument.\n` +
-            `Example .mcp.json: { "servers": { "context": { "projectPath": "K:\\\\VSProjects\\\\MySolution\\\\MyModel\\\\MyModel.rnrproj" } } }\n`;
-        }
+        projectMessage = `\n⚠️ Cannot add to project: projectPath could not be resolved.\n` +
+          `Add projectPath to .mcp.json config, or pass it as a tool argument.\n` +
+          `Example .mcp.json: { "servers": { "context": { "projectPath": "K:\\\\VSProjects\\\\MySolution\\\\MyModel\\\\MyModel.rnrproj" } } }\n`;
       }
 
       if (projectPath) {

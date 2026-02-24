@@ -159,29 +159,6 @@ export async function autoDetectD365Project(
     if (envResult) return envResult;
   }
 
-  // Priority 3.5: Common D365FO Visual Studio project directories on Windows
-  // The MCP server's process.cwd() is the server directory, not the VS project —
-  // so we probe well-known locations where developers typically keep VS solutions.
-  const knownDevPaths = [
-    'K:\\VSProjects',
-    'C:\\VSProjects',
-    'D:\\VSProjects',
-    path.join(process.env.USERPROFILE || '', 'VSProjects'),
-    path.join(process.env.USERPROFILE || '', 'source', 'VSProjects'),
-  ].filter(Boolean);
-
-  for (const devPath of knownDevPaths) {
-    try {
-      // Quick existence check before scanning to avoid ENOENT noise
-      await fs.access(devPath);
-      console.error(`[WorkspaceDetector] Scanning known dev path: ${devPath}`);
-      const devResult = await detectD365Project(devPath, 4);
-      if (devResult) return devResult;
-    } catch {
-      // Path doesn't exist — skip silently
-    }
-  }
-
   // Priority 4: Extract model name directly from a PackagesLocalDirectory path
   // e.g. K:\AOSService\PackagesLocalDirectory\AslEnhancedDataSharing → modelName: "AslEnhancedDataSharing"
   if (explicitWorkspacePath) {
