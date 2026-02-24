@@ -47,14 +47,14 @@ export async function handleSuggestEdt(
 
   // Strategy 1: Exact match on EDT name
   const exactMatch = db.prepare(`
-    SELECT name, extends, enumType, referenceTable, label
+    SELECT edt_name, extends, enum_type, reference_table, label
     FROM edt_metadata
-    WHERE name = ?
+    WHERE edt_name = ?
     LIMIT 1
-  `).get(fieldName) as { name: string; extends: string; enumType: string; referenceTable: string; label: string } | undefined;
+  `).get(fieldName) as { edt_name: string; extends: string; enum_type: string; reference_table: string; label: string } | undefined;
 
   if (exactMatch) {
-    console.log(`[suggestEdt] Found exact EDT match: ${exactMatch.name}`);
+    console.log(`[suggestEdt] Found exact EDT match: ${exactMatch.edt_name}`);
     return {
       content: [
         {
@@ -63,12 +63,12 @@ export async function handleSuggestEdt(
             fieldName,
             suggestions: [
               {
-                edt: exactMatch.name,
+                edt: exactMatch.edt_name,
                 confidence: 1.0,
                 reason: 'Exact match on EDT name',
                 extends: exactMatch.extends,
-                enumType: exactMatch.enumType,
-                referenceTable: exactMatch.referenceTable,
+                enumType: exactMatch.enum_type,
+                referenceTable: exactMatch.reference_table,
                 label: exactMatch.label,
               },
             ],
@@ -80,12 +80,12 @@ export async function handleSuggestEdt(
 
   // Strategy 2: Fuzzy match on EDT name (case-insensitive, substring)
   const fuzzyMatches = db.prepare(`
-    SELECT name, extends, enumType, referenceTable, label
+    SELECT edt_name, extends, enum_type, reference_table, label
     FROM edt_metadata
-    WHERE name LIKE ? OR name LIKE ?
-    ORDER BY LENGTH(name) ASC
+    WHERE edt_name LIKE ? OR edt_name LIKE ?
+    ORDER BY LENGTH(edt_name) ASC
     LIMIT ?
-  `).all(`%${fieldName}%`, `%${fieldName.toLowerCase()}%`, limit * 2) as Array<{ name: string; extends: string; enumType: string; referenceTable: string; label: string }>;
+  `).all(`%${fieldName}%`, `%${fieldName.toLowerCase()}%`, limit * 2) as Array<{ edt_name: string; extends: string; enum_type: string; reference_table: string; label: string }>;
 
   console.log(`[suggestEdt] Found ${fuzzyMatches.length} fuzzy matches`);
 
@@ -98,17 +98,17 @@ export async function handleSuggestEdt(
 
   // Add fuzzy matches with confidence score
   for (const match of fuzzyMatches) {
-    if (seen.has(match.name)) continue;
-    seen.add(match.name);
+    if (seen.has(match.edt_name)) continue;
+    seen.add(match.edt_name);
 
-    const confidence = calculateConfidence(fieldName, match.name, context);
+    const confidence = calculateConfidence(fieldName, match.edt_name, context);
     suggestions.push({
-      edt: match.name,
+      edt: match.edt_name,
       confidence,
       reason: `Fuzzy match (similarity: ${Math.round(confidence * 100)}%)`,
       extends: match.extends,
-      enumType: match.enumType,
-      referenceTable: match.referenceTable,
+      enumType: match.enum_type,
+      referenceTable: match.reference_table,
       label: match.label,
     });
   }
@@ -120,11 +120,11 @@ export async function handleSuggestEdt(
 
     // Check if EDT exists
     const edtExists = db.prepare(`
-      SELECT name, extends, enumType, referenceTable, label
+      SELECT edt_name, extends, enum_type, reference_table, label
       FROM edt_metadata
-      WHERE name = ?
+      WHERE edt_name = ?
       LIMIT 1
-    `).get(heuristic.edt) as { name: string; extends: string; enumType: string; referenceTable: string; label: string } | undefined;
+    `).get(heuristic.edt) as { edt_name: string; extends: string; enum_type: string; reference_table: string; label: string } | undefined;
 
     if (edtExists) {
       suggestions.push({
@@ -132,8 +132,8 @@ export async function handleSuggestEdt(
         confidence: heuristic.confidence,
         reason: heuristic.reason,
         extends: edtExists.extends,
-        enumType: edtExists.enumType,
-        referenceTable: edtExists.referenceTable,
+        enumType: edtExists.enum_type,
+        referenceTable: edtExists.reference_table,
         label: edtExists.label,
       });
     }
