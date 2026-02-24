@@ -18,10 +18,8 @@ describe('ConfigManager - UDE support', () => {
     expect(typeof getConfigManager).toBe('function');
   });
 
-  it('should return explicit CUSTOM_PACKAGES_PATH from env', () => {
-    process.env.CUSTOM_PACKAGES_PATH = 'C:\\MyCustom';
-    process.env.MICROSOFT_PACKAGES_PATH = 'C:\\MyMicrosoft';
-    expect(process.env.CUSTOM_PACKAGES_PATH).toBe('C:\\MyCustom');
-    expect(process.env.MICROSOFT_PACKAGES_PATH).toBe('C:\\MyMicrosoft');
+  it('should support XPP_CONFIG_NAME env var', () => {
+    process.env.XPP_CONFIG_NAME = 'contoso-dev-env1___10.0.2428.63';
+    expect(process.env.XPP_CONFIG_NAME).toBe('contoso-dev-env1___10.0.2428.63');
   });
 });

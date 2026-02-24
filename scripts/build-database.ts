@@ -15,6 +15,7 @@ const __dirname = path.dirname(__filename);
 
 import { isCustomModel, isStandardModel, getCustomModels } from '../src/utils/modelClassifier.js';
 import { indexAllLabels } from '../src/metadata/labelParser.js';
+import { XppConfigProvider } from '../src/utils/xppConfigProvider.js';
 
 const INPUT_PATH = process.env.METADATA_PATH || './extracted-metadata';
 const OUTPUT_DB = process.env.DB_PATH || './data/xpp-metadata.db';
@@ -24,9 +25,6 @@ const CUSTOM_MODELS = getCustomModels();
 const FORCE_VACUUM = process.env.VACUUM === 'true';
 // Labels are indexed from PackagesLocalDirectory directly (not from extracted-metadata)
 const PACKAGES_PATH = process.env.PACKAGES_PATH || 'K:\\AosService\\PackagesLocalDirectory';
-// UDE (Unified Developer Experience) uses two separate package roots
-const CUSTOM_PACKAGES_PATH = process.env.CUSTOM_PACKAGES_PATH || '';
-const MICROSOFT_PACKAGES_PATH = process.env.MICROSOFT_PACKAGES_PATH || '';
 const INCLUDE_LABELS = process.env.INCLUDE_LABELS !== 'false'; // default: true
 // Two-phase CI build: Phase 1 indexes symbols only (SKIP_FTS=true), Phase 2 runs build-fts
 const SKIP_FTS = process.env.SKIP_FTS === 'true';
@@ -172,12 +170,21 @@ async function buildDatabase() {
     console.log('\n⏭️  Skipping label indexing (SKIP_FTS=true) — will be indexed by build-fts step');
   } else if (INCLUDE_LABELS) {
     // Build list of package root paths to scan for labels.
-    // UDE environments set CUSTOM_PACKAGES_PATH and MICROSOFT_PACKAGES_PATH instead of PACKAGES_PATH.
+    // Priority: XPP config auto-detection > PACKAGES_PATH fallback
     const labelRootPaths: string[] = [];
-    if (CUSTOM_PACKAGES_PATH || MICROSOFT_PACKAGES_PATH) {
-      if (CUSTOM_PACKAGES_PATH) labelRootPaths.push(CUSTOM_PACKAGES_PATH);
-      if (MICROSOFT_PACKAGES_PATH) labelRootPaths.push(MICROSOFT_PACKAGES_PATH);
-    } else {
+    const devEnvType = process.env.DEV_ENVIRONMENT_TYPE || 'auto';
+    if (devEnvType !== 'traditional') {
+      const xppProvider = new XppConfigProvider();
+      const configName = process.env.XPP_CONFIG_NAME || undefined;
+      const xppConfig = await xppProvider.getActiveConfig(configName);
+      if (xppConfig) {
+        console.log(`   [UDE] XPP config: ${xppConfig.configName} v${xppConfig.version}`);
+        labelRootPaths.push(xppConfig.customPackagesPath);
+        labelRootPaths.push(xppConfig.microsoftPackagesPath);
+      }
+    }
+    // Fallback: traditional single path
+    if (labelRootPaths.length === 0) {
       labelRootPaths.push(PACKAGES_PATH);
     }
 
@@ -197,7 +204,7 @@ async function buildDatabase() {
 
     if (validRoots.length === 0) {
       console.log(`   ⚠️  No valid package roots found — skipping labels.`);
-      console.log(`   ℹ️  Set PACKAGES_PATH (or CUSTOM_PACKAGES_PATH / MICROSOFT_PACKAGES_PATH) env var, or INCLUDE_LABELS=false to suppress this message.`);
+      console.log(`   ℹ️  Set PACKAGES_PATH env var (or configure XPP_CONFIG_NAME for UDE), or INCLUDE_LABELS=false to suppress this message.`);
     } else {
       const labelStart = Date.now();
 

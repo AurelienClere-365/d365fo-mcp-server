@@ -54,37 +54,26 @@ copy .env.example .env
 Key settings in `.env`:
 
 ```env
-# Path to your D365FO packages (traditional on-prem setup)
+# Environment type: auto (default), traditional, ude
+DEV_ENVIRONMENT_TYPE=auto
+
+# --- Traditional (on-prem VM) ---
 PACKAGES_PATH=C:/AosService/PackagesLocalDirectory
-
-# Your custom model names (comma-separated)
 CUSTOM_MODELS=YourModel1,YourModel2
-EXTENSION_PREFIX=YourCompanyPrefix
-
-# Where to store the databases (dual-database architecture)
-DB_PATH=./data/xpp-metadata.db                 # Symbols database (~1-1.5 GB)
-LABELS_DB_PATH=./data/xpp-metadata-labels.db   # Labels database (~500 MB for 4 languages, up to 8 GB for all 70)
-
-# Languages to index from AxLabelFile (reduces labels DB size)
-# Default: en-US,cs,sk,de (4 languages)
-# Use 'all' for all 70+ languages (database will be 8+ GB)
-LABEL_LANGUAGES=en-US,cs,sk,de
 
 # --- UDE (Unified Developer Experience) ---
-# Set these if you use Power Platform Tools in VS2022 instead of a traditional on-prem VM.
-# When auto, the server reads XPP config files from %LOCALAPPDATA%\Microsoft\Dynamics365\XPPConfig\
-# DEV_ENVIRONMENT_TYPE=auto
-# XPP_CONFIG_NAME=                              # Leave empty to auto-select newest config
-# CUSTOM_PACKAGES_PATH=C:/CustomXppCode         # Override custom X++ root
-# MICROSOFT_PACKAGES_PATH=C:/Users/.../Dynamics365/10.0.2428.63/PackagesLocalDirectory
-# Tip: run  npm run select-config  to pick from available XPP configs interactively
+# Leave XPP_CONFIG_NAME empty to auto-select newest config
+# Tip: run  npm run select-config  to pick interactively
+# XPP_CONFIG_NAME=
 
-# Azure Blob Storage (only needed for cloud sync)
-AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
-BLOB_CONTAINER_NAME=xpp-metadata
+# --- Database ---
+DB_PATH=./data/xpp-metadata.db                 # Symbols (~1-1.5 GB)
+LABELS_DB_PATH=./data/xpp-metadata-labels.db   # Labels (~500 MB for 4 languages)
+LABEL_LANGUAGES=en-US,cs,sk,de                 # Reduce with fewer languages
 
-# Redis (optional — leave disabled for local use)
-REDIS_ENABLED=false
+# --- Cloud (optional) ---
+# AZURE_STORAGE_CONNECTION_STRING=...
+# REDIS_ENABLED=false
 ```
 
 ### 3. Extract Metadata
@@ -296,9 +285,10 @@ npm rebuild better-sqlite3
 ```
 
 ### No metadata found after extraction
-- Check that `PACKAGES_PATH` points to a directory containing XML model files
-- Check that your model names in `CUSTOM_MODELS` match the actual folder names exactly
-- Verify file permissions on PackagesLocalDirectory
+
+- **Traditional:** Check that `PACKAGES_PATH` points to a directory containing XML model files and that `CUSTOM_MODELS` matches the actual folder names exactly
+- **UDE:** Run `npm run select-config` to verify the correct XPP config is active and that the custom/Microsoft package paths exist
+- Verify file permissions on the packages directory
 
 ### Slow response times on Azure
 1. Enable Redis: set `REDIS_ENABLED=true` and configure `REDIS_URL`

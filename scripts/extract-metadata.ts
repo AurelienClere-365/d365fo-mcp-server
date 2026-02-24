@@ -10,6 +10,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { XppMetadataParser } from '../src/metadata/xmlParser.js';
 import { isCustomModel as checkIsCustomModel, getCustomModels } from '../src/utils/modelClassifier.js';
+import { XppConfigProvider } from '../src/utils/xppConfigProvider.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,8 +18,6 @@ const __dirname = path.dirname(__filename);
 const PACKAGES_PATH = process.env.PACKAGES_PATH || 'C:\\AOSService\\PackagesLocalDirectory';
 const OUTPUT_PATH = process.env.METADATA_PATH || './extracted-metadata';
 const CUSTOM_MODELS_PATH = process.env.CUSTOM_MODELS_PATH; // Optional: separate path for custom extensions
-const CUSTOM_PACKAGES_PATH = process.env.CUSTOM_PACKAGES_PATH;
-const MICROSOFT_PACKAGES_PATH = process.env.MICROSOFT_PACKAGES_PATH;
 
 // Custom models defined in .env - these are YOUR extensions
 const CUSTOM_MODELS = getCustomModels();
@@ -133,15 +132,24 @@ async function extractMetadata() {
   console.log('🔍 X++ Metadata Extraction');
 
   // Build list of metadata root paths to scan
+  // Priority: XPP config auto-detection > PACKAGES_PATH fallback
   const metadataRoots: string[] = [];
-  if (CUSTOM_PACKAGES_PATH) {
-    metadataRoots.push(CUSTOM_PACKAGES_PATH);
-    console.log(`[UDE] Custom packages path: ${CUSTOM_PACKAGES_PATH}`);
+  let customRoot: string | null = null; // UDE: path whose models are all "custom"
+  const devEnvType = process.env.DEV_ENVIRONMENT_TYPE || 'auto';
+  if (devEnvType !== 'traditional') {
+    const xppProvider = new XppConfigProvider();
+    const configName = process.env.XPP_CONFIG_NAME || undefined;
+    const xppConfig = await xppProvider.getActiveConfig(configName);
+    if (xppConfig) {
+      console.log(`[UDE] XPP config: ${xppConfig.configName} v${xppConfig.version}`);
+      customRoot = xppConfig.customPackagesPath;
+      metadataRoots.push(xppConfig.customPackagesPath);
+      console.log(`[UDE] Custom packages path: ${xppConfig.customPackagesPath}`);
+      metadataRoots.push(xppConfig.microsoftPackagesPath);
+      console.log(`[UDE] Microsoft packages path: ${xppConfig.microsoftPackagesPath}`);
+    }
   }
-  if (MICROSOFT_PACKAGES_PATH) {
-    metadataRoots.push(MICROSOFT_PACKAGES_PATH);
-    console.log(`[UDE] Microsoft packages path: ${MICROSOFT_PACKAGES_PATH}`);
-  }
+  // Fallback: traditional single path
   if (metadataRoots.length === 0) {
     metadataRoots.push(PACKAGES_PATH);
   }
@@ -254,11 +262,21 @@ async function extractMetadata() {
       totalAllPackageNames += allPackageNames.length;
 
       // Apply filtering based on mode
+      // In UDE mode, use path-based detection: customRoot = custom, everything else = standard
+      // Falls back to CUSTOM_MODELS / EXTENSION_PREFIX for traditional environments
       let filteredPackages: string[];
       if (FILTER_MODE === 'custom-only') {
-        filteredPackages = allPackageNames.filter(pkg => isCustomModel(pkg));
+        if (customRoot) {
+          filteredPackages = root === customRoot ? allPackageNames : [];
+        } else {
+          filteredPackages = allPackageNames.filter(pkg => isCustomModel(pkg));
+        }
       } else if (FILTER_MODE === 'standard-only') {
-        filteredPackages = allPackageNames.filter(pkg => !isCustomModel(pkg));
+        if (customRoot) {
+          filteredPackages = root === customRoot ? [] : allPackageNames;
+        } else {
+          filteredPackages = allPackageNames.filter(pkg => !isCustomModel(pkg));
+        }
       } else {
         filteredPackages = allPackageNames;
       }

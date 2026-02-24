@@ -333,12 +333,10 @@ class ConfigManager {
    * Get the custom packages path (UDE: ModelStoreFolder).
    */
   async getCustomPackagesPath(): Promise<string | null> {
-    // Priority 1: Explicit env var
-    if (process.env.CUSTOM_PACKAGES_PATH) return process.env.CUSTOM_PACKAGES_PATH;
-    // Priority 2: .mcp.json context
+    // Priority 1: .mcp.json context
     const ctx = this.getContext();
     if (ctx?.customPackagesPath) return ctx.customPackagesPath;
-    // Priority 3: XPP config
+    // Priority 2: XPP config auto-detection
     await this.ensureXppConfig();
     return this.xppConfig?.customPackagesPath || null;
   }
@@ -347,12 +345,10 @@ class ConfigManager {
    * Get the Microsoft packages path (UDE: FrameworkDirectory).
    */
   async getMicrosoftPackagesPath(): Promise<string | null> {
-    // Priority 1: Explicit env var
-    if (process.env.MICROSOFT_PACKAGES_PATH) return process.env.MICROSOFT_PACKAGES_PATH;
-    // Priority 2: .mcp.json context
+    // Priority 1: .mcp.json context
     const ctx = this.getContext();
     if (ctx?.microsoftPackagesPath) return ctx.microsoftPackagesPath;
-    // Priority 3: XPP config
+    // Priority 2: XPP config auto-detection
     await this.ensureXppConfig();
     return this.xppConfig?.microsoftPackagesPath || null;
   }

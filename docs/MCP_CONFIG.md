@@ -115,10 +115,9 @@ When the server needs to create a file, it resolves the target path in this orde
 
 **UDE mode:**
 
-1. **`.env` overrides** — `CUSTOM_PACKAGES_PATH` / `MICROSOFT_PACKAGES_PATH`
-2. **`.mcp.json` context** — `customPackagesPath` / `microsoftPackagesPath`
-3. **XPP config auto-detection** — reads `ModelStoreFolder` and `FrameworkDirectory` from the newest config file in `%LOCALAPPDATA%\Microsoft\Dynamics365\XPPConfig\`
-4. **Fallback** — existing `PACKAGES_PATH` env var or `packagePath` from `.mcp.json`
+1. **`.mcp.json` context** — `customPackagesPath` / `microsoftPackagesPath`
+2. **XPP config auto-detection** — reads `ModelStoreFolder` and `FrameworkDirectory` from the config file selected by `XPP_CONFIG_NAME` (or the newest) in `%LOCALAPPDATA%\Microsoft\Dynamics365\XPPConfig\`
+3. **Fallback** — existing `PACKAGES_PATH` env var or `packagePath` from `.mcp.json`
 
 In D365FO, a package can contain multiple models (e.g., package "CustomExtensions" may contain
 models "Contoso Utilities" and "Contoso Reporting"). When the package name differs from the model
