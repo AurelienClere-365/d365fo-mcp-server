@@ -251,9 +251,20 @@ function extractDataSourceFields(fieldsNode: any): string[] {
 function extractControls(designNode: any): FormControl[] {
   const controls: FormControl[] = [];
 
-  // Controls live under Design > Controls > AxFormControl[]
-  if (designNode.Controls && designNode.Controls[0] && designNode.Controls[0].AxFormControl) {
-    for (const node of designNode.Controls[0].AxFormControl) {
+  // Design XML can be structured as:
+  // 1. Design > AxFormDesign > Controls > AxFormControl[]
+  // 2. Design > Controls > AxFormControl[] (older format)
+  
+  // Try AxFormDesign wrapper first (newer format)
+  let controlsNode = null;
+  if (designNode.AxFormDesign && designNode.AxFormDesign[0]) {
+    controlsNode = designNode.AxFormDesign[0].Controls;
+  } else if (designNode.Controls) {
+    controlsNode = designNode.Controls;
+  }
+  
+  if (controlsNode && controlsNode[0] && controlsNode[0].AxFormControl) {
+    for (const node of controlsNode[0].AxFormControl) {
       const control = extractControl(node);
       if (control) {
         controls.push(control);

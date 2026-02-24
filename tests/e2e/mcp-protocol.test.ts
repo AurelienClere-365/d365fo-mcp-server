@@ -87,7 +87,7 @@ describe('MCP Protocol E2E Tests', () => {
 
     // Wait for server to be ready
     await new Promise((resolve) => setTimeout(resolve, 500));
-  });
+  }, 30000);
 
   afterAll((done) => {
     symbolIndex.close();

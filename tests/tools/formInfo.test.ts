@@ -54,31 +54,40 @@ describe('get_form_info tool', () => {
 \t<Design>
 \t\t<AxFormDesign>
 \t\t\t<Name>Design</Name>
-\t\t\t<AxFormGroupControl>
-\t\t\t\t<Name>MainGroup</Name>
-\t\t\t\t<AxFormButtonControl>
-\t\t\t\t\t<Name>SaveButton</Name>
-\t\t\t\t\t<Caption>Save</Caption>
-\t\t\t\t\t<Enabled>Yes</Enabled>
-\t\t\t\t</AxFormButtonControl>
-\t\t\t\t<AxFormStringControl>
-\t\t\t\t\t<Name>AccountNum</Name>
-\t\t\t\t\t<DataSource>CustTable</DataSource>
-\t\t\t\t\t<DataField>AccountNum</DataField>
-\t\t\t\t</AxFormStringControl>
-\t\t\t</AxFormGroupControl>
+\t\t\t<Controls>
+\t\t\t\t<AxFormControl>
+\t\t\t\t\t<Name>MainGroup</Name>
+\t\t\t\t\t<Type>Group</Type>
+\t\t\t\t\t<Controls>
+\t\t\t\t\t\t<AxFormControl>
+\t\t\t\t\t\t\t<Name>SaveButton</Name>
+\t\t\t\t\t\t\t<Type>ButtonControl</Type>
+\t\t\t\t\t\t\t<Caption>Save</Caption>
+\t\t\t\t\t\t\t<Enabled>Yes</Enabled>
+\t\t\t\t\t\t</AxFormControl>
+\t\t\t\t\t\t<AxFormControl>
+\t\t\t\t\t\t\t<Name>AccountNum</Name>
+\t\t\t\t\t\t\t<Type>StringControl</Type>
+\t\t\t\t\t\t\t<DataSource>CustTable</DataSource>
+\t\t\t\t\t\t\t<DataField>AccountNum</DataField>
+\t\t\t\t\t\t</AxFormControl>
+\t\t\t\t\t</Controls>
+\t\t\t\t</AxFormControl>
+\t\t\t</Controls>
 \t\t</AxFormDesign>
 \t</Design>
-\t<Methods>
-\t\t<Method>
-\t\t\t<Name>init</Name>
-\t\t\t<Source>public void init()</Source>
-\t\t</Method>
-\t\t<Method>
-\t\t\t<Name>run</Name>
-\t\t\t<Source>public void run()</Source>
-\t\t</Method>
-\t</Methods>
+\t<SourceCode>
+\t\t<Methods>
+\t\t\t<Method>
+\t\t\t\t<Name>init</Name>
+\t\t\t\t<Source>public void init()</Source>
+\t\t\t</Method>
+\t\t\t<Method>
+\t\t\t\t<Name>run</Name>
+\t\t\t\t<Source>public void run()</Source>
+\t\t\t</Method>
+\t\t</Methods>
+\t</SourceCode>
 </AxForm>`;
 
     await fs.writeFile(tempFormFile, formXml, 'utf-8');

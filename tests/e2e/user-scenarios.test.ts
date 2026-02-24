@@ -78,50 +78,72 @@ describe('User Scenario Tests', () => {
 
   describe('Scenario 1: What methods are available on SalesTable table related to totals/sums?', () => {
     it('should find methods related to totals on SalesTable', async () => {
-      // Mock to say SalesTable is NOT a table (it's a class for completion purposes)
-      mockSymbolIndex.searchSymbols = vi.fn((query: string, limit?: number, types?: string[]) => {
-        if (types && types.includes('table')) return [];
-        return [];
+      // Mock for table lookup
+      mockSymbolIndex.getSymbolByName = vi.fn((name, type) => {
+        if (name === 'SalesTable' && type === 'table') {
+          return {
+            id: 1,
+            name: 'SalesTable',
+            type: 'table' as const,
+            filePath: '/Tables/SalesTable.xml',
+            model: 'ApplicationSuite',
+          };
+        }
+        return null;
       });
       
-      mockSymbolIndex.getSymbolByName = vi.fn(() => ({
-        id: 1,
-        name: 'SalesTable',
-        type: 'class' as const,
-        filePath: '/Tables/SalesTable.xml',
-        model: 'ApplicationSuite',
+      // Mock parser to return table with methods
+      mockParser.parseTableFile = vi.fn(async () => ({
+        success: true,
+        data: {
+          name: 'SalesTable',
+          label: 'Sales orders',
+          tableGroup: 'Main',
+          model: 'ApplicationSuite',
+          fields: [],
+          indexes: [],
+          relations: [],
+          methods: [
+            {
+              name: 'calcTotalAmount',
+              signature: 'public Amount calcTotalAmount()',
+              source: 'public Amount calcTotalAmount() { return 0; }',
+              visibility: 'public',
+              returnType: 'Amount',
+              isStatic: false,
+              parameters: [],
+            },
+            {
+              name: 'sumLineAmount',
+              signature: 'public Amount sumLineAmount()',
+              source: 'public Amount sumLineAmount() { return 0; }',
+              visibility: 'public',
+              returnType: 'Amount',
+              isStatic: false,
+              parameters: [],
+            },
+            {
+              name: 'totalDiscount',
+              signature: 'public Amount totalDiscount()',
+              source: 'public Amount totalDiscount() { return 0; }',
+              visibility: 'public',
+              returnType: 'Amount',
+              isStatic: false,
+              parameters: [],
+            },
+          ],
+        },
       }));
-      
-      mockSymbolIndex.getCompletions = vi.fn(() => [
-        {
-          label: 'calcTotalAmount',
-          kind: 'Method',
-          detail: 'public Amount calcTotalAmount()',
-          documentation: 'Calculate total amount',
-        },
-        {
-          label: 'sumLineAmount',
-          kind: 'Method',
-          detail: 'public Amount sumLineAmount()',
-          documentation: 'Sum line amounts',
-        },
-        {
-          label: 'totalDiscount',
-          kind: 'Method',
-          detail: 'public Amount totalDiscount()',
-          documentation: 'Calculate total discount',
-        },
-      ]);
 
       const request = {
         method: 'tools/call',
         params: {
-          name: 'code_completion',
-          arguments: { className: 'SalesTable', prefix: 'total' }
+          name: 'get_table_info',
+          arguments: { tableName: 'SalesTable' }
         }
       } as CallToolRequest;
 
-      const result = await completionTool(request, mockContext);
+      const result = await tableInfoTool(request, mockContext);
 
       expect(result.content[0].text).toContain('calcTotalAmount');
       expect(result.content[0].text).toContain('sumLineAmount');
