@@ -1064,6 +1064,223 @@ Examples:
             required: ['labelId', 'labelFileId', 'model', 'translations'],
           },
         },
+        {
+          name: 'get_table_patterns',
+          description: `📊 Analyze common field types, index patterns, and relation structures for D365FO tables.
+
+Helps understand table design patterns before creating new tables. Use tableGroup to analyze patterns in standard table groups (Main, Transaction, Parameter, etc.) or similarTo to find tables with similar structure.
+
+Examples:
+- get_table_patterns(tableGroup="Transaction") → Analyze common fields/indexes in transaction tables
+- get_table_patterns(similarTo="CustTable") → Find tables with similar structure to CustTable`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              tableGroup: {
+                type: 'string',
+                enum: ['Main', 'Transaction', 'Parameter', 'Group', 'Reference', 'Miscellaneous', 'WorksheetHeader', 'WorksheetLine'],
+                description: 'Table group type to analyze (choose one)',
+              },
+              similarTo: {
+                type: 'string',
+                description: 'Name of table to find similar patterns (alternative to tableGroup)',
+              },
+              limit: {
+                type: 'number',
+                description: 'Maximum number of pattern examples (default: 10)',
+                default: 10,
+              },
+            },
+          },
+        },
+        {
+          name: 'get_form_patterns',
+          description: `📋 Analyze common datasource configurations, control hierarchies, and D365FO form patterns.
+
+Helps understand form design patterns before creating new forms. Use formPattern to analyze D365FO standard patterns, dataSource to find forms using a specific table, or similarTo for specific form analysis.
+
+Examples:
+- get_form_patterns(formPattern="SimpleList") → Analyze SimpleList pattern forms
+- get_form_patterns(dataSource="CustTable") → Find all forms using CustTable
+- get_form_patterns(similarTo="CustTableListPage") → Find forms similar to CustTableListPage`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              formPattern: {
+                type: 'string',
+                enum: ['DetailsTransaction', 'ListPage', 'SimpleList', 'SimpleListDetails', 'Dialog', 'DropDialog', 'FormPart', 'Lookup'],
+                description: 'D365FO form pattern to analyze',
+              },
+              dataSource: {
+                type: 'string',
+                description: 'Table name - find forms using this table',
+              },
+              similarTo: {
+                type: 'string',
+                description: 'Form name to find similar patterns',
+              },
+              limit: {
+                type: 'number',
+                description: 'Maximum number of pattern examples (default: 10)',
+                default: 10,
+              },
+            },
+          },
+        },
+        {
+          name: 'suggest_edt',
+          description: `🔍 Suggest Extended Data Types (EDT) for a field name using fuzzy matching and pattern analysis.
+
+Analyzes indexed EDT metadata to recommend appropriate Extended Data Types based on field name patterns and optional context. Returns confidence-ranked suggestions with EDT properties (base type, enum, reference table, label).
+
+Use BEFORE creating table fields to ensure you reuse existing EDTs instead of primitive types.
+
+Examples:
+- suggest_edt(fieldName="CustomerAccount") → Suggests CustAccount EDT
+- suggest_edt(fieldName="OrderAmount", context="sales order") → Suggests AmountCur, SalesAmountCur, etc.
+- suggest_edt(fieldName="TransDate") → Suggests TransDate EDT`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              fieldName: {
+                type: 'string',
+                description: 'Field name to suggest EDT for (e.g., "CustomerAccount", "OrderAmount")',
+              },
+              context: {
+                type: 'string',
+                description: 'Optional context (e.g., "sales order") to improve suggestions',
+              },
+              limit: {
+                type: 'number',
+                description: 'Maximum number of suggestions (default: 5)',
+                default: 5,
+              },
+            },
+            required: ['fieldName'],
+          },
+        },
+        {
+          name: 'generate_smart_table',
+          description: `🎨 AI-driven table generation with intelligent field/index/relation suggestions.
+
+Generates AxTable XML using pattern analysis from indexed metadata. Supports multiple strategies:
+1. Copy structure from existing table (copyFrom parameter)
+2. Analyze table group patterns and generate common fields (tableGroup + generateCommonFields)
+3. Use field hints and suggest EDTs (fieldsHint parameter)
+4. Combine all strategies for comprehensive generation
+
+Returns complete XML ready for create_d365fo_file or manual save.
+
+Examples:
+- generate_smart_table(name="MyOrderTable", tableGroup="Transaction", generateCommonFields=true)
+- generate_smart_table(name="MyTable", copyFrom="CustTable")
+- generate_smart_table(name="MyTable", fieldsHint="RecId, Name, Amount")`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'Table name (e.g., "MyCustomTable")',
+              },
+              label: {
+                type: 'string',
+                description: 'Optional label for the table',
+              },
+              tableGroup: {
+                type: 'string',
+                description: 'Table group (Main, Transaction, Parameter, etc.)',
+              },
+              copyFrom: {
+                type: 'string',
+                description: 'Optional: Copy structure from existing table name',
+              },
+              fieldsHint: {
+                type: 'string',
+                description: 'Optional: Comma-separated field hints (e.g., "RecId, Name, Amount")',
+              },
+              generateCommonFields: {
+                type: 'boolean',
+                description: 'If true, auto-generate common fields based on table group patterns',
+              },
+              modelName: {
+                type: 'string',
+                description: 'Model name (auto-detected from projectPath)',
+              },
+              projectPath: {
+                type: 'string',
+                description: 'Path to .rnrproj file for model extraction',
+              },
+              solutionPath: {
+                type: 'string',
+                description: 'Path to solution directory (alternative to projectPath)',
+              },
+            },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'generate_smart_form',
+          description: `🎨 AI-driven form generation with intelligent datasource/control suggestions.
+
+Generates AxForm XML using pattern analysis from indexed metadata. Supports multiple strategies:
+1. Copy structure from existing form (copyFrom parameter)
+2. Auto-generate datasource and grid from table (dataSource + generateControls)
+3. Analyze form pattern and apply structure (formPattern parameter)
+4. Combine strategies for comprehensive generation
+
+Returns complete XML ready for create_d365fo_file or manual save.
+
+Examples:
+- generate_smart_form(name="MyOrderForm", dataSource="MyOrderTable", generateControls=true)
+- generate_smart_form(name="MyForm", copyFrom="CustTableListPage")
+- generate_smart_form(name="MyForm", formPattern="SimpleList", dataSource="MyTable")`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'Form name (e.g., "MyCustomForm")',
+              },
+              label: {
+                type: 'string',
+                description: 'Optional label for the form',
+              },
+              caption: {
+                type: 'string',
+                description: 'Optional caption/title',
+              },
+              dataSource: {
+                type: 'string',
+                description: 'Optional: Table name for primary datasource',
+              },
+              formPattern: {
+                type: 'string',
+                description: 'Optional: Form pattern (SimpleList, DetailsTransaction, etc.)',
+              },
+              copyFrom: {
+                type: 'string',
+                description: 'Optional: Copy structure from existing form name',
+              },
+              generateControls: {
+                type: 'boolean',
+                description: 'If true, auto-generate grid controls for datasource',
+              },
+              modelName: {
+                type: 'string',
+                description: 'Model name (auto-detected from projectPath)',
+              },
+              projectPath: {
+                type: 'string',
+                description: 'Path to .rnrproj file for model extraction',
+              },
+              solutionPath: {
+                type: 'string',
+                description: 'Path to solution directory (alternative to projectPath)',
+              },
+            },
+            required: ['name'],
+          },
+        },
       ],
     };
   });

@@ -261,7 +261,7 @@ async function main() {
     const transport = new StdioServerTransport();
     await mcpServer.connect(transport);
     console.log('✅ Stdio transport connected');
-    console.log('🎯 Registered 24 X++ MCP tools (8 discovery + 3 labels + 5 object-info + 4 intelligent + 3 file-ops + 1 analysis)');
+    console.log('🎯 Registered 29 X++ MCP tools (8 discovery + 3 labels + 5 object-info + 4 intelligent + 3 smart-generation + 3 file-ops + 3 pattern-analysis)');
     serverState.isReady = true;
     serverState.isHealthy = true;
     serverState.statusMessage = 'Ready';
@@ -322,7 +322,7 @@ async function main() {
         console.log('✅ Server is READY!');
         console.log(`📡 MCP endpoint: http://localhost:${PORT}/mcp`);
         console.log('');
-        console.log('🎯 Available tools (24 total):');
+        console.log('🎯 Available tools (29 total):');
         console.log('   🔍 Search & Discovery (8):');
         console.log('   - search              Search 584K+ D365FO symbols by name or keyword');
         console.log('   - batch_search        Execute multiple searches in parallel (3x faster)');
@@ -351,13 +351,20 @@ async function main() {
         console.log('   - analyze_class_completeness    Find missing standard methods on a class');
         console.log('   - get_api_usage_patterns        Show how an API is initialized and called');
         console.log('');
+        console.log('   🎨 Smart Object Generation (3):');
+        console.log('   - generate_smart_table  AI-driven table generation with pattern analysis');
+        console.log('   - generate_smart_form   AI-driven form generation with pattern analysis');
+        console.log('   - suggest_edt           Suggest EDT for field name using fuzzy matching');
+        console.log('');
         console.log('   📝 File & Metadata Operations (3):');
         console.log('   - generate_d365fo_xml  Generate D365FO XML content (preview / cloud-ready)');
         console.log('   - create_d365fo_file   Create D365FO file in correct AOT location (Windows)');
         console.log('   - modify_d365fo_file   Safely edit D365FO XML with backup & rollback (Windows)');
         console.log('');
-        console.log('   🔗 Code Generation (1):');
-        console.log('   - generate_code       Generate X++ boilerplate (class, batch-job, data-entity, …)');
+        console.log('   📈 Pattern Analysis (3):');
+        console.log('   - get_table_patterns   Analyze common field/index patterns for table groups');
+        console.log('   - get_form_patterns    Analyze common datasource/control patterns for forms');
+        console.log('   - generate_code        Generate X++ boilerplate (class, batch-job, data-entity, …)');
       })
       .catch((error) => {
         console.error('❌ Failed to initialize services:', error);

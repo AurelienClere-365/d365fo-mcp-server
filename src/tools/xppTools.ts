@@ -823,5 +823,5 @@ export const toolDefinitions: ToolDefinition[] = [
   getQueryInfoToolDefinition,
   getViewInfoToolDefinition,
   getEnumInfoToolDefinition,
-  getEdtInfoToolDefinition
+  getEdtInfoToolDefinition,
 ];

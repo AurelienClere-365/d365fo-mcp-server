@@ -103,6 +103,16 @@ The following built-in tools **MUST NOT** be used on D365FO metadata files (.xml
 | `get_api_usage_patterns(apiName)` | None (new capability) | Shows how a specific API/class is typically initialized and used in your codebase, including common method call sequences | "How do I correctly use LedgerJournalEngine?" |
 | `generate_code(pattern, name, ...)` | None | Generates X++ boilerplate for common patterns: `class`, `runnable`, `form-handler`, `data-entity`, `batch-job`, `table-extension` | "Generate a batch job for order processing" |
 
+### 🎨 Smart Object Generation (5 tools)
+
+| Tool | Description | Example Usage |
+|------|-------------|---------------|
+| `get_table_patterns(tableGroup?, similarTo?)` | Analyze common patterns in tables: field types, indexes, relations. Query by table group (e.g., "Transaction") or find tables similar to an existing one | `get_table_patterns(tableGroup="Transaction")` or `get_table_patterns(similarTo="CustTable")` |
+| `get_form_patterns(formPattern?, tableName?)` | Analyze common patterns in forms: datasource configurations, control hierarchies, form patterns. Find forms using specific table or matching pattern | `get_form_patterns(tableName="SalesTable")` or `get_form_patterns(formPattern="SimpleList")` |
+| `suggest_edt(fieldName, context?)` | Suggest Extended Data Types (EDT) for a field name using fuzzy matching and pattern analysis. Returns confidence-ranked suggestions with EDT properties | `suggest_edt(fieldName="CustomerAccount", context="sales order")` |
+| `generate_smart_table(name, tableGroup?, copyFrom?, fieldsHint?, generateCommonFields?)` | **AI-driven table generation.** Creates AxTable XML with intelligent field/index/relation suggestions. Can copy structure, analyze patterns, or use field hints | `generate_smart_table(name="MyOrderTable", tableGroup="Transaction", generateCommonFields=true)` |
+| `generate_smart_form(name, dataSource?, formPattern?, copyFrom?, generateControls?)` | **AI-driven form generation.** Creates AxForm XML with intelligent datasource/control suggestions. Can copy structure, analyze patterns, or auto-generate grids | `generate_smart_form(name="MyOrderForm", dataSource="MyOrderTable", generateControls=true)` |
+
 ### 📝 File & Metadata Operations (3 tools)
 
 | Tool | Replaces Built-in | Description | When to Use |
@@ -234,6 +244,67 @@ Step 4: Create extension with exact signature from step 2
 | "Find label for text X" | `search_labels("X")` |
 | "Get all translations for label X" | `get_label_info("X")` |
 | "What label files exist in model X?" | `get_label_info(model="X")` |
+| "Suggest EDT for field name X" | `suggest_edt("X")` |
+| "Find similar tables to X" | `get_table_patterns(similarTo="X")` |
+| "Find forms using table X" | `get_form_patterns(tableName="X")` |
+| "Generate table with AI" | `generate_smart_table(name="X", generateCommonFields=true)` |
+| "Generate form for table X" | `generate_smart_form(name="XForm", dataSource="X", generateControls=true)` |
+
+### Generating Smart Tables and Forms
+
+**Workflow for creating a new table with AI assistance:**
+```
+Step 1: get_table_patterns(tableGroup="Transaction")
+     → Analyze common field patterns in transaction tables
+Step 2: suggest_edt("OrderAmount", context="sales order")
+     → Get EDT suggestions for specific fields
+Step 3: generate_smart_table(
+          name="MyOrderTable",
+          tableGroup="Transaction",
+          fieldsHint="OrderId, CustomerAccount, OrderAmount, OrderDate",
+          generateCommonFields=true,
+          projectPath="K:\VSProjects\MySolution\MyProject\MyProject.rnrproj"
+        )
+     → Generates complete table with fields, indexes, and relations
+```
+
+**Workflow for creating a new form with AI assistance:**
+```
+Step 1: get_form_patterns(formPattern="SimpleList")
+     → Analyze common patterns in SimpleList forms
+Step 2: generate_smart_form(
+          name="MyOrderForm",
+          dataSource="MyOrderTable",
+          formPattern="SimpleList",
+          generateControls=true,
+          projectPath="K:\VSProjects\MySolution\MyProject\MyProject.rnrproj"
+        )
+     → Generates complete form with datasource and grid controls
+```
+
+**Workflow for copying existing table structure:**
+```
+Step 1: get_table_info("CustTable")
+     → Review structure of source table
+Step 2: generate_smart_table(
+          name="MyCustomerTable",
+          copyFrom="CustTable",
+          projectPath="K:\VSProjects\MySolution\MyProject\MyProject.rnrproj"
+        )
+     → Creates table with copied structure (fields, indexes, relations)
+```
+
+**Workflow for copying existing form structure:**
+```
+Step 1: get_form_info("CustTableListPage")
+     → Review structure of source form
+Step 2: generate_smart_form(
+          name="MyCustomerListPage",
+          copyFrom="CustTableListPage",
+          projectPath="K:\VSProjects\MySolution\MyProject\MyProject.rnrproj"
+        )
+     → Creates form with copied datasources and pattern
+```
 
 ### Working with Labels (AxLabelFile)
 
@@ -329,6 +400,9 @@ K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxView\{Name}.xml
 - **Use `get_edt_info()` for Extended Data Types** — `get_enum_info()` is for enums only
 - **Call `search_labels()` before `create_label()`** — always reuse existing labels when possible
 - Provide translations for ALL languages the model supports when calling `create_label()`
+- **Call `suggest_edt()` when creating new table fields** — reuse existing EDTs instead of creating primitives
+- **Use `get_table_patterns()` or `get_form_patterns()` before generating objects** — learn from existing patterns
+- **Use `generate_smart_table()` / `generate_smart_form()` for new objects** — AI-driven generation with pattern analysis
 
 ### ❌ DON'T:
 - Never use built-in file tools (`get_file`, `edit_file`, etc.) on .xml or .xpp files
@@ -342,6 +416,8 @@ K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxView\{Name}.xml
 - Don't call `search()` after you already have the complete object from `get_class_info()`
 - **Never edit .label.txt files with `edit_file` or `replace_string_in_file`** — use `create_label()` which maintains sort order and updates the index
 - Never create a label without first calling `search_labels()` — duplicate labels waste translation effort
+- **Never manually specify EDT types like "String", "Int"** — call `suggest_edt()` to find correct Extended Data Type
+- **Never create tables/forms without analyzing patterns first** — use `get_table_patterns()`/`get_form_patterns()` to learn from existing code
 
 ## Why MCP Tools Are Required
 

@@ -151,6 +151,62 @@ export interface XppSymbol {
   apiPatterns?: string;         // JSON of common API usage patterns
 }
 
+/**
+ * Form metadata types
+ */
+export interface XppFormInfo {
+  name: string;
+  model: string;
+  sourcePath: string;
+  label?: string;
+  caption?: string;
+  formPattern?: string;  // E.g., 'DetailsTransaction', 'ListPage', 'SimpleList'
+  dataSources: XppFormDataSource[];
+  design: XppFormControl[];
+  methods: XppMethodInfo[];
+}
+
+export interface XppFormDataSource {
+  name: string;
+  table: string;
+  allowEdit: boolean;
+  allowCreate: boolean;
+  allowDelete: boolean;
+  fields: string[];
+  methods: string[];
+}
+
+export interface XppFormControl {
+  name: string;
+  type: string;  // E.g., 'ActionPane', 'Grid', 'Group', 'String', 'Button'
+  properties: Record<string, string>;
+  children: XppFormControl[];
+}
+
+/**
+ * EDT metadata types
+ */
+export interface XppEdtInfo {
+  name: string;
+  model: string;
+  sourcePath: string;
+  extends?: string;        // Base type it extends (e.g., 'String', 'Integer', or another EDT)
+  enumType?: string;       // Associated enum type name
+  referenceTable?: string; // Related table for foreign key lookups
+  relationType?: string;   // Type of relation (e.g., 'OneToMany')
+  stringSize?: string;     // String length (e.g., '20')
+  displayLength?: string;  // Display width
+  label?: string;          // User-facing label
+  helpText?: string;       // Help text
+  formHelp?: string;       // Form help reference
+  configurationKey?: string;
+  alignment?: string;      // Left, Right, Center
+  decimalSeparator?: string;
+  signDisplay?: string;
+  noOfDecimals?: string;
+  additionalProperties: Record<string, string>;
+}
+
 export interface CodePattern {
   patternName: string;
   patternType: string;          // Helper, Service, Repository, etc.

@@ -292,16 +292,83 @@ export class XppSymbolIndex {
         INSERT INTO labels_fts(rowid, label_id, text, comment)
         VALUES (new.id, new.label_id, new.text, new.comment);
       END;
+
       CREATE TRIGGER IF NOT EXISTS labels_ad AFTER DELETE ON labels WHEN old.language = 'en-US' BEGIN
         INSERT INTO labels_fts(labels_fts, rowid, label_id, text, comment)
         VALUES ('delete', old.id, old.label_id, old.text, old.comment);
       END;
+
       CREATE TRIGGER IF NOT EXISTS labels_au AFTER UPDATE ON labels WHEN old.language = 'en-US' OR new.language = 'en-US' BEGIN
         INSERT INTO labels_fts(labels_fts, rowid, label_id, text, comment)
         VALUES ('delete', old.id, old.label_id, old.text, old.comment);
         INSERT INTO labels_fts(rowid, label_id, text, comment)
         VALUES (new.id, new.label_id, new.text, new.comment);
       END;
+    `);
+
+    // ── Extended Metadata Tables for Smart Generation ───────────────────────
+
+    // Table Relations - for analyzing table relationships
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS table_relations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_table TEXT NOT NULL,
+        target_table TEXT NOT NULL,
+        relation_name TEXT NOT NULL,
+        constraint_fields TEXT,
+        model TEXT NOT NULL
+      );
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_table_relations_source ON table_relations(source_table);
+      CREATE INDEX IF NOT EXISTS idx_table_relations_target ON table_relations(target_table);
+      CREATE INDEX IF NOT EXISTS idx_table_relations_model ON table_relations(model);
+    `);
+
+    // Form DataSources - for analyzing form patterns
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS form_datasources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        form_name TEXT NOT NULL,
+        datasource_name TEXT NOT NULL,
+        table_name TEXT NOT NULL,
+        allow_edit INTEGER DEFAULT 1,
+        allow_create INTEGER DEFAULT 1,
+        allow_delete INTEGER DEFAULT 1,
+        model TEXT NOT NULL
+      );
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_form_datasources_form ON form_datasources(form_name);
+      CREATE INDEX IF NOT EXISTS idx_form_datasources_table ON form_datasources(table_name);
+      CREATE INDEX IF NOT EXISTS idx_form_datasources_model ON form_datasources(model);
+    `);
+
+    // EDT Metadata - for EDT suggestion and validation
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS edt_metadata (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        edt_name TEXT NOT NULL,
+        extends TEXT,
+        enum_type TEXT,
+        reference_table TEXT,
+        relation_type TEXT,
+        string_size TEXT,
+        display_length TEXT,
+        label TEXT,
+        model TEXT NOT NULL
+      );
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_edt_metadata_name ON edt_metadata(edt_name);
+      CREATE INDEX IF NOT EXISTS idx_edt_metadata_extends ON edt_metadata(extends);
+      CREATE INDEX IF NOT EXISTS idx_edt_metadata_enum ON edt_metadata(enum_type);
+      CREATE INDEX IF NOT EXISTS idx_edt_metadata_ref_table ON edt_metadata(reference_table);
+      CREATE INDEX IF NOT EXISTS idx_edt_metadata_model ON edt_metadata(model);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_edt_metadata_unique ON edt_metadata(edt_name, model);
     `);
   }
 
@@ -996,6 +1063,32 @@ export class XppSymbolIndex {
             });
           }
         }
+
+        // Index table relations to new table
+        if (tableData.relations && Array.isArray(tableData.relations)) {
+          const stmt = this.db.prepare(`
+            INSERT OR IGNORE INTO table_relations (
+              source_table, target_table, relation_name, constraint_fields, model
+            ) VALUES (?, ?, ?, ?, ?)
+          `);
+
+          for (const relation of tableData.relations) {
+            if (relation.name && relation.relatedTable) {
+              // Serialize constraints as JSON
+              const constraintFields = relation.constraints 
+                ? JSON.stringify(relation.constraints)
+                : null;
+              
+              stmt.run(
+                tableData.name,
+                relation.relatedTable,
+                relation.name,
+                constraintFields,
+                model
+              );
+            }
+          }
+        }
       } catch (error) {
         // Only log errors, don't stop processing
         console.error(`      ⚠️  Skipped table ${file}: ${error instanceof Error ? error.message : error}`);
@@ -1044,12 +1137,20 @@ export class XppSymbolIndex {
         const edtName = edtData.name || path.basename(file, '.json');
 
         let signature: string | undefined;
-        if (typeof edtData.raw === 'string') {
+        
+        // Enhanced metadata extraction from parsed EDT info
+        if (edtData.extends) {
+          signature = edtData.extends;
+        } else if (edtData.enumType) {
+          signature = edtData.enumType;
+        } else if (typeof edtData.raw === 'string') {
+          // Fallback to raw XML parsing for old metadata
           const extendsMatch = edtData.raw.match(/<Extends>([^<]+)<\/Extends>/i);
           const enumTypeMatch = edtData.raw.match(/<EnumType>([^<]+)<\/EnumType>/i);
           signature = extendsMatch?.[1]?.trim() || enumTypeMatch?.[1]?.trim();
         }
 
+        // Add symbol
         this.addSymbol({
           name: edtName,
           type: 'edt',
@@ -1057,6 +1158,28 @@ export class XppSymbolIndex {
           filePath: sourceFilePath,
           model,
         });
+
+        // Add extended EDT metadata to new table
+        if (edtData.extends || edtData.enumType || edtData.referenceTable) {
+          const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO edt_metadata (
+              edt_name, extends, enum_type, reference_table, relation_type,
+              string_size, display_length, label, model
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `);
+          
+          stmt.run(
+            edtName,
+            edtData.extends || null,
+            edtData.enumType || null,
+            edtData.referenceTable || null,
+            edtData.relationType || null,
+            edtData.stringSize || null,
+            edtData.displayLength || null,
+            edtData.label || null,
+            model
+          );
+        }
       } catch (error) {
         console.error(`      ⚠️  Skipped edt ${file}: ${error instanceof Error ? error.message : error}`);
       }
@@ -1084,6 +1207,30 @@ export class XppSymbolIndex {
           model,
           description: formData.caption || formData.label,
         });
+
+        // Index form datasources to new table
+        if (formData.dataSources && Array.isArray(formData.dataSources)) {
+          const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO form_datasources (
+              form_name, datasource_name, table_name, 
+              allow_edit, allow_create, allow_delete, model
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          `);
+
+          for (const ds of formData.dataSources) {
+            if (ds.name && ds.table) {
+              stmt.run(
+                formName,
+                ds.name,
+                ds.table,
+                ds.allowEdit ? 1 : 0,
+                ds.allowCreate ? 1 : 0,
+                ds.allowDelete ? 1 : 0,
+                model
+              );
+            }
+          }
+        }
       
       } catch (error) {
         // Only log errors, don't stop processing
@@ -1555,6 +1702,9 @@ export class XppSymbolIndex {
    */
   clear(): void {
     this.db.exec('DELETE FROM symbols');
+    this.db.exec('DELETE FROM table_relations');
+    this.db.exec('DELETE FROM form_datasources');
+    this.db.exec('DELETE FROM edt_metadata');
     this.vacuum();
   }
 
@@ -1567,8 +1717,20 @@ export class XppSymbolIndex {
     if (modelNames.length === 0) return;
     
     const placeholders = modelNames.map(() => '?').join(',');
+    
+    // Clear symbols
     const stmt = this.db.prepare(`DELETE FROM symbols WHERE model IN (${placeholders})`);
     stmt.run(...modelNames);
+    
+    // Clear extended metadata tables
+    const stmtRelations = this.db.prepare(`DELETE FROM table_relations WHERE model IN (${placeholders})`);
+    stmtRelations.run(...modelNames);
+    
+    const stmtFormDs = this.db.prepare(`DELETE FROM form_datasources WHERE model IN (${placeholders})`);
+    stmtFormDs.run(...modelNames);
+    
+    const stmtEdt = this.db.prepare(`DELETE FROM edt_metadata WHERE model IN (${placeholders})`);
+    stmtEdt.run(...modelNames);
     
     console.log(`🗑️  Cleared symbols for models: ${modelNames.join(', ')}`);
     

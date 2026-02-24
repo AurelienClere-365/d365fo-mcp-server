@@ -505,4 +505,296 @@ export class XppMetadataParser {
 
     return params;
   }
+
+  /**
+   * Parse Form XML file (AxForm)
+   */
+  async parseFormFile(filePath: string, model?: string): Promise<XppParseResult<any>> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const parsed = await this.parser.parseStringPromise(content);
+
+      if (!parsed.AxForm) {
+        return { success: false, error: 'Not a valid AxForm file' };
+      }
+
+      const axForm = parsed.AxForm;
+      const formName = axForm.Name || 'UnknownForm';
+
+      // Extract form info with full structure
+      const formInfo: any = {
+        name: formName,
+        model: model || 'Unknown',
+        sourcePath: filePath,
+        label: axForm.Label || undefined,
+        caption: axForm.Caption || axForm.TitleDatasource || undefined,
+        formPattern: undefined, // Will be detected from Design
+        dataSources: [],
+        design: [],
+        methods: [],
+      };
+
+      // Extract data sources
+      if (axForm.DataSources && axForm.DataSources.length > 0) {
+        formInfo.dataSources = this.extractFormDataSources(axForm.DataSources[0]);
+      }
+
+      // Extract design (controls)
+      if (axForm.Design && axForm.Design.length > 0) {
+        const designInfo = this.extractFormDesign(axForm.Design[0]);
+        formInfo.design = designInfo.controls;
+        formInfo.formPattern = designInfo.pattern;
+      }
+
+      // Extract methods
+      if (axForm.Methods && axForm.Methods.length > 0) {
+        formInfo.methods = this.extractFormMethods(axForm.Methods[0], formName);
+      }
+
+      return { success: true, data: formInfo };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Extract form datasources
+   */
+  private extractFormDataSources(dataSourcesNode: any): any[] {
+    const dataSources: any[] = [];
+
+    if (!dataSourcesNode.AxFormDataSourceRoot) {
+      return dataSources;
+    }
+
+    const dsRoots = this.ensureArray(dataSourcesNode.AxFormDataSourceRoot);
+
+    for (const dsNode of dsRoots) {
+      const ds: any = {
+        name: dsNode.Name || 'Unknown',
+        table: dsNode.Table || 'Unknown',
+        allowEdit: dsNode.AllowEdit === 'Yes' || dsNode.AllowEdit === 'true',
+        allowCreate: dsNode.AllowCreate === 'Yes' || dsNode.AllowCreate === 'true',
+        allowDelete: dsNode.AllowDelete === 'Yes' || dsNode.AllowDelete === 'true',
+        fields: [],
+        methods: [],
+      };
+
+      // Extract fields
+      if (dsNode.Fields && this.ensureArray(dsNode.Fields).length > 0) {
+        const fieldsNode = this.ensureArray(dsNode.Fields)[0];
+        if (fieldsNode.AxFormDataSourceField) {
+          const fieldNodes = this.ensureArray(fieldsNode.AxFormDataSourceField);
+          ds.fields = fieldNodes
+            .map((f: any) => f.DataField || 'Unknown')
+            .filter((name: string) => name !== 'Unknown');
+        }
+      }
+
+      // Extract methods
+      if (dsNode.Methods && this.ensureArray(dsNode.Methods).length > 0) {
+        const methodsNode = this.ensureArray(dsNode.Methods)[0];
+        if (methodsNode.Method) {
+          const methodNodes = this.ensureArray(methodsNode.Method);
+          ds.methods = methodNodes.map((m: any) => m.Name || 'Unknown');
+        }
+      }
+
+      dataSources.push(ds);
+    }
+
+    return dataSources;
+  }
+
+  /**
+   * Extract form design (controls)
+   */
+  private extractFormDesign(designNode: any): { controls: any[]; pattern?: string } {
+    const controls: any[] = [];
+    let pattern: string | undefined = undefined;
+
+    // Detect form pattern from Design properties
+    if (designNode.Pattern) {
+      pattern = designNode.Pattern;
+    } else if (designNode.Style) {
+      // Some forms use Style instead of Pattern
+      pattern = designNode.Style;
+    }
+
+    // Find root containers
+    const rootKeys = Object.keys(designNode).filter(k => k.startsWith('AxForm'));
+
+    for (const key of rootKeys) {
+      const nodes = this.ensureArray(designNode[key]);
+      for (const node of nodes) {
+        const control = this.extractFormControl(node, key);
+        if (control) {
+          controls.push(control);
+        }
+      }
+    }
+
+    return { controls, pattern };
+  }
+
+  /**
+   * Extract single form control recursively
+   */
+  private extractFormControl(node: any, nodeType: string): any | null {
+    if (!node) return null;
+
+    const control: any = {
+      name: node.Name || 'Unknown',
+      type: nodeType.replace('AxForm', ''),
+      properties: {},
+      children: [],
+    };
+
+    // Extract common properties
+    const propertiesToExtract = [
+      'Caption',
+      'Visible',
+      'Enabled',
+      'AutoDeclaration',
+      'DataSource',
+      'DataField',
+      'DataMethod',
+      'HelpText',
+      'Label',
+      'Width',
+      'Height',
+      'AllowEdit',
+      'Mandatory',
+      'Style',
+      'Pattern',
+    ];
+
+    for (const prop of propertiesToExtract) {
+      if (node[prop]) {
+        const value = Array.isArray(node[prop]) ? node[prop][0] : node[prop];
+        if (value) {
+          control.properties[prop] = value;
+        }
+      }
+    }
+
+    // Recursively extract child controls
+    const childKeys = Object.keys(node).filter(k => k.startsWith('AxForm') && k !== nodeType);
+
+    for (const childKey of childKeys) {
+      const childNodes = this.ensureArray(node[childKey]);
+      for (const childNode of childNodes) {
+        const childControl = this.extractFormControl(childNode, childKey);
+        if (childControl) {
+          control.children.push(childControl);
+        }
+      }
+    }
+
+    return control;
+  }
+
+  /**
+   * Extract form methods
+   */
+  private extractFormMethods(methodsNode: any, _formName: string): any[] {
+    const methods: any[] = [];
+
+    if (!methodsNode.Method) {
+      return methods;
+    }
+
+    const methodNodes = this.ensureArray(methodsNode.Method);
+
+    for (const methodNode of methodNodes) {
+      const name = methodNode.Name || 'Unknown';
+      const source = methodNode.Source || '';
+
+      // Parse method info (similar to class methods)
+      const methodInfo: any = {
+        name,
+        visibility: 'public', // Forms typically have public methods
+        returnType: this.extractReturnType(source, name) || 'void',
+        parameters: this.extractParametersFromSource(source, name),
+        isStatic: this.isMethodStatic(source),
+        source,
+        sourceSnippet: source.split('\n').slice(0, 10).join('\n'),
+      };
+
+      methods.push(methodInfo);
+    }
+
+    return methods;
+  }
+
+  /**
+   * Parse EDT XML file (AxEdt)
+   */
+  async parseEdtFile(filePath: string, model?: string): Promise<XppParseResult<any>> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const parsed = await this.parser.parseStringPromise(content);
+
+      if (!parsed.AxEdt) {
+        return { success: false, error: 'Not a valid AxEdt file' };
+      }
+
+      const axEdt = parsed.AxEdt;
+      const edtName = axEdt.Name || 'UnknownEDT';
+
+      const getValue = (key: string): string | undefined => {
+        const raw = axEdt[key];
+        if (!raw) return undefined;
+        const value = Array.isArray(raw) ? raw[0] : raw;
+        return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+      };
+
+      const edtInfo: any = {
+        name: edtName,
+        model: model || 'Unknown',
+        sourcePath: filePath,
+        extends: getValue('Extends'),
+        enumType: getValue('EnumType'),
+        referenceTable: getValue('ReferenceTable'),
+        relationType: getValue('RelationType'),
+        stringSize: getValue('StringSize'),
+        displayLength: getValue('DisplayLength'),
+        label: getValue('Label'),
+        helpText: getValue('HelpText'),
+        formHelp: getValue('FormHelp'),
+        configurationKey: getValue('ConfigurationKey'),
+        alignment: getValue('Alignment'),
+        decimalSeparator: getValue('DecimalSeparator'),
+        signDisplay: getValue('SignDisplay'),
+        noOfDecimals: getValue('NoOfDecimals'),
+        additionalProperties: {} as Record<string, string>,
+      };
+
+      // Extract additional properties
+      const knownProperties = new Set([
+        'Name', 'Extends', 'EnumType', 'ReferenceTable', 'RelationType', 'StringSize', 'DisplayLength',
+        'Label', 'HelpText', 'FormHelp', 'ConfigurationKey', 'Alignment', 'DecimalSeparator',
+        'SignDisplay', 'NoOfDecimals', 'ArrayElements', 'Relations', 'TableReferences'
+      ]);
+
+      for (const [key, value] of Object.entries(axEdt)) {
+        if (knownProperties.has(key)) continue;
+
+        const first = Array.isArray(value) ? value[0] : value;
+        if (typeof first === 'string' && first.trim().length > 0) {
+          edtInfo.additionalProperties[key] = first;
+        }
+      }
+
+      return { success: true, data: edtInfo };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
 }

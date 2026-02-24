@@ -68,6 +68,11 @@ import { getEdtInfoTool } from './edtInfo.js';
 import { searchLabelsTool } from './searchLabels.js';
 import { getLabelInfoTool } from './getLabelInfo.js';
 import { createLabelTool } from './createLabel.js';
+import { handleGetTablePatterns } from './getTablePatterns.js';
+import { handleGetFormPatterns } from './getFormPatterns.js';
+import { handleGenerateSmartTable } from './generateSmartTable.js';
+import { handleGenerateSmartForm } from './generateSmartForm.js';
+import { handleSuggestEdt } from './suggestEdt.js';
 
 /**
  * Centralized tool handler that dispatches to individual tool implementations
@@ -131,6 +136,41 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
         return getLabelInfoTool(request, context);
       case 'create_label':
         return createLabelTool(request, context);
+      case 'get_table_patterns':
+        return {
+          content: (await handleGetTablePatterns(
+            request.params.arguments as any,
+            context.symbolIndex
+          )).content,
+        };
+      case 'get_form_patterns':
+        return {
+          content: (await handleGetFormPatterns(
+            request.params.arguments as any,
+            context.symbolIndex
+          )).content,
+        };
+      case 'generate_smart_table':
+        return {
+          content: (await handleGenerateSmartTable(
+            request.params.arguments as any,
+            context.symbolIndex
+          )).content,
+        };
+      case 'generate_smart_form':
+        return {
+          content: (await handleGenerateSmartForm(
+            request.params.arguments as any,
+            context.symbolIndex
+          )).content,
+        };
+      case 'suggest_edt':
+        return {
+          content: (await handleSuggestEdt(
+            request.params.arguments as any,
+            context.symbolIndex
+          )).content,
+        };
       default:
         return {
           content: [

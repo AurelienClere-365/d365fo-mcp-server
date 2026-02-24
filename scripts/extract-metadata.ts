@@ -508,18 +508,20 @@ async function extractForms(
     stats.totalFiles++;
 
     try {
-      // Basic form parsing (name extraction)
-      const formName = path.basename(file, '.xml');
-      const formInfo = {
-        name: formName,
-        model: modelName,
-        sourcePath: filePath,
-        type: 'form'
-      };
+      // Parse full form structure using new parser
+      const result = await parser.parseFormFile(filePath, modelName);
+      
+      if (!result.success || !result.data) {
+        console.error(`   ❌ Error parsing ${file}: ${result.error || 'Unknown error'}`);
+        stats.errors++;
+        continue;
+      }
+      
+      const formInfo = result.data;
       
       const outputDir = path.join(OUTPUT_PATH, modelName, 'forms');
       await fs.mkdir(outputDir, { recursive: true });
-      const outputFile = path.join(outputDir, `${formName}.json`);
+      const outputFile = path.join(outputDir, `${formInfo.name}.json`);
       await fs.writeFile(outputFile, JSON.stringify(formInfo, null, 2));
 
       stats.forms++;
@@ -722,13 +724,21 @@ async function extractEdts(
     stats.totalFiles++;
 
     try {
-      // Store raw XML (same approach as enums)
-      const content = await fs.readFile(filePath, 'utf-8');
-      const edtName = path.basename(file, '.xml');
+      // Parse full EDT structure using new parser
+      const result = await parser.parseEdtFile(filePath, modelName);
+      
+      if (!result.success || !result.data) {
+        console.error(`   ❌ Error parsing ${file}: ${result.error || 'Unknown error'}`);
+        stats.errors++;
+        continue;
+      }
+      
+      const edtInfo = result.data;
+      
       const outputDir = path.join(OUTPUT_PATH, modelName, 'edts');
       await fs.mkdir(outputDir, { recursive: true });
-      const outputFile = path.join(outputDir, `${edtName}.json`);
-      await fs.writeFile(outputFile, JSON.stringify({ name: edtName, sourcePath: filePath, raw: content }, null, 2));
+      const outputFile = path.join(outputDir, `${edtInfo.name}.json`);
+      await fs.writeFile(outputFile, JSON.stringify(edtInfo, null, 2));
 
       stats.edts++;
     } catch (error) {

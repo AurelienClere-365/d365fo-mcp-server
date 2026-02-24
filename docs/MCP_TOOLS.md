@@ -1,7 +1,7 @@
 # All Available Tools
 
 When you ask GitHub Copilot a question about D365FO code, it automatically calls one of these
-23 tools to look up the answer or generate code. You do not need to name the tools yourself —
+29 tools to look up the answer or generate code. You do not need to name the tools yourself —
 just ask in plain English.
 
 ---
@@ -40,6 +40,22 @@ just ask in plain English.
 | **analyze_class_completeness** | Which standard methods is my class missing? | "Is MyHelper class complete?" |
 | **get_api_usage_patterns** | How is a specific API typically initialized and used? | "How do I use LedgerJournalEngine?" |
 
+### Smart Object Generation (3 tools)
+
+| Tool | What it does | Example prompt |
+|------|-------------|---------------|
+| **generate_smart_table** | AI-driven table generation with pattern analysis | "Generate a transaction table with common fields" |
+| **generate_smart_form** | AI-driven form generation with pattern analysis | "Create a SimpleList form for MyTable" |
+| **suggest_edt** | Suggest EDT for field name using fuzzy matching | "What EDT should I use for CustomerAccount field?" |
+
+### Pattern Analysis (3 tools)
+
+| Tool | What it does | Example prompt |
+|------|-------------|---------------|
+| **get_table_patterns** | Analyze field/index patterns for table groups | "Show me common patterns in Transaction tables" |
+| **get_form_patterns** | Analyze datasource/control patterns for forms | "Find forms using CustTable" |
+| **generate_code** | Generate X++ boilerplate (class, batch job, CoC, etc.) | "Generate a batch job class for order processing" |
+
 ### File Operations (3 tools)
 
 | Tool | Works where | What it does |
@@ -47,12 +63,6 @@ just ask in plain English.
 | **generate_d365fo_xml** | Anywhere (cloud + local) | Returns XML content — Copilot then creates the file |
 | **create_d365fo_file** | Local Windows VM only | Creates the physical file and adds it to the VS project |
 | **modify_d365fo_file** | Local Windows VM only | Safely edits an existing file with automatic backup |
-
-### Analysis (1 tool)
-
-| Tool | What it does | Example prompt |
-|------|-------------|---------------|
-| **generate_code** | Generate X++ boilerplate (class, batch job, CoC, etc.) | "Generate a batch job class for order processing" |
 
 ### Label Management (3 tools)
 
@@ -419,6 +429,165 @@ Add a new label CustomerAccountNumber with English text "Customer account number
 
 ---
 
+### get_table_patterns
+
+Analyzes common field types, index patterns, and relation structures for D365FO table groups.
+Helps understand table design patterns before creating new tables.
+
+**Parameters:**
+- `tableGroup` — table group to analyze (Main, Transaction, Parameter, Group, Reference,
+  Miscellaneous, WorksheetHeader, WorksheetLine)
+- `similarTo` — alternative: find tables with similar structure to a specific table name
+- `limit` — max examples to return (default: 10)
+
+**Examples:**
+```
+Show me common field patterns in Transaction tables
+Find tables similar to CustTable
+What indexes are typical in Parameter tables?
+```
+
+**Returns:**
+- Common field names and their EDTs
+- Typical index configurations (unique, clustered, etc.)
+- Common relation patterns to other tables
+- Table group characteristics and recommendations
+
+---
+
+### get_form_patterns
+
+Analyzes common datasource configurations, control hierarchies, and D365FO form patterns.
+Helps understand form design patterns before creating new forms.
+
+**Parameters:**
+- `formPattern` — D365FO form pattern to analyze (DetailsTransaction, ListPage, SimpleList,
+  SimpleListDetails, Dialog, DropDialog, FormPart, Lookup)
+- `dataSource` — alternative: find forms that use a specific table
+- `similarTo` — alternative: find forms with similar structure to a specific form name
+- `limit` — max examples to return (default: 10)
+
+**Examples:**
+```
+Analyze SimpleList form patterns
+Find all forms using CustTable as datasource
+Show me forms similar to SalesTableListPage
+What controls are typical in ListPage forms?
+```
+
+**Returns:**
+- Datasource configurations (allow edit/create/delete settings)
+- Common control hierarchies (grids, buttons, groups)
+- Form pattern characteristics and recommendations
+- Typical field selections in grids
+
+---
+
+### suggest_edt
+
+Suggests Extended Data Types (EDT) for a field name using fuzzy matching and pattern analysis.
+Analyzes indexed EDT metadata to recommend appropriate EDTs based on field name patterns.
+
+**Use this BEFORE creating table fields** to ensure you reuse existing EDTs instead of
+creating primitive types.
+
+**Parameters:**
+- `fieldName` — field name to suggest EDT for (required), e.g. "CustomerAccount", "OrderAmount"
+- `context` — optional context to improve suggestions, e.g. "sales order", "ledger journal"
+- `limit` — max suggestions to return (default: 5)
+
+**Examples:**
+```
+What EDT should I use for field CustomerAccount?
+Suggest EDT for OrderAmount in sales order context
+What EDT matches TransDate field name?
+```
+
+**Returns:**
+- Confidence-ranked EDT suggestions (1.0 = exact match, 0.8+ = high confidence)
+- EDT properties: base type, enum type, reference table, label
+- Reason for each suggestion (exact match, fuzzy match, pattern match)
+- String constraints (size, display length) or numeric properties
+
+---
+
+### generate_smart_table
+
+AI-driven table generation with intelligent field/index/relation suggestions based on
+indexed metadata patterns. Generates complete AxTable XML ready for file creation.
+
+**Strategies:**
+1. **Copy structure** — copyFrom an existing table
+2. **Pattern analysis** — analyze tableGroup patterns and generateCommonFields
+3. **Field hints** — provide fieldsHint and let tool suggest EDTs
+4. **Combine strategies** — use multiple approaches for comprehensive generation
+
+**Parameters:**
+- `name` — table name (required), e.g. "MyOrderTable"
+- `label` — optional label for the table
+- `tableGroup` — table group (Main, Transaction, Parameter, etc.)
+- `copyFrom` — optional: copy structure from existing table name
+- `fieldsHint` — optional: comma-separated field hints (e.g. "RecId, Name, Amount")
+- `generateCommonFields` — if true, auto-generate common fields based on table group
+- `modelName` — model name (auto-detected from projectPath)
+- `projectPath` — path to .rnrproj file for model extraction
+- `solutionPath` — path to solution directory (alternative to projectPath)
+
+**Examples:**
+```
+Generate a transaction table with common fields like RecId, CreatedBy, ModifiedBy
+Create a table copying structure from CustTable
+Generate MyOrderTable with fields: OrderId, CustomerAccount, OrderAmount
+```
+
+**Returns:**
+- Complete AxTable XML with:
+  - Suggested fields with appropriate EDTs
+  - Recommended indexes (primary key, alternate keys)
+  - Suggested relations to related tables
+  - Table group properties and configuration
+
+---
+
+### generate_smart_form
+
+AI-driven form generation with intelligent datasource/control suggestions based on
+indexed metadata patterns. Generates complete AxForm XML ready for file creation.
+
+**Strategies:**
+1. **Copy structure** — copyFrom an existing form
+2. **Auto-generate** — provide dataSource table and generateControls for automatic grid
+3. **Pattern-based** — specify formPattern and let tool apply standard structure
+4. **Combine strategies** — use multiple approaches for comprehensive generation
+
+**Parameters:**
+- `name` — form name (required), e.g. "MyOrderForm"
+- `label` — optional label for the form
+- `caption` — optional caption/title
+- `dataSource` — optional: table name for primary datasource (auto-generates grid)
+- `formPattern` — optional: form pattern (SimpleList, DetailsTransaction, etc.)
+- `copyFrom` — optional: copy structure from existing form name
+- `generateControls` — if true, auto-generate grid controls for datasource fields
+- `modelName` — model name (auto-detected from projectPath)
+- `projectPath` — path to .rnrproj file for model extraction
+- `solutionPath` — path to solution directory (alternative to projectPath)
+
+**Examples:**
+```
+Generate a SimpleList form for MyOrderTable with auto-generated grid
+Create a form copying structure from CustTableListPage
+Generate MyOrderForm with datasource and controls for displaying orders
+```
+
+**Returns:**
+- Complete AxForm XML with:
+  - Datasource configuration (table, allow edit/create/delete)
+  - Control hierarchy (grids, buttons, groups)
+  - Form pattern application (SimpleList, DetailsTransaction, etc.)
+  - Common action buttons (New, Delete, Refresh)
+
+---
+
 ## Tips
 
 **You never need to name tools directly.** Just describe what you want:
@@ -427,6 +596,23 @@ Add a new label CustomerAccountNumber with English text "Customer account number
 - "Find..." → uses search or find_references
 - "Create..." → uses analyze_code_patterns + generate_code + create_d365fo_file
 - "Extend..." → uses get_method_signature + generate_code
+- "Generate a table..." → uses get_table_patterns + generate_smart_table
+
+**Be specific for best results:**
+- Vague: "Find customer stuff"
+- Better: "Find methods on CustTable for updating the credit limit"
+
+**For CoC extensions, always get the signature first:**
+```
+Get the signature of CustTable.validateWrite()
+Now create a CoC extension that adds credit limit validation
+```
+
+**For creating tables/forms, analyze patterns first:**
+```
+Show me common patterns in Transaction tables
+Now generate a transaction table with those patterns
+```
 
 **Be specific for best results:**
 - Vague: "Find customer stuff"
