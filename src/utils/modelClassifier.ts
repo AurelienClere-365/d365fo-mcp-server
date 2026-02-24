@@ -80,8 +80,12 @@ export function resolveObjectPrefix(modelName: string): string {
  */
 export function applyObjectPrefix(objectName: string, prefix: string): string {
   if (!prefix) return objectName;
-  if (objectName.toLowerCase().startsWith(prefix.toLowerCase())) return objectName;
-  return `${prefix}${objectName}`;
+  // Capitalize first letter of prefix (e.g. "whs" → "Whs", "WHS" stays "WHS")
+  const normalizedPrefix = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+  if (objectName.toLowerCase().startsWith(normalizedPrefix.toLowerCase())) return objectName;
+  // Capitalize first letter of objectName part so result is PascalCase
+  const normalizedName = objectName.charAt(0).toUpperCase() + objectName.slice(1);
+  return `${normalizedPrefix}${normalizedName}`;
 }
 
 /**
