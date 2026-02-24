@@ -330,9 +330,16 @@ export async function handleGenerateSmartForm(
 }
 
 /**
- * Extract model name from .rnrproj file
+ * Extract model name from .rnrproj file.
+ * Returns null if the file cannot be read (e.g. Windows path on Linux) or
+ * if <ModelName> is not found — callers must handle null gracefully.
  */
-function extractModelFromProject(projectPath: string): string {
+function extractModelFromProject(projectPath: string): string | null {
+  // Windows paths (K:\...) are not accessible on non-Windows — skip silently
+  if (process.platform !== 'win32' && /^[A-Z]:\\/i.test(projectPath)) {
+    console.warn(`[generateSmartForm] Skipping .rnrproj read on non-Windows: ${projectPath}`);
+    return null;
+  }
   try {
     const content = fs.readFileSync(projectPath, 'utf-8');
     const match = content.match(/<ModelName>(.*?)<\/ModelName>/);
@@ -342,7 +349,7 @@ function extractModelFromProject(projectPath: string): string {
   } catch (error) {
     console.error(`Failed to extract model from ${projectPath}:`, error);
   }
-  throw new Error(`Could not extract ModelName from ${projectPath}`);
+  return null;
 }
 
 /**
