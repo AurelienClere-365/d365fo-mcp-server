@@ -113,16 +113,36 @@ export async function getFormInfoTool(request: CallToolRequest, context: XppServ
       throw new Error(`Form "${formName}" not found. Make sure it's indexed or provide workspacePath for local forms.`);
     }
 
-    // 2. Parse XML (file_path may point to build-agent path — not accessible on this server)
-    let xmlContent: string;
+    // 2. Read the form XML
+    // file_path may point to: (a) actual XML on disk, or (b) JSON metadata with sourcePath
+    let xmlContent: string | null = null;
     try {
-      xmlContent = await fs.readFile(formRow.file_path, 'utf-8');
+      const fileContent = await fs.readFile(formRow.file_path, 'utf-8');
+      const trimmed = fileContent.trimStart();
+      if (trimmed.startsWith('{')) {
+        // JSON metadata — extract sourcePath and read actual XML from there
+        const data = JSON.parse(fileContent);
+        if (data.sourcePath) {
+          try {
+            xmlContent = await fs.readFile(data.sourcePath, 'utf-8');
+          } catch {
+            // sourcePath not accessible
+          }
+        }
+      } else {
+        xmlContent = fileContent;
+      }
     } catch {
+      // file_path not accessible
+    }
+
+    if (!xmlContent) {
       return {
         content: [{ type: 'text', text: buildXmlNotAvailableMessage('form', formName, formRow.file_path) }],
         isError: true,
       };
     }
+
     const xmlObj = await parseStringPromise(xmlContent);
 
     // 3. Extract form info
@@ -149,9 +169,9 @@ export async function getFormInfoTool(request: CallToolRequest, context: XppServ
       formInfo.design = extractControls(axForm.Design[0]);
     }
 
-    // Extract methods
-    if (includeMethods && axForm.Methods) {
-      formInfo.methods = extractMethods(axForm.Methods[0]);
+    // Extract methods (form methods are under SourceCode > Methods, not top-level)
+    if (includeMethods && axForm.SourceCode && axForm.SourceCode[0] && axForm.SourceCode[0].Methods) {
+      formInfo.methods = extractMethods(axForm.SourceCode[0].Methods[0]);
     }
 
     // 4. Format output
@@ -176,11 +196,13 @@ export async function getFormInfoTool(request: CallToolRequest, context: XppServ
 function extractDataSources(dataSourcesNode: any): FormDataSource[] {
   const dataSources: FormDataSource[] = [];
 
-  if (!dataSourcesNode.AxFormDataSourceRoot) {
+  // Form XML uses AxFormDataSource (not AxFormDataSourceRoot)
+  const dsArray = dataSourcesNode.AxFormDataSource || dataSourcesNode.AxFormDataSourceRoot;
+  if (!dsArray) {
     return dataSources;
   }
 
-  for (const dsNode of dataSourcesNode.AxFormDataSourceRoot) {
+  for (const dsNode of dsArray) {
     const ds: FormDataSource = {
       name: dsNode.Name ? dsNode.Name[0] : 'Unknown',
       table: dsNode.Table ? dsNode.Table[0] : 'Unknown',
@@ -229,17 +251,12 @@ function extractDataSourceFields(fieldsNode: any): string[] {
 function extractControls(designNode: any): FormControl[] {
   const controls: FormControl[] = [];
 
-  // Find root container (usually FormDesign)
-  const rootKeys = Object.keys(designNode).filter(k => k.startsWith('AxForm'));
-  
-  for (const key of rootKeys) {
-    const nodes = designNode[key];
-    if (Array.isArray(nodes)) {
-      for (const node of nodes) {
-        const control = extractControl(node, key);
-        if (control) {
-          controls.push(control);
-        }
+  // Controls live under Design > Controls > AxFormControl[]
+  if (designNode.Controls && designNode.Controls[0] && designNode.Controls[0].AxFormControl) {
+    for (const node of designNode.Controls[0].AxFormControl) {
+      const control = extractControl(node);
+      if (control) {
+        controls.push(control);
       }
     }
   }
@@ -250,12 +267,12 @@ function extractControls(designNode: any): FormControl[] {
 /**
  * Extract single control
  */
-function extractControl(node: any, nodeType: string): FormControl | null {
+function extractControl(node: any): FormControl | null {
   if (!node) return null;
 
   const control: FormControl = {
     name: node.Name ? node.Name[0] : 'Unknown',
-    type: nodeType.replace('AxForm', ''),
+    type: node.Type ? node.Type[0] : 'Group',
     properties: {},
     children: [],
   };
@@ -281,17 +298,12 @@ function extractControl(node: any, nodeType: string): FormControl | null {
     }
   }
 
-  // Recursively extract child controls
-  const childKeys = Object.keys(node).filter(k => k.startsWith('AxForm') && k !== nodeType);
-  
-  for (const childKey of childKeys) {
-    const childNodes = node[childKey];
-    if (Array.isArray(childNodes)) {
-      for (const childNode of childNodes) {
-        const childControl = extractControl(childNode, childKey);
-        if (childControl) {
-          control.children.push(childControl);
-        }
+  // Recursively extract child controls (nested under Controls > AxFormControl)
+  if (node.Controls && node.Controls[0] && node.Controls[0].AxFormControl) {
+    for (const childNode of node.Controls[0].AxFormControl) {
+      const childControl = extractControl(childNode);
+      if (childControl) {
+        control.children.push(childControl);
       }
     }
   }

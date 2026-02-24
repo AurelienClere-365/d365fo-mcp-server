@@ -59,13 +59,34 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
       throw new Error(`File not found for ${objectType} "${objectName}". Make sure the object exists and is indexed.`);
     }
 
-    // 2. Create backup if requested
-    if (createBackup) {
-      await createFileBackup(filePath);
+    // 2. Resolve actual XML file path (DB may store JSON metadata with sourcePath)
+    let xmlContent: string;
+    let actualFilePath = filePath;
+    try {
+      const fileContent = await fs.readFile(filePath, 'utf-8');
+      const trimmed = fileContent.trimStart();
+      if (trimmed.startsWith('{')) {
+        const data = JSON.parse(fileContent);
+        if (data.sourcePath) {
+          actualFilePath = data.sourcePath;
+          xmlContent = await fs.readFile(data.sourcePath, 'utf-8');
+        } else {
+          throw new Error(`Metadata file has no sourcePath: ${filePath}`);
+        }
+      } else {
+        xmlContent = fileContent;
+      }
+    } catch (readError) {
+      if (readError instanceof SyntaxError || (readError instanceof Error && readError.message.includes('sourcePath'))) {
+        throw readError;
+      }
+      throw new Error(`Cannot read file: ${filePath}`);
     }
 
-    // 3. Read and parse XML
-    const xmlContent = await fs.readFile(filePath, 'utf-8');
+    // 3. Create backup of the actual XML file
+    if (createBackup) {
+      await createFileBackup(actualFilePath);
+    }
     const xmlObj = await parseStringPromise(xmlContent);
 
     // 4. Perform operation
@@ -114,14 +135,14 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
     });
     
     const newXml = builder.buildObject(xmlObj);
-    await fs.writeFile(filePath, newXml, 'utf-8');
+    await fs.writeFile(actualFilePath, newXml, 'utf-8');
 
     // 6. Return success
     return {
       content: [
         {
           type: 'text',
-          text: `✅ ${message}\n\n**File:** ${filePath}\n**Backup:** ${createBackup ? 'Created' : 'Skipped'}\n\n**Next steps:**\n- Review changes in Visual Studio\n- Build the model to validate\n- Commit changes to source control`,
+          text: `✅ ${message}\n\n**File:** ${actualFilePath}\n**Backup:** ${createBackup ? 'Created' : 'Skipped'}\n\n**Next steps:**\n- Review changes in Visual Studio\n- Build the model to validate\n- Commit changes to source control`,
         },
       ],
     };
@@ -210,16 +231,26 @@ async function addMethod(xmlObj: any, objectType: string, args: any): Promise<bo
   // Navigate to Methods node
   const rootKey = getRootKey(objectType);
   const root = xmlObj[rootKey];
-  
-  if (!root || !root[0]) {
-    throw new Error(`Invalid XML structure: root node not found`);
+
+  if (!root) {
+    throw new Error(`Invalid XML structure: root element <${rootKey}> not found`);
   }
 
-  let methodsNode = root[0].Methods;
+  // For classes, methods are under SourceCode > Methods; for tables/forms, under Methods
+  let methodsContainer: any;
+  if (objectType === 'class') {
+    if (!root.SourceCode) {
+      root.SourceCode = [{ Methods: [{ $: { xmlns: '' }, Method: [] }] }];
+    }
+    methodsContainer = root.SourceCode[0];
+  } else {
+    methodsContainer = root;
+  }
+
+  let methodsNode = methodsContainer.Methods;
   if (!methodsNode) {
-    // Create Methods node if it doesn't exist
-    root[0].Methods = [{ Method: [] }];
-    methodsNode = root[0].Methods;
+    methodsContainer.Methods = [{ Method: [] }];
+    methodsNode = methodsContainer.Methods;
   }
 
   if (!methodsNode[0].Method) {
@@ -250,11 +281,17 @@ async function removeMethod(xmlObj: any, objectType: string, args: any): Promise
   const rootKey = getRootKey(objectType);
   const root = xmlObj[rootKey];
 
-  if (!root || !root[0] || !root[0].Methods || !root[0].Methods[0].Method) {
+  if (!root) {
+    throw new Error(`Invalid XML structure: root element <${rootKey}> not found`);
+  }
+
+  // For classes, methods are under SourceCode > Methods
+  const methodsContainer = objectType === 'class' ? root.SourceCode?.[0] : root;
+  if (!methodsContainer?.Methods?.[0]?.Method) {
     throw new Error('No methods found in object');
   }
 
-  const methods = root[0].Methods[0].Method;
+  const methods = methodsContainer.Methods[0].Method;
   const index = methods.findIndex((m: any) => m.Name && m.Name[0] === methodName);
 
   if (index === -1) {
@@ -286,14 +323,14 @@ async function addField(xmlObj: any, objectType: string, args: any): Promise<boo
   const rootKey = getRootKey(objectType);
   const root = xmlObj[rootKey];
 
-  if (!root || !root[0]) {
-    throw new Error('Invalid XML structure: root node not found');
+  if (!root) {
+    throw new Error(`Invalid XML structure: root element <${rootKey}> not found`);
   }
 
-  let fieldsNode = root[0].Fields;
+  let fieldsNode = root.Fields;
   if (!fieldsNode) {
-    root[0].Fields = [{ $: {}, AxTableField: [] }];
-    fieldsNode = root[0].Fields;
+    root.Fields = [{ $: {}, AxTableField: [] }];
+    fieldsNode = root.Fields;
   }
 
   if (!fieldsNode[0].AxTableField) {
@@ -343,11 +380,11 @@ async function removeField(xmlObj: any, objectType: string, args: any): Promise<
   const rootKey = getRootKey(objectType);
   const root = xmlObj[rootKey];
 
-  if (!root || !root[0] || !root[0].Fields || !root[0].Fields[0].AxTableField) {
+  if (!root?.Fields?.[0]?.AxTableField) {
     throw new Error('No fields found in table');
   }
 
-  const fields = root[0].Fields[0].AxTableField;
+  const fields = root.Fields[0].AxTableField;
   const index = fields.findIndex((f: any) => {
     // Field might be wrapped in different type nodes
     const fieldObj = Object.values(f)[0];
@@ -382,11 +419,9 @@ async function modifyProperty(xmlObj: any, objectType: string, args: any): Promi
   const rootKey = getRootKey(objectType);
   let current = xmlObj[rootKey];
 
-  if (!current || !current[0]) {
-    throw new Error('Invalid XML structure');
+  if (!current) {
+    throw new Error(`Invalid XML structure: root element <${rootKey}> not found`);
   }
-
-  current = current[0];
 
   // Navigate to property
   for (let i = 0; i < parts.length - 1; i++) {

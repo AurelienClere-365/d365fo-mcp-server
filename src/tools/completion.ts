@@ -21,8 +21,9 @@ export async function completionTool(request: CallToolRequest, context: XppServe
     const { symbolIndex, cache, workspaceScanner } = context;
     
     // ⚠️ EARLY CHECK: Is this a table? If yes, reject immediately!
-    const tableCheck = symbolIndex.searchSymbols(args.className, 1, ['table']);
-    if (tableCheck.length > 0) {
+    // Use exact-name lookup (not FTS search which does prefix matching and can false-positive)
+    const tableCheck = symbolIndex.getSymbolByName(args.className, 'table');
+    if (tableCheck) {
       return {
         content: [
           {
@@ -80,9 +81,9 @@ export async function completionTool(request: CallToolRequest, context: XppServe
     const completions = symbolIndex.getCompletions(args.className, args.prefix);
 
     if (completions.length === 0) {
-      // Check if the class/table exists at all
-      const classExists = symbolIndex.searchSymbols(args.className, 1, ['class']).length > 0;
-      const tableExists = symbolIndex.searchSymbols(args.className, 1, ['table']).length > 0;
+      // Check if the class/table exists at all (exact-name lookup, not FTS prefix match)
+      const classExists = symbolIndex.getSymbolByName(args.className, 'class') !== null;
+      const tableExists = symbolIndex.getSymbolByName(args.className, 'table') !== null;
       
       // ⚠️ CRITICAL: If it's a table, explicitly reject and redirect to get_table_info
       if (tableExists) {

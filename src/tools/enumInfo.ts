@@ -75,12 +75,21 @@ export async function getEnumInfoTool(request: CallToolRequest, context: XppServ
     // Primary: extracted-metadata JSON (always available, no file-path issues)
     rawXml = await readEnumRawXml(enumRow.model, enumName);
 
-    // Secondary: actual XML file (works only on D365FO VM)
+    // Secondary: file at DB path (may be XML on D365FO VM, or JSON metadata)
     if (!rawXml) {
       try {
-        rawXml = await fs.readFile(enumRow.file_path, 'utf-8');
+        const fileContent = await fs.readFile(enumRow.file_path, 'utf-8');
+        const trimmed = fileContent.trimStart();
+        if (trimmed.startsWith('{')) {
+          // JSON file (metadata dir) — extract raw XML from it
+          const data = JSON.parse(fileContent);
+          rawXml = typeof data.raw === 'string' ? data.raw : null;
+        } else {
+          // Actual XML file
+          rawXml = fileContent;
+        }
       } catch {
-        // Build-agent path not accessible
+        // Path not accessible
       }
     }
 

@@ -327,7 +327,13 @@ function buildCoCTemplate(
 
   template += returnType + ' ' + methodName + '(';
 
-  const paramStrings = parameters.map(p => p.type + ' ' + p.name);
+  const paramStrings = parameters.map(p => {
+    let ps = p.type + ' ' + p.name;
+    if (p.defaultValue) {
+      ps += ' = ' + p.defaultValue;
+    }
+    return ps;
+  });
   template += paramStrings.join(', ');
   template += ')\n';
   template += '\t{\n';

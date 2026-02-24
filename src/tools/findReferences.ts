@@ -279,7 +279,7 @@ function findClassReferences(symbolIndex: any, className: string, _scope: string
 
   // 3. Find instantiations (new ClassName())
   const instantiationStmt = symbolIndex.db.prepare(`
-    SELECT 
+    SELECT
       s.name,
       s.parent_name,
       s.file_path,
@@ -302,6 +302,44 @@ function findClassReferences(symbolIndex: any, className: string, _scope: string
         referenceType: 'instantiation',
         caller: row.parent_name ? `${row.parent_name}.${row.name}` : row.name,
       });
+    }
+  }
+
+  // 4. Find general type references (classStr(), variable declarations, static calls)
+  const typeRefPatterns = [
+    `%classStr(${className})%`,
+    `%${className}::%`,
+    `%${className} _%`,
+  ];
+
+  const typeRefStmt = symbolIndex.db.prepare(`
+    SELECT
+      s.name,
+      s.parent_name,
+      s.file_path,
+      s.model,
+      s.source_snippet
+    FROM symbols s
+    WHERE s.type = 'method'
+      AND (s.source_snippet LIKE ? OR s.source_snippet LIKE ? OR s.source_snippet LIKE ?)
+    LIMIT ?
+  `);
+
+  const typeRefRows = typeRefStmt.all(...typeRefPatterns, limit);
+  const existingCallers = new Set(references.map(r => r.caller));
+  for (const row of typeRefRows) {
+    const caller = row.parent_name ? `${row.parent_name}.${row.name}` : row.name;
+    if (existingCallers.has(caller)) continue; // skip duplicates
+    const context = extractTableReferenceContext(row.source_snippet, className);
+    if (context) {
+      references.push({
+        file: row.file_path,
+        model: row.model,
+        context: context,
+        referenceType: 'type-reference',
+        caller,
+      });
+      existingCallers.add(caller);
     }
   }
 

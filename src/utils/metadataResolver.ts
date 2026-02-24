@@ -19,6 +19,7 @@ import { fileURLToPath } from 'url';
 // Resolve path relative to this file, not to process.cwd()
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTRACTED_METADATA_BASE = path.resolve(__dirname, '../../extracted-metadata');
+const METADATA_BASE = path.resolve(__dirname, '../../metadata');
 
 export type ExtractedObjectType = 'classes' | 'enums' | 'edts' | 'tables' | 'views';
 
@@ -176,16 +177,19 @@ export async function readEnumRawXml(
   model: string,
   enumName: string
 ): Promise<string | null> {
-  const filePath = await resolveMetadataJsonPath(model, 'enums', enumName);
-  if (!filePath) return null;
-
-  try {
-    const raw = await fs.readFile(filePath, 'utf-8');
-    const data = JSON.parse(raw);
-    return typeof data.raw === 'string' ? data.raw : null;
-  } catch {
-    return null;
+  // Try extracted-metadata/ first, then metadata/ (DB file_path may point here)
+  for (const base of [EXTRACTED_METADATA_BASE, METADATA_BASE]) {
+    const filePath = path.join(base, model, 'enums', `${enumName}.json`);
+    try {
+      await fs.access(filePath);
+      const raw = await fs.readFile(filePath, 'utf-8');
+      const data = JSON.parse(raw);
+      return typeof data.raw === 'string' ? data.raw : null;
+    } catch {
+      continue;
+    }
   }
+  return null;
 }
 
 /**
@@ -196,16 +200,19 @@ export async function readEdtRawXml(
   model: string,
   edtName: string
 ): Promise<string | null> {
-  const filePath = await resolveMetadataJsonPath(model, 'edts', edtName);
-  if (!filePath) return null;
-
-  try {
-    const raw = await fs.readFile(filePath, 'utf-8');
-    const data = JSON.parse(raw);
-    return typeof data.raw === 'string' ? data.raw : null;
-  } catch {
-    return null;
+  // Try extracted-metadata/ first, then metadata/ (DB file_path may point here)
+  for (const base of [EXTRACTED_METADATA_BASE, METADATA_BASE]) {
+    const filePath = path.join(base, model, 'edts', `${edtName}.json`);
+    try {
+      await fs.access(filePath);
+      const raw = await fs.readFile(filePath, 'utf-8');
+      const data = JSON.parse(raw);
+      return typeof data.raw === 'string' ? data.raw : null;
+    } catch {
+      continue;
+    }
   }
+  return null;
 }
 
 export async function readViewMetadata(
