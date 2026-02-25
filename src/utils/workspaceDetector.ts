@@ -38,7 +38,16 @@ async function findProjectFiles(
       const fullPath = path.join(dir, entry.name);
 
       // Skip common directories that won't contain .rnrproj
-      const skipDirs = ['node_modules', 'bin', 'obj', '.git', '.vs', 'PackagesLocalDirectory'];
+      const skipDirs = [
+        'node_modules', 'bin', 'obj', '.git', '.vs', 'PackagesLocalDirectory',
+        // AOT artifact folders inside model directories — skip to avoid crawling thousands of XML files
+        'AxClass', 'AxTable', 'AxForm', 'AxEnum', 'AxQuery', 'AxView',
+        'AxDataEntityView', 'AxTableExtension', 'AxFormExtension',
+        'AxMenuItemAction', 'AxMenuItemDisplay', 'AxMenuItemOutput',
+        'AxMenu', 'AxSecurityRole', 'AxSecurityDuty', 'AxSecurityPrivilege',
+        'AxLabel', 'AxResource', 'AxReport', 'AxWorkflowType',
+        'AxEdt', 'AxExtendedDataType',
+      ];
       if (entry.isDirectory() && skipDirs.includes(entry.name)) {
         continue;
       }
@@ -134,6 +143,7 @@ export async function detectD365Project(workspacePath: string, maxDepth: number 
  * 1. Explicitly provided workspacePath parameter
  * 2. Current working directory (process.cwd())
  * 3. Environment variable WORKSPACE_PATH
+ * 4. PackagesLocalDirectory path regex extraction (last resort, no .rnrproj)
  */
 export async function autoDetectD365Project(
   explicitWorkspacePath?: string

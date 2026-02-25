@@ -8,7 +8,10 @@ import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { XppServerContext } from '../types/context.js';
 import { promises as fs } from 'fs';
+import path from 'path';
 import { parseStringPromise, Builder } from 'xml2js';
+import { getConfigManager } from '../utils/configManager.js';
+import { PackageResolver } from '../utils/packageResolver.js';
 
 const ModifyD365FileArgsSchema = z.object({
   objectType: z.enum(['class', 'table', 'form', 'enum', 'query', 'view']).describe('Type of D365FO object'),
@@ -185,19 +188,19 @@ async function findD365File(
     throw new Error(`Unsupported object type: ${objectType}`);
   }
 
-  // Query database
-  let stmt;
+  // Query database first
+  let dbResult: string | null = null;
   if (modelName) {
-    stmt = symbolIndex.db.prepare(`
+    const stmt = symbolIndex.db.prepare(`
       SELECT file_path
       FROM symbols
       WHERE type = ? AND name = ? AND model = ?
       LIMIT 1
     `);
     const row = stmt.get(symbolType, objectName, modelName);
-    return row ? row.file_path : null;
+    dbResult = row ? row.file_path : null;
   } else {
-    stmt = symbolIndex.db.prepare(`
+    const stmt = symbolIndex.db.prepare(`
       SELECT file_path
       FROM symbols
       WHERE type = ? AND name = ?
@@ -205,8 +208,103 @@ async function findD365File(
       LIMIT 1
     `);
     const row = stmt.get(symbolType, objectName);
-    return row ? row.file_path : null;
+    dbResult = row ? row.file_path : null;
   }
+
+  if (dbResult) {
+    return dbResult;
+  }
+
+  // Filesystem fallback: handles newly created files not yet in the symbol index
+  return findD365FileOnDisk(objectType, objectName, modelName);
+}
+
+/**
+ * Filesystem fallback for findD365File.
+ * Constructs the expected AOT file path from config/env and checks if it exists on disk.
+ * This handles objects that were just created and are not yet indexed in the symbol database.
+ */
+async function findD365FileOnDisk(
+  objectType: string,
+  objectName: string,
+  modelName?: string
+): Promise<string | null> {
+  const folderMap: Record<string, string> = {
+    class: 'AxClass',
+    table: 'AxTable',
+    form: 'AxForm',
+    enum: 'AxEnum',
+    query: 'AxQuery',
+    view: 'AxView',
+  };
+
+  const objectFolder = folderMap[objectType];
+  if (!objectFolder) return null;
+
+  const configManager = getConfigManager();
+
+  // Resolve model name: explicit arg (if not placeholder) → config → auto-detected
+  const resolvedModel =
+    (modelName && modelName !== 'any' ? modelName : null) ||
+    configManager.getModelName() ||
+    (await configManager.getAutoDetectedModelName());
+
+  if (!resolvedModel) {
+    console.error('[modifyD365File] Filesystem fallback: could not resolve model name');
+    return null;
+  }
+
+  const configPackagePath =
+    configManager.getPackagePath() || 'K:\\AosService\\PackagesLocalDirectory';
+
+  // Traditional mode: package name == model name (most common case)
+  const candidatePath = path.join(
+    configPackagePath,
+    resolvedModel,
+    resolvedModel,
+    objectFolder,
+    `${objectName}.xml`
+  );
+
+  try {
+    await fs.access(candidatePath);
+    console.error(`[modifyD365File] Found via filesystem fallback: ${candidatePath}`);
+    return candidatePath;
+  } catch {
+    // Not at the default package==model path; try UDE layout
+  }
+
+  // UDE mode: package name may differ from model name — use PackageResolver
+  try {
+    const envType = await configManager.getDevEnvironmentType();
+    if (envType === 'ude') {
+      const customPath = await configManager.getCustomPackagesPath();
+      const msPath = await configManager.getMicrosoftPackagesPath();
+      const roots = [customPath, msPath].filter(Boolean) as string[];
+      const resolver = new PackageResolver(roots);
+      const resolved = await resolver.resolve(resolvedModel);
+      if (resolved) {
+        const udePath = path.join(
+          resolved.rootPath,
+          resolved.packageName,
+          resolvedModel,
+          objectFolder,
+          `${objectName}.xml`
+        );
+        try {
+          await fs.access(udePath);
+          console.error(`[modifyD365File] Found via UDE filesystem fallback: ${udePath}`);
+          return udePath;
+        } catch {
+          // Not found at UDE path either
+        }
+      }
+    }
+  } catch {
+    // UDE resolution failed — skip silently
+  }
+
+  return null;
 }
 
 /**
@@ -238,20 +336,31 @@ async function addMethod(xmlObj: any, objectType: string, args: any): Promise<bo
 
   // Methods are always under SourceCode > Methods for all D365FO object types
   // (AxClass, AxTable, AxForm all use <SourceCode><Methods>...</Methods></SourceCode>)
+  //
+  // xml2js edge cases for empty/missing SourceCode:
+  //   - absent entirely          → root.SourceCode is undefined         → falsy ✓
+  //   - <SourceCode></SourceCode> → root.SourceCode is ['']             → truthy array, element is ''
+  //   - <SourceCode/>            → root.SourceCode is ['']             → same
+  // We must check the *element* is a proper object, not just that the array exists.
   let methodsContainer: any;
-  if (!root.SourceCode) {
+  const sourceCodeEl = Array.isArray(root.SourceCode) ? root.SourceCode[0] : root.SourceCode;
+  if (!sourceCodeEl || typeof sourceCodeEl !== 'object') {
+    // Absent or empty element – create the full structure from scratch
     root.SourceCode = [{ Methods: [{ Method: [] }] }];
   }
   methodsContainer = root.SourceCode[0];
 
   let methodsNode = methodsContainer.Methods;
-  if (!methodsNode) {
+  if (!methodsNode || (Array.isArray(methodsNode) && typeof methodsNode[0] !== 'object')) {
     methodsContainer.Methods = [{ Method: [] }];
     methodsNode = methodsContainer.Methods;
   }
 
   if (!methodsNode[0].Method) {
     methodsNode[0].Method = [];
+  } else if (!Array.isArray(methodsNode[0].Method)) {
+    // Single existing method may be parsed as an object instead of a 1-element array
+    methodsNode[0].Method = [methodsNode[0].Method];
   }
 
   // Create method node

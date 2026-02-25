@@ -5,7 +5,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { autoDetectD365Project, type D365ProjectInfo } from './workspaceDetector.js';
+import { autoDetectD365Project, detectD365Project, type D365ProjectInfo } from './workspaceDetector.js';
 import { registerCustomModel } from './modelClassifier.js';
 import { XppConfigProvider, type XppEnvironmentConfig } from './xppConfigProvider.js';
 
@@ -76,8 +76,34 @@ class ConfigManager {
     console.error('[ConfigManager] Auto-detecting D365FO project from workspace...');
 
     // Try to detect from provided workspace path or current directory
-    const detectedProject = await autoDetectD365Project(workspacePath);
-    
+    let detectedProject = await autoDetectD365Project(workspacePath);
+
+    // Fallback: if no .rnrproj was found (workspace is the MCP server dir, not the D365FO solution),
+    // scan the configured packagePath directly.
+    // In standard D365FO layout the .rnrproj lives inside:
+    //   PackagesLocalDirectory\<package>\<model>\<model>.rnrproj
+    if (!detectedProject?.projectPath) {
+      const packagePathHint =
+        this.runtimeContext.packagePath ||
+        this.config?.servers.context?.packagePath;
+
+      if (packagePathHint) {
+        console.error(`[ConfigManager] No .rnrproj in workspace — scanning packagePath: ${packagePathHint}`);
+        const pkgScan = await detectD365Project(packagePathHint, 4);
+        if (pkgScan?.projectPath) {
+          detectedProject = {
+            ...pkgScan,
+            // Prefer model name already resolved via Priority 4 (from PackagesLocalDirectory regex)
+            modelName: detectedProject?.modelName || pkgScan.modelName,
+            packagePath: packagePathHint,
+          };
+          console.error(`[ConfigManager] ✅ Found .rnrproj via packagePath scan: ${pkgScan.projectPath}`);
+        } else {
+          console.error(`[ConfigManager] No .rnrproj found in packagePath either`);
+        }
+      }
+    }
+
     // Store in cache (PERFORMANCE FIX)
     this.autoDetectionCache.set(cacheKey, detectedProject);
     
@@ -188,8 +214,13 @@ class ConfigManager {
       this.config = JSON.parse(content);
       console.error('[ConfigManager] Config loaded successfully');
       return this.config;
-    } catch (error) {
-      console.error('[ConfigManager] Failed to load .mcp.json:', error);
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') {
+        // .mcp.json is optional — not present on Azure/cloud deployments, only on local Windows VM.
+        console.error(`[ConfigManager] .mcp.json not found at ${this.configPath} — running without local config (expected on Azure)`);
+      } else {
+        console.error('[ConfigManager] Failed to load .mcp.json:', error);
+      }
       return null;
     }
   }

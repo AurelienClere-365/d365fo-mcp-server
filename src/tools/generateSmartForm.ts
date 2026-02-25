@@ -11,6 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import { getConfigManager } from '../utils/configManager.js';
 import { resolveObjectPrefix, applyObjectPrefix } from '../utils/modelClassifier.js';
+import { ProjectFileManager } from './createD365File.js';
 
 interface GenerateSmartFormArgs {
   name: string;
@@ -251,22 +252,31 @@ export async function handleGenerateSmartForm(
 
   if (!resolvedModel) {
     if (isNonWindows) {
-      // Fallback priority: modelName arg → modelName/workspacePath (mcp.json) → D365FO_MODEL_NAME env var → no prefix
+      // Both Windows and Azure/Linux: .rnrproj extraction failed (or wasn't attempted).
+      // Fall back in this order:
+      //   1. .mcp.json context (modelName field or last segment of workspacePath)
+      //   2. Auto-detected model name (async) — e.g. from PackagesLocalDirectory regex / well-known paths
+      //   3. D365FO_MODEL_NAME env var
+      //   4. modelName arg — LAST because the AI often passes a placeholder like "any" or "whatever"
       const configModel = configManager.getModelName();
-      resolvedModel = modelName || configModel || process.env.D365FO_MODEL_NAME || undefined;
+      const autoModel = configModel ? null : (await configManager.getAutoDetectedModelName());
+      resolvedModel = configModel || autoModel || process.env.D365FO_MODEL_NAME || modelName || undefined;
       if (resolvedModel) {
         const ctx = configManager.getContext();
-        const source = modelName ? 'modelName arg'
-          : ctx?.modelName ? 'modelName (mcp.json)'
-          : configModel === resolvedModel ? 'workspacePath (mcp.json)'
-          : 'D365FO_MODEL_NAME env var';
+        const source = configModel === resolvedModel
+          ? (ctx?.modelName ? 'modelName (mcp.json)' : 'workspacePath (mcp.json)')
+          : autoModel === resolvedModel ? 'auto-detected (well-known paths)'
+          : process.env.D365FO_MODEL_NAME === resolvedModel ? 'D365FO_MODEL_NAME env var'
+          : 'modelName arg (fallback)';
         console.log(`[generateSmartForm] Using model from ${source}: ${resolvedModel}`);
+      } else if (!isNonWindows) {
+        // Windows VM: all sources exhausted — tell the user exactly what to configure.
+        throw new Error(
+          'Could not resolve model name. Provide modelName, projectPath, or solutionPath, ' +
+          'or configure projectPath/solutionPath in .mcp.json or set D365FO_MODEL_NAME env var.'
+        );
       }
-    } else {
-      throw new Error(
-        'Could not resolve model name. Provide modelName, projectPath, or solutionPath, ' +
-        'or configure projectPath/solutionPath in .mcp.json or set D365FO_MODEL_NAME env var.'
-      );
+      // Non-Windows: if still null we continue without a prefix.
     }
   }
 
@@ -353,19 +363,53 @@ export async function handleGenerateSmartForm(
   fs.writeFileSync(normalizedPath, xml, 'utf-8');
   console.log(`[generateSmartForm] Created file: ${normalizedPath}`);
 
+  // Add to Visual Studio project if a projectPath is known
+  let projectMessage = '';
+  const effectiveProjectPath = resolvedProjectPath ||
+    (await getConfigManager().getProjectPath()) ||
+    undefined;
+
+  if (effectiveProjectPath) {
+    try {
+      const projectManager = new ProjectFileManager();
+      const wasAdded = await projectManager.addToProject(
+        effectiveProjectPath,
+        'form',
+        finalName,
+        normalizedPath
+      );
+      projectMessage = wasAdded
+        ? `\n✅ Added to Visual Studio project:\n📋 Project: ${effectiveProjectPath}`
+        : `\n✅ Already in Visual Studio project:\n📋 Project: ${effectiveProjectPath}`;
+      console.log(`[generateSmartForm] addToProject result: ${wasAdded ? 'added' : 'already present'}`);
+    } catch (projErr) {
+      projectMessage = `\n⚠️ File created but could not be added to project: ${projErr instanceof Error ? projErr.message : String(projErr)}`;
+      console.error(`[generateSmartForm] addToProject error:`, projErr);
+    }
+  } else {
+    projectMessage = `\n⚠️ addToProject skipped — no projectPath found in .mcp.json or tool args.`;
+  }
+
   return {
     content: [
       {
         type: 'text',
-        text: JSON.stringify({
-          success: true,
-          formName: finalName,
-          filePath: normalizedPath,
-          dataSourcesGenerated: dataSources.length,
-          controlsGenerated: controls.length,
-          strategy: copyFrom ? 'copy' : dataSource ? 'datasource' : formPattern ? 'pattern' : 'default',
-          xml,
-        }, null, 2),
+        text: [
+          `✅ Form **${finalName}** created directly on the Windows VM.`,
+          ``,
+          `📁 File: ${normalizedPath}`,
+          `📦 Model: ${resolvedModel}`,
+          `📊 DataSources: ${dataSources.length}, Controls: ${controls.length}`,
+          projectMessage,
+          ``,
+          `⛔ DO NOT call \`create_d365fo_file\` — the file is already written to disk.`,
+          `⛔ DO NOT call \`generate_smart_form\` again — task is COMPLETE.`,
+          ``,
+          `Next steps for the user:`,
+          `1. Reload the project in Visual Studio (or close/reopen solution)`,
+          `2. Build the project to synchronize the form`,
+          `3. Refresh AOT to see the new object`,
+        ].join('\n'),
       },
     ],
   };

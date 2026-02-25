@@ -99,19 +99,26 @@ export class SmartXmlBuilder {
     xml += `\t<DeleteActions />\n`;
 
     // 5 standard FieldGroups required by VS D365FO project system
+    // Order matches real D365FO AOT: AutoReport, AutoLookup, AutoIdentification, AutoSummary, AutoBrowse
     xml += `\t<FieldGroups>\n`;
-    for (const groupName of ['AutoReport', 'AutoLookup', 'AutoSummary', 'AutoBrowse']) {
+    for (const groupName of ['AutoReport', 'AutoLookup']) {
       xml += `\t\t<AxTableFieldGroup>\n`;
       xml += `\t\t\t<Name>${groupName}</Name>\n`;
       xml += `\t\t\t<Fields />\n`;
       xml += `\t\t</AxTableFieldGroup>\n`;
     }
-    // AutoIdentification requires AutoPopulate=Yes
+    // AutoIdentification is 3rd (requires AutoPopulate=Yes)
     xml += `\t\t<AxTableFieldGroup>\n`;
     xml += `\t\t\t<Name>AutoIdentification</Name>\n`;
     xml += `\t\t\t<AutoPopulate>Yes</AutoPopulate>\n`;
     xml += `\t\t\t<Fields />\n`;
     xml += `\t\t</AxTableFieldGroup>\n`;
+    for (const groupName of ['AutoSummary', 'AutoBrowse']) {
+      xml += `\t\t<AxTableFieldGroup>\n`;
+      xml += `\t\t\t<Name>${groupName}</Name>\n`;
+      xml += `\t\t\t<Fields />\n`;
+      xml += `\t\t</AxTableFieldGroup>\n`;
+    }
     xml += `\t</FieldGroups>\n`;
 
     // Fields

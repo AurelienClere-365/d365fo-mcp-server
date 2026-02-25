@@ -422,7 +422,7 @@ ${dataSourceXml}\t\t<Pattern xmlns="">${pattern}</Pattern>
 /**
  * Visual Studio Project (.rnrproj) Manipulator
  */
-class ProjectFileManager {
+export class ProjectFileManager {
   private parser: Parser;
   private builder: Builder;
 
@@ -1175,7 +1175,7 @@ export async function handleCreateD365File(
             `🔧 Type: ${objectFolder}\n` +
             projectMessage +
             `\n${nextSteps}\n` +
-            `File content preview:\n\`\`\`xml\n${xmlContent.substring(0, 500)}...\n\`\`\``,
+            `⛔ TASK COMPLETE — do NOT call \`generate_smart_table\`, \`generate_smart_form\`, or \`create_d365fo_file\` again for this object.`,
         },
       ],
     };

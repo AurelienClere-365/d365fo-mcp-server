@@ -10,6 +10,7 @@ import path from 'path';
 import fs from 'fs';
 import { getConfigManager } from '../utils/configManager.js';
 import { resolveObjectPrefix, applyObjectPrefix } from '../utils/modelClassifier.js';
+import { ProjectFileManager } from './createD365File.js';
 
 interface GenerateSmartTableArgs {
   name: string;
@@ -361,27 +362,32 @@ export async function handleGenerateSmartTable(
   const isNonWindows = process.platform !== 'win32';
 
   if (!resolvedModel) {
-    if (isNonWindows) {
-      // Azure/Linux: model resolution requires .rnrproj which is only on the Windows VM.
-      // Use modelName arg as-is for prefix resolution (caller may pass e.g. "MyModel").
-      // If not provided either, generate XML without prefix and return it as text.
-      // Fallback priority: modelName arg → modelName/workspacePath (mcp.json) → D365FO_MODEL_NAME env var → no prefix
-      const configModel = configManager.getModelName();
-      resolvedModel = modelName || configModel || process.env.D365FO_MODEL_NAME || undefined;
-      if (resolvedModel) {
-        const ctx = configManager.getContext();
-        const source = modelName ? 'modelName arg'
-          : ctx?.modelName ? 'modelName (mcp.json)'
-          : configModel === resolvedModel ? 'workspacePath (mcp.json)'
-          : 'D365FO_MODEL_NAME env var';
-        console.log(`[generateSmartTable] Using model from ${source}: ${resolvedModel}`);
-      }
-    } else {
+    // Both Windows and Azure/Linux: .rnrproj extraction failed (or wasn't attempted).
+    // Fall back in this order:
+    //   1. .mcp.json context (modelName field or last segment of workspacePath) — user explicitly configured
+    //   2. Auto-detected model name (async) — e.g. from PackagesLocalDirectory regex in well-known paths scan
+    //   3. D365FO_MODEL_NAME env var
+    //   4. modelName arg — LAST because the AI often passes a placeholder like "any" or "whatever"
+    // Only throw when every source is exhausted.
+    const configModel = configManager.getModelName();
+    const autoModel = configModel ? null : (await configManager.getAutoDetectedModelName());
+    resolvedModel = configModel || autoModel || process.env.D365FO_MODEL_NAME || modelName || undefined;
+    if (resolvedModel) {
+      const ctx = configManager.getContext();
+      const source = configModel === resolvedModel
+        ? (ctx?.modelName ? 'modelName (mcp.json)' : 'workspacePath (mcp.json)')
+        : autoModel === resolvedModel ? 'auto-detected (well-known paths)'
+        : process.env.D365FO_MODEL_NAME === resolvedModel ? 'D365FO_MODEL_NAME env var'
+        : 'modelName arg (fallback)';
+      console.log(`[generateSmartTable] Using model from ${source}: ${resolvedModel}`);
+    } else if (!isNonWindows) {
+      // Windows VM: all sources exhausted — tell the user exactly what to configure.
       throw new Error(
         'Could not resolve model name. Provide modelName, projectPath, or solutionPath, ' +
         'or configure projectPath/solutionPath in .mcp.json or set D365FO_MODEL_NAME env var.'
       );
     }
+    // Non-Windows: if still null we continue without a prefix (XML will be returned as text).
   }
 
   console.log(`[generateSmartTable] Using model: ${resolvedModel ?? '(none — no prefix)'}`);
@@ -453,26 +459,49 @@ export async function handleGenerateSmartTable(
     }
   }
 
-  // Build incomplete-table warning for when no fieldsHint was provided
-  const incompleteWarning = usedFallback
-    ? [
-        ``,
-        `⚠️ **INCOMPLETE TABLE — \`fieldsHint\` was NOT provided!**`,
-        `Generic default fields were used instead of the user's actual fields.`,
-        ``,
-        `🔄 **YOU MUST REGENERATE** — call \`generate_smart_table\` AGAIN with correct parameters:`,
-        `\`\`\``,
-        `generate_smart_table(`,
-        `  name="${name}",              ← base name WITHOUT model prefix`,
-        `  fieldsHint="Field1, Field2, Field3",  ← extract ALL fields from the user's description`,
-        `  primaryKeyFields=["Field1", "Field2"],  ← ALL fields in the PK (omit for single-field PK)`,
-        `  methods=["find", "exist"],   ← include if user requested these`,
-        `)`,
-        `\`\`\``,
-        `⛔ **NEVER** call \`modify_d365fo_file\` to add missing fields — it CANNOT write on Azure/Linux.`,
-        `⛔ **NEVER** call \`create_d365fo_file\` with this incomplete XML — REGENERATE first.`,
-      ].join('\n')
-    : '';
+  // HARD-BLOCK: when no fieldsHint was provided (and no copyFrom / generateCommonFields),
+  // return an error immediately — do NOT generate any XML that the AI might use.
+  // The AI MUST retry with explicit fieldsHint extracted from the user's description.
+  if (usedFallback) {
+    console.error(`[generateSmartTable] ❌ BLOCKED — fieldsHint not provided for table "${name}"`);
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          `❌ **CANNOT GENERATE TABLE — \`fieldsHint\` is REQUIRED!**`,
+          ``,
+          `The user described specific fields but you did NOT pass \`fieldsHint\`. Without it the table`,
+          `will be empty (no fields, no indexes, no methods). No XML has been generated.`,
+          ``,
+          `🔄 **YOU MUST call \`generate_smart_table\` AGAIN** with ALL fields extracted from the user's description:`,
+          ``,
+          `\`\`\``,
+          `generate_smart_table(`,
+          `  name="${name}",                           ← base name WITHOUT model prefix`,
+          `  fieldsHint="Field1, Field2, Field3",      ← REQUIRED: extract ALL fields from the user`,
+          `  primaryKeyFields=["Field1", "Field2"],    ← ALL PK fields (omit for single-field PK)`,
+          `  methods=["find", "exist"],                ← include if user requested these`,
+          `  tableGroup="${tableGroup}",`,
+          `)`,
+          `\`\`\``,
+          ``,
+          `**Common Czech → D365FO field name mappings:**`,
+          `| User phrase | fieldsHint value |`,
+          `|-------------|-----------------|`,
+          `| "Account number" / "číslo účtu" | \`AccountNum\` |`,
+          `| "Name" / "název" | \`Name\` |`,
+          `| "Description" / "popis" | \`Description\` |`,
+          `| "platnost od" / "from date" / "valid from" | \`ValidFrom\` |`,
+          `| "platnost do" / "to date" / "valid to" | \`ValidTo\` |`,
+          `| "active" / "aktivní" / "flag" | \`Active\` |`,
+          ``,
+          `⛔ NEVER call \`create_d365fo_file\` without first regenerating — there is no XML to use.`,
+          `⛔ NEVER call \`modify_d365fo_file\` to add missing fields — it CANNOT write on Azure/Linux.`,
+        ].join('\n'),
+      }],
+      isError: true,
+    };
+  }
 
   // Generate XML
   const xml = builder.buildTableXml({
@@ -514,7 +543,6 @@ export async function handleGenerateSmartTable(
           `✅ Table XML generated for **${finalName}**` + (resolvedModel ? ` (model: ${resolvedModel})` : ''),
           `   Fields: ${fields.length}, Indexes: ${indexes.length}, Relations: ${relations.length}`,
           noModelNote,
-          incompleteWarning,
           ``,
           `ℹ️  MCP server is running on Azure/Linux — file writing is handled by the local Windows companion. This is the expected hybrid workflow.`,
           nextStep,
@@ -564,20 +592,53 @@ export async function handleGenerateSmartTable(
   fs.writeFileSync(normalizedPath, xml, 'utf-8');
   console.log(`[generateSmartTable] Created file: ${normalizedPath}`);
 
+  // Add to Visual Studio project if a projectPath is known
+  let projectMessage = '';
+  const effectiveProjectPath = resolvedProjectPath ||
+    (await getConfigManager().getProjectPath()) ||
+    undefined;
+
+  if (effectiveProjectPath) {
+    try {
+      const projectManager = new ProjectFileManager();
+      const wasAdded = await projectManager.addToProject(
+        effectiveProjectPath,
+        'table',
+        finalName,
+        normalizedPath
+      );
+      projectMessage = wasAdded
+        ? `\n✅ Added to Visual Studio project:\n📋 Project: ${effectiveProjectPath}`
+        : `\n✅ Already in Visual Studio project:\n📋 Project: ${effectiveProjectPath}`;
+      console.log(`[generateSmartTable] addToProject result: ${wasAdded ? 'added' : 'already present'}`);
+    } catch (projErr) {
+      projectMessage = `\n⚠️ File created but could not be added to project: ${projErr instanceof Error ? projErr.message : String(projErr)}`;
+      console.error(`[generateSmartTable] addToProject error:`, projErr);
+    }
+  } else {
+    projectMessage = `\n⚠️ addToProject skipped — no projectPath found in .mcp.json or tool args.`;
+  }
+
   return {
     content: [
       {
         type: 'text',
-        text: JSON.stringify({
-          success: true,
-          tableName: finalName,
-          filePath: normalizedPath,
-          fieldsGenerated: fields.length,
-          indexesGenerated: indexes.length,
-          relationsGenerated: relations.length,
-          strategy: copyFrom ? 'copy' : generateCommonFields ? 'patterns' : fieldsHint ? 'hints' : 'default',
-          xml,
-        }, null, 2),
+        text: [
+          `✅ Table **${finalName}** created directly on the Windows VM.`,
+          ``,
+          `📁 File: ${normalizedPath}`,
+          `📦 Model: ${resolvedModel}`,
+          `📊 Fields: ${fields.length}, Indexes: ${indexes.length}, Relations: ${relations.length}`,
+          projectMessage,
+          ``,
+          `⛔ DO NOT call \`create_d365fo_file\` — the file is already written to disk.`,
+          `⛔ DO NOT call \`generate_smart_table\` again — task is COMPLETE.`,
+          ``,
+          `Next steps for the user:`,
+          `1. Reload the project in Visual Studio (or close/reopen solution)`,
+          `2. Build the project to synchronize the table`,
+          `3. Refresh AOT to see the new object`,
+        ].join('\n'),
       },
     ],
   };

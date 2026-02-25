@@ -74,13 +74,23 @@ User: "Review the SalesTableType class and check if it follows best practices"
    - Optional: call `generate_d365fo_xml()` first to get XML content, then pass it to `create_d365fo_file()`
    - `create_file` will corrupt D365FO metadata and break project integration
 
-6. **When `generate_smart_table` or `generate_smart_form` returns XML as text — this is SUCCESS, not a failure**
-   - The message `ℹ️ MCP server is running on Azure/Linux — file writing is handled by the local Windows companion` means the tool completed correctly
+6. **`generate_smart_table` / `generate_smart_form` — TWO possible success responses, different required actions**
+
+   **Case A — Azure/Linux response** (contains `ℹ️ MCP server is running on Azure/Linux`):
+   - The tool generated XML but could not write it to disk (no K:\ drive)
    - The **ONLY correct next action** is `create_d365fo_file(objectType=..., objectName=..., xmlContent="<full XML>", addToProject=true)`
-   - ⛔ NEVER try `modify_d365fo_file` as an intermediate or compensating step
-   - ⛔ NEVER fall back to `create_file`, PowerShell scripts, or any built-in file tool
-   - ⛔ NEVER tell the user "the file was not processed correctly" — the XML was generated correctly; only the file write step is pending
-   - The flow is always: `generate_smart_table` → XML text → `create_d365fo_file(xmlContent=...)` — no other alternative exists
+   - ⛔ NEVER try `modify_d365fo_file`, `create_file`, or PowerShell scripts
+   - The flow: `generate_smart_table` → XML text → `create_d365fo_file(xmlContent=...)` → **STOP**
+
+   **Case B — Windows direct-write response** (contains `⛔ DO NOT call create_d365fo_file`):
+   - The tool wrote the file **directly to disk** — the task is already complete
+   - ⛔ **DO NOT call `create_d365fo_file`** — it would overwrite the file unnecessarily
+   - ⛔ **DO NOT call `generate_smart_table` again** — the file exists
+   - Inform the user of the file path and tell them to reload the VS project — **STOP**
+
+   **How to tell them apart:**
+   - Azure/Linux → response contains the XML block and "MANDATORY NEXT STEP"
+   - Windows direct → response contains "DO NOT call `create_d365fo_file`" and a file path
 
 7. **Use specific tools for specific object types**
    - For forms: use `get_form_info()`, not `search(type="form")`
@@ -396,9 +406,7 @@ Step 1: generate_smart_table(
           generateCommonFields=true,
           methods=["find","exist"]    ← embed methods in XML — do NOT call modify_d365fo_file afterwards
         )
-     → Returns "✅ Table XML generated" with ℹ️ Azure/Linux note — this is SUCCESS
-     → The tool response contains MANDATORY NEXT STEP instructions
-     → XML is included in the response
+     → Returns "ℹ️ MCP server is running on Azure/Linux" + XML block + MANDATORY NEXT STEP
 
 Step 2: create_d365fo_file(           ← IMMEDIATELY after step 1, no intermediate steps
           objectType="table",
@@ -408,14 +416,32 @@ Step 2: create_d365fo_file(           ← IMMEDIATELY after step 1, no intermedi
         )
      → Writes file to K:\AosService\PackagesLocalDirectory\MyPackage\MyModel\AxTable\...
      → Adds entry to .rnrproj for VS2022
+     → Returns "TASK COMPLETE" — STOP here, do NOT call generate_smart_table again
 
 ⛔ FORBIDDEN alternatives when generate_smart_table returns XML text:
    - create_file()                  ← NEVER — corrupts D365FO metadata
    - PowerShell / shell scripts     ← NEVER — bypasses AOT structure
    - modify_d365fo_file()           ← NEVER — not a substitute for create_d365fo_file
-   - Telling user to save manually  ← never needed; create_d365fo_file handles it
+   - Calling generate_smart_table again after create_d365fo_file succeeds ← LOOP!
+```
 
-Same pattern applies for generate_smart_form + create_d365fo_file(objectType="form", ...).
+**Workflow for Windows-only (full mode, single server):**
+```
+Step 1: generate_smart_table(
+          name="MyOrderTable",
+          fieldsHint="OrderId, CustomerAccount, OrderAmount, OrderDate",
+          primaryKeyFields=["OrderId"],
+          methods=["find","exist"]
+        )
+     → Returns "✅ Table created directly on the Windows VM" + file path
+     → File is ALREADY written to K:\...\AxTable\MyOrderTable.xml
+
+⛔ STOP — do NOT call create_d365fo_file (file already exists)
+⛔ STOP — do NOT call generate_smart_table again
+→ Tell the user: file path + "reload the VS project and build"
+```
+
+Same patterns apply for generate_smart_form.
 ```
 
 
@@ -541,6 +567,8 @@ K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxView\{Name}.xml
 - **Never call `modify_d365fo_file` after `generate_smart_table` to add methods** — use the `methods` parameter instead; `modify_d365fo_file` fails on Azure/Linux (read-only mode)
 - **🚨 NEVER use `create_file` or PowerShell as a fallback when `generate_smart_table`/`generate_smart_form` returns XML as text** — the `ℹ️ Azure/Linux` message in the response means "pass this XML to `create_d365fo_file(xmlContent=...)`", not "the tool failed". There is NO other acceptable approach.
 - **NEVER interpret `generate_smart_table`/`generate_smart_form` returning XML as a partial failure** — it is a complete success; `create_d365fo_file(xmlContent=...)` is the mandatory and only next step
+- **🚨 NEVER call `create_d365fo_file` when `generate_smart_table`/`generate_smart_form` response contains `⛔ DO NOT call create_d365fo_file`** — the file was written directly on Windows; calling `create_d365fo_file` creates a loop
+- **🚨 NEVER call `generate_smart_table` or `generate_smart_form` again after a success response** — once either tool reports success (regardless of Windows or Azure path), the task is COMPLETE; calling them again creates duplicates
 
 ## Why MCP Tools Are Required
 
