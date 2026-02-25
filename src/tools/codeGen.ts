@@ -6,6 +6,7 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { resolveObjectPrefix, applyObjectPrefix } from '../utils/modelClassifier.js';
+import { getConfigManager } from '../utils/configManager.js';
 
 const CodeGenArgsSchema = z.object({
   pattern: z
@@ -269,8 +270,9 @@ export async function codeGenTool(request: CallToolRequest) {
   try {
     const args = CodeGenArgsSchema.parse(request.params.arguments);
 
-    // Resolve prefix: EXTENSION_PREFIX env var (stripped of trailing '_') or modelName arg or empty
-    const prefix = resolveObjectPrefix(args.modelName ?? '');
+    // Resolve prefix: EXTENSION_PREFIX env var (stripped of trailing '_') or modelName arg → mcp.json → empty
+    const resolvedModelName = args.modelName || getConfigManager().getModelName() || '';
+    const prefix = resolveObjectPrefix(resolvedModelName);
 
     let code: string;
     let displayName: string;

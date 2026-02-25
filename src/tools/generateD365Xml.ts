@@ -7,6 +7,7 @@
 
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { getConfigManager } from '../utils/configManager.js';
 
 const GenerateD365XmlArgsSchema = z.object({
   objectType: z
@@ -17,7 +18,8 @@ const GenerateD365XmlArgsSchema = z.object({
     .describe('Name of the object (e.g., MyHelperClass, MyCustomTable)'),
   modelName: z
     .string()
-    .describe('Model name (e.g., ContosoExtensions, ApplicationSuite)'),
+    .optional()
+    .describe('Model name (e.g., ContosoExtensions). Auto-detected from mcp.json if omitted.'),
   sourceCode: z
     .string()
     .optional()
@@ -238,8 +240,21 @@ export async function handleGenerateD365Xml(
   const args = GenerateD365XmlArgsSchema.parse(request.params.arguments);
 
   try {
+    // Resolve model name: arg → mcp.json modelName → workspacePath segment
+    const configManager = getConfigManager();
+    const modelName = args.modelName || configManager.getModelName();
+    if (!modelName) {
+      const errorMsg =
+        '❌ ERROR: modelName could not be resolved.\n\n' +
+        'Provide it in one of these ways:\n' +
+        '  1. Pass modelName explicitly in the tool call arguments\n' +
+        '  2. Add modelName to .mcp.json context: { "context": { "modelName": "YourModel" } }\n' +
+        '  3. Add workspacePath ending with the package/model name: { "context": { "workspacePath": "K:\\\\...\\\\YourModel" } }';
+      return { content: [{ type: 'text', text: errorMsg }] };
+    }
+
     console.error(
-      `[generate_d365fo_xml] Generating XML for ${args.objectType}: ${args.objectName}, model: ${args.modelName}`
+      `[generate_d365fo_xml] Generating XML for ${args.objectType}: ${args.objectName}, model: ${modelName}`
     );
 
     // Determine object folder based on type
@@ -271,12 +286,12 @@ export async function handleGenerateD365Xml(
     );
 
     // Construct recommended file path
-    const recommendedPath = `K:\\AosService\\PackagesLocalDirectory\\${args.modelName}\\${args.modelName}\\${objectFolder}\\${args.objectName}.xml`;
+    const recommendedPath = `K:\\AosService\\PackagesLocalDirectory\\${modelName}\\${modelName}\\${objectFolder}\\${args.objectName}.xml`;
 
     // Return XML content with instructions
     const instructions = `✅ Generated D365FO ${args.objectType} XML for: ${args.objectName}
 
-📋 Model: ${args.modelName}
+📋 Model: ${modelName}
 📁 Recommended path: ${recommendedPath}
 
 ⚠️ CRITICAL NEXT STEPS (GitHub Copilot MUST do this):

@@ -251,10 +251,16 @@ export async function handleGenerateSmartForm(
 
   if (!resolvedModel) {
     if (isNonWindows) {
-      // Fallback priority: modelName arg → D365FO_MODEL_NAME env var → no prefix
-      resolvedModel = modelName || process.env.D365FO_MODEL_NAME || undefined;
+      // Fallback priority: modelName arg → modelName/workspacePath (mcp.json) → D365FO_MODEL_NAME env var → no prefix
+      const configModel = configManager.getModelName();
+      resolvedModel = modelName || configModel || process.env.D365FO_MODEL_NAME || undefined;
       if (resolvedModel) {
-        console.log(`[generateSmartForm] Using model from ${modelName ? 'modelName arg' : 'D365FO_MODEL_NAME env var'}: ${resolvedModel}`);
+        const ctx = configManager.getContext();
+        const source = modelName ? 'modelName arg'
+          : ctx?.modelName ? 'modelName (mcp.json)'
+          : configModel === resolvedModel ? 'workspacePath (mcp.json)'
+          : 'D365FO_MODEL_NAME env var';
+        console.log(`[generateSmartForm] Using model from ${source}: ${resolvedModel}`);
       }
     } else {
       throw new Error(

@@ -21,7 +21,8 @@ const CreateD365FileArgsSchema = z.object({
     .describe('Name of the object (e.g., MyHelperClass, MyCustomTable)'),
   modelName: z
     .string()
-    .describe('Model name (e.g., ContosoExtensions, ApplicationSuite)'),
+    .optional()
+    .describe('Model name (e.g., ContosoExtensions). Auto-detected from mcp.json if omitted.'),
   packageName: z
     .string()
     .optional()
@@ -646,11 +647,21 @@ export async function handleCreateD365File(
     // If neither projectPath nor solutionPath provided, try to get from config or auto-detect
     if (!projectPathToUse && !solutionPathToUse) {
       const configManager = getConfigManager();
-      
+
       // Try to auto-detect from workspace (async)
       projectPathToUse = await configManager.getProjectPath() || undefined;
       solutionPathToUse = await configManager.getSolutionPath() || undefined;
-      
+
+      // If model name was not passed as argument, try to resolve from mcp.json config
+      if (!actualModelName) {
+        actualModelName = configManager.getModelName() ?? undefined;
+        if (actualModelName) {
+          const ctx = configManager.getContext();
+          const source = ctx?.modelName ? 'modelName (mcp.json)' : 'workspacePath (mcp.json)';
+          console.error(`[create_d365fo_file] Using modelName from ${source}: ${actualModelName}`);
+        }
+      }
+
       if (projectPathToUse) {
         console.error(
           `[create_d365fo_file] Using projectPath (auto-detected or from .mcp.json): ${projectPathToUse}`
@@ -683,7 +694,7 @@ export async function handleCreateD365File(
     else if (solutionPathToUse) {
       const foundProjectPath = await ProjectFileFinder.findProjectInSolution(
         solutionPathToUse,
-        args.modelName
+        actualModelName ?? ''
       );
       
       if (foundProjectPath) {
@@ -702,6 +713,19 @@ export async function handleCreateD365File(
           registerCustomModel(actualModelName);
         }
       }
+    }
+
+    // ⚠️ CRITICAL: modelName is required — must come from args, mcp.json, or .rnrproj extraction
+    if (!actualModelName) {
+      const errorMsg =
+        '❌ ERROR: modelName could not be resolved.\n\n' +
+        'Provide it in one of these ways:\n' +
+        '  1. Pass modelName explicitly in the tool call arguments\n' +
+        '  2. Add modelName to .mcp.json context: { "context": { "modelName": "YourModel" } }\n' +
+        '  3. Add workspacePath ending with the package/model name: { "context": { "workspacePath": "K:\\\\...\\\\YourModel" } }\n' +
+        '  4. Add projectPath or solutionPath to .mcp.json so the model is auto-extracted from .rnrproj';
+      console.error(`[create_d365fo_file] ${errorMsg}`);
+      return { content: [{ type: 'text', text: errorMsg }] };
     }
 
     // ⚠️ CRITICAL WARNING: If no project/solution path available anywhere

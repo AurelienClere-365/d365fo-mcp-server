@@ -300,10 +300,16 @@ export async function handleGenerateSmartTable(
       // Azure/Linux: model resolution requires .rnrproj which is only on the Windows VM.
       // Use modelName arg as-is for prefix resolution (caller may pass e.g. "AslCore").
       // If not provided either, generate XML without prefix and return it as text.
-      // Fallback priority: modelName arg → D365FO_MODEL_NAME env var → no prefix
-      resolvedModel = modelName || process.env.D365FO_MODEL_NAME || undefined;
+      // Fallback priority: modelName arg → modelName/workspacePath (mcp.json) → D365FO_MODEL_NAME env var → no prefix
+      const configModel = configManager.getModelName();
+      resolvedModel = modelName || configModel || process.env.D365FO_MODEL_NAME || undefined;
       if (resolvedModel) {
-        console.log(`[generateSmartTable] Using model from ${modelName ? 'modelName arg' : 'D365FO_MODEL_NAME env var'}: ${resolvedModel}`);
+        const ctx = configManager.getContext();
+        const source = modelName ? 'modelName arg'
+          : ctx?.modelName ? 'modelName (mcp.json)'
+          : configModel === resolvedModel ? 'workspacePath (mcp.json)'
+          : 'D365FO_MODEL_NAME env var';
+        console.log(`[generateSmartTable] Using model from ${source}: ${resolvedModel}`);
       }
     } else {
       throw new Error(

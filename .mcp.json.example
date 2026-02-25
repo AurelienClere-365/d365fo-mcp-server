@@ -6,6 +6,12 @@
  *   1. Single server (local only, full mode)
  *   2. Single server (Azure, read-only mode)
  *   3. Hybrid setup (Azure read-only + local write-only companion)
+ *
+ * Model name resolution priority (from highest to lowest):
+ *   1. modelName argument passed directly in the tool call
+ *   2. modelName in context below (explicit, use when package name ≠ model name)
+ *   3. Last segment of workspacePath (e.g. "AslCore" from "...PackagesLocalDirectory\AslCore")
+ *   4. D365FO_MODEL_NAME environment variable (legacy fallback)
  */
 
 // ─── Option 1: Single local server (full mode) ───────────────────────────────
@@ -39,6 +45,21 @@
   }
 }
 
+// When package name ≠ model name, add modelName explicitly:
+{
+  "servers": {
+    "d365fo-code-intelligence": {
+      "url": "https://your-app-name.azurewebsites.net/mcp/"
+    },
+    "context": {
+      "workspacePath": "K:\\AOSService\\PackagesLocalDirectory\\YourPackageName",
+      "modelName": "YourModelName",
+      "packagePath": "K:\\AOSService\\PackagesLocalDirectory",
+      "devEnvironmentType": "auto"
+    }
+  }
+}
+
 // ─── Option 3: Hybrid setup (Azure read-only + local write-only) ─────────────
 // Recommended for teams sharing an Azure-hosted metadata server.
 // GitHub Copilot connects to both servers simultaneously and routes each tool
@@ -63,6 +84,7 @@
       }
     },
     "context": {
+      "modelName": "YourModelName",
       "projectPath": "K:\\VSProjects\\MySolution\\MyProject\\MyProject.rnrproj",
       "packagePath": "K:\\AOSService\\PackagesLocalDirectory",
       "devEnvironmentType": "auto"
@@ -81,6 +103,7 @@
       "url": "https://your-app-name.azurewebsites.net/mcp/"
     },
     "context": {
+      "modelName": "YourModelName",
       "customPackagesPath": "C:\\CustomXppCode",
       "microsoftPackagesPath": "C:\\Users\\...\\Dynamics365\\10.0.2428.63\\PackagesLocalDirectory",
       "devEnvironmentType": "ude"

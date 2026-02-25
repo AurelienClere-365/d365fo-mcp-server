@@ -12,6 +12,7 @@ import { XppConfigProvider, type XppEnvironmentConfig } from './xppConfigProvide
 export interface McpContext {
   workspacePath?: string;
   packagePath?: string;
+  modelName?: string;               // Explicit model name — overrides workspacePath-based detection
   customPackagesPath?: string;      // UDE: custom X++ root (ModelStoreFolder)
   microsoftPackagesPath?: string;   // UDE: Microsoft X++ root (FrameworkDirectory)
   projectPath?: string;
@@ -252,6 +253,32 @@ class ConfigManager {
   getWorkspacePath(): string | null {
     const context = this.getContext();
     return context?.workspacePath || null;
+  }
+
+  /**
+   * Get model name from the last segment of workspacePath.
+   * workspacePath like K:\AOSService\PackagesLocalDirectory\AslCore → "AslCore"
+   * This allows automatic model detection on non-Windows (Azure) without D365FO_MODEL_NAME env var.
+   * Note: package name usually equals model name, but not always.
+   */
+  getModelNameFromWorkspacePath(): string | null {
+    const workspacePath = this.getContext()?.workspacePath;
+    if (!workspacePath) return null;
+    const segment = path.basename(path.normalize(workspacePath));
+    return segment || null;
+  }
+
+  /**
+   * Get model name from configuration.
+   * Priority: 1) Explicit modelName in mcp.json context  2) Last segment of workspacePath
+   * Use this as the primary fallback instead of D365FO_MODEL_NAME env var.
+   */
+  getModelName(): string | null {
+    const context = this.getContext();
+    if (context?.modelName) {
+      return context.modelName;
+    }
+    return this.getModelNameFromWorkspacePath();
   }
 
   /**
