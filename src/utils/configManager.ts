@@ -4,7 +4,7 @@
  */
 
 import * as fs from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, realpathSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { autoDetectD365Project, detectD365Project, type D365ProjectInfo } from './workspaceDetector.js';
@@ -27,6 +27,21 @@ export interface McpConfig {
     [key: string]: any;
     context?: McpContext;
   };
+}
+
+/**
+ * Resolve the actual on-disk casing of a path.
+ * On Windows the filesystem is case-insensitive but VS Code and Copilot compare
+ * paths case-sensitively, causing "Couldn't find file" errors when casing in
+ * .mcp.json / .rnrproj differs from the real directory name (e.g. AOSService vs AosService).
+ * Falls back to the original string when the path does not exist yet.
+ */
+function normalizePath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
 }
 
 class ConfigManager {
@@ -277,10 +292,11 @@ class ConfigManager {
 
     // If packagePath is explicitly set, use it
     if (context.packagePath) {
+      const resolved = normalizePath(context.packagePath);
       console.error(
-        `[ConfigManager] Using explicit packagePath: ${context.packagePath}`
+        `[ConfigManager] Using explicit packagePath: ${resolved}`
       );
-      return context.packagePath;
+      return resolved;
     }
 
     // If workspacePath contains PackagesLocalDirectory, extract the base path
@@ -288,20 +304,21 @@ class ConfigManager {
       const normalized = path.normalize(context.workspacePath);
       
       // If workspacePath points to a specific model, extract base path
-      // Example: K:\AOSService\PackagesLocalDirectory\MyPackage
-      // Should return: K:\AOSService\PackagesLocalDirectory
+      // Example: K:\AosService\PackagesLocalDirectory\MyPackage
+      // Should return: K:\AosService\PackagesLocalDirectory
       const match = normalized.match(/^(.+[\\\/]PackagesLocalDirectory)(?:[\\\/]|$)/i);
       if (match) {
+        const resolved = normalizePath(match[1]);
         console.error(
-          `[ConfigManager] Extracted packagePath from workspacePath: ${match[1]}`
+          `[ConfigManager] Extracted packagePath from workspacePath: ${resolved}`
         );
-        return match[1];
+        return resolved;
       }
     }
 
     // Fallback: check if auto-detection already ran and found packagePath
     if (this.autoDetectedProject?.packagePath) {
-      return this.autoDetectedProject.packagePath;
+      return normalizePath(this.autoDetectedProject.packagePath);
     }
 
     return null;

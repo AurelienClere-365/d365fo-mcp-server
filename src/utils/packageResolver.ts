@@ -17,7 +17,21 @@
  */
 
 import * as fs from 'fs/promises';
+import { realpathSync } from 'fs';
 import * as path from 'path';
+
+/**
+ * Resolve the actual on-disk casing of a path (Windows is case-insensitive but
+ * VS Code and Copilot compare paths case-sensitively). Falls back to the
+ * original string if the path does not exist yet.
+ */
+function normalizePathCase(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
 
 export interface ResolvedPackage {
   packageName: string;
@@ -91,8 +105,9 @@ export class PackageResolver {
     const map = new Map<string, ResolvedPackage>();
     const lcMap = new Map<string, ResolvedPackage>();
 
-    for (const root of this.roots) {
-      if (!root) continue;
+    for (const rawRoot of this.roots) {
+      if (!rawRoot) continue;
+      const root = normalizePathCase(rawRoot);
 
       let packageDirs: string[];
       try {
