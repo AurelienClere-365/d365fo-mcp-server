@@ -9,14 +9,14 @@ import type { XppServerContext } from '../types/context.js';
 import { validateWorkspacePath } from '../workspace/workspaceUtils.js';
 import { buildObjectTypeMismatchMessage } from '../utils/metadataResolver.js';
 
-const METHOD_PAGE_SIZE = 25;
+const METHOD_PAGE_SIZE = 15;
 
 const ClassInfoArgsSchema = z.object({
   className: z.string().describe('Name of the X++ class'),
   includeWorkspace: z.boolean().optional().default(false).describe('Whether to search in workspace first'),
   workspacePath: z.string().optional().describe('Workspace path to search for class'),
-  methodOffset: z.number().optional().default(0).describe('Offset for paginating methods (use multiples of 25)'),
-  compact: z.boolean().optional().default(false).describe('Return signatures only (no source bodies) — much smaller response, useful for initial exploration'),
+  methodOffset: z.number().optional().default(0).describe('Offset for paginating methods (use multiples of 15)'),
+  compact: z.boolean().optional().default(true).describe('Signatures only, no source bodies (default true). Set false only when you need to read a specific method body'),
 });
 
 export async function classInfoTool(request: CallToolRequest, context: XppServerContext) {
@@ -53,26 +53,33 @@ export async function classInfoTool(request: CallToolRequest, context: XppServer
     const cachedClass = await cache.get<any>(cacheKey);
     
     if (cachedClass) {
-      const methods = cachedClass.methods
+      const methodOffset = args.methodOffset ?? 0;
+      const totalMethods = cachedClass.methods.length;
+      const pagedMethods = cachedClass.methods.slice(methodOffset, methodOffset + METHOD_PAGE_SIZE);
+      const hasMore = methodOffset + METHOD_PAGE_SIZE < totalMethods;
+
+      const methodLines = pagedMethods
         .map(
           (m: any) =>
-            `  ${m.isStatic ? 'static ' : ''}${m.returnType || 'void'} ${m.name}(${m.parameters?.join(', ') || ''})`
+            `- \`${m.isStatic ? 'static ' : ''}${m.returnType || 'void'} ${m.name}(${m.parameters?.join(', ') || ''})\``
         )
         .join('\n');
 
-      const extendsInfo = cachedClass.extendsClass ? `\nExtends: ${cachedClass.extendsClass}` : '';
+      const extendsInfo = cachedClass.extendsClass ? `\n**Extends:** ${cachedClass.extendsClass}` : '';
       const modifiers = [];
       if (cachedClass.isFinal) modifiers.push('final');
       if (cachedClass.isAbstract) modifiers.push('abstract');
       const modifiersInfo = modifiers.length > 0 ? ` (${modifiers.join(', ')})` : '';
 
+      let text = `# Class: ${cachedClass.name}${modifiersInfo}${extendsInfo}\n\n`;
+      text += `## Methods (${totalMethods} total, showing ${methodOffset + 1}–${Math.min(methodOffset + METHOD_PAGE_SIZE, totalMethods)})\n\n`;
+      text += methodLines;
+      if (hasMore) {
+        text += `\n\n> ⚠️ **${totalMethods - methodOffset - METHOD_PAGE_SIZE} more methods.** Call again with \`methodOffset: ${methodOffset + METHOD_PAGE_SIZE}\` to see next page.`;
+      }
+
       return {
-        content: [
-          {
-            type: 'text',
-            text: `Class: ${cachedClass.name}${modifiersInfo}${extendsInfo}\n\nMethods:\n${methods} (cached)`,
-          },
-        ],
+        content: [{ type: 'text', text }],
       };
     }
 
@@ -186,7 +193,7 @@ export async function classInfoTool(request: CallToolRequest, context: XppServer
           output += `**Documentation:**\n${method.documentation}\n\n`;
         }
         
-        output += `\`\`\`xpp\n${method.source.substring(0, 500)}${method.source.length > 500 ? '...' : ''}\n\`\`\`\n\n`;
+        output += `\`\`\`xpp\n${method.source.substring(0, 200)}${method.source.length > 200 ? '\n// ... (use get_method_signature for full body)' : ''}\n\`\`\`\n\n`;
       }
     }
 

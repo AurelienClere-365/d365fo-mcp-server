@@ -19,12 +19,18 @@ This workspace contains D365FO code. **Always use the specialized MCP tools**  p
 >
 > **Pattern:**
 > ```
-> 1. get_class_info("MyClass")         analyze
-> 2. suggest_method_implementation()  prepare
-> 3. modify_d365fo_file()             apply  
->    NOT: replace_string_in_file        FORBIDDEN
->    NOT: PowerShell script             FORBIDDEN
+> 1. get_class_info("MyClass")                       analyze (compact=true by default)
+> 2. get_method_signature(class, method)             only if you need a body
+> 3. modify_d365fo_file()                            apply
+>    NOT: replace_string_in_file                       FORBIDDEN
+>    NOT: PowerShell script                            FORBIDDEN
 > ```
+
+> ## ⚡ TOKEN BUDGET — READ BEFORE EVERY CALL
+>
+> - `get_class_info` returns **signatures only** by default (`compact=true`) — do NOT pass `compact=false` unless you need to read a body
+> - **NEVER call `get_class_info` more than 2× per turn** — use `get_method_signature(class, method)` for individual method bodies
+> - `search_extensions` can return large results — use at most once per turn
 
 ---
 
@@ -83,7 +89,7 @@ For any D365FO request, **start with MCP tools  never** `code_search`, `grep_sea
 | `search(query, type?)` | Find any D365FO symbol (class, table, method, field, enum, edt, form, query) |
 | `batch_search(queries[])` | Multiple searches in parallel |
 | `search_extensions(query)` | Custom/ISV code only |
-| `get_class_info(className)` | Full class: methods, signatures, source, inheritance |
+| `get_class_info(className, compact?, methodOffset?)` | Class signatures (`compact=true` default, 15/page). Set `compact=false` + `methodOffset` only to read bodies |
 | `get_table_info(tableName)` | Fields, indexes, relations, methods |
 | `get_enum_info(enumName)` | Enum values (NOT for EDTs) |
 | `get_edt_info(edtName)` | EDT definition, base type, constraints |
@@ -95,7 +101,7 @@ For any D365FO request, **start with MCP tools  never** `code_search`, `grep_sea
 | `get_form_info(formName)` | Datasources, controls, methods |
 | `get_query_info(queryName)` | Datasources, joins, ranges |
 | `get_view_info(viewName)` | View / data entity structure |
-| `get_method_signature(className, methodName)` | Exact signature  required before CoC |
+| `get_method_signature(className, methodName)` | **Preferred way to get a full method body** — required before CoC |
 | `find_references(targetName, targetType?)` | Where-used analysis |
 
 ### Code Generation & Analysis
