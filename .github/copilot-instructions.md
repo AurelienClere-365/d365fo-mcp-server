@@ -2,6 +2,28 @@
 
 This workspace contains Dynamics 365 Finance & Operations (D365FO) code. When working with X++ code, classes, tables, forms, enums, or any D365FO metadata, **always use the specialized MCP tools** described below. These tools provide access to a pre-indexed symbol database with 584,799+ D365FO objects.
 
+## START HERE — Everyday Development Tasks
+
+For **any** request involving existing X++ code, **start with MCP tools — never with built-in tools** (`code_search`, `grep_search`, `semantic_search`, `get_file`).
+
+| Developer Request | Start with these MCP tools |
+|-------------------|---------------------------|
+| "Fix bug / why doesn't this work?" | `get_class_info` → `suggest_method_implementation` → `find_references` |
+| "Refactor / improve this class" | `get_class_info` → `analyze_class_completeness` → `analyze_code_patterns` |
+| "Find better solution / best practice" | `analyze_code_patterns` → `get_api_usage_patterns` |
+| "Review this code" | `get_class_info` → `analyze_class_completeness` → `find_references` |
+| "Optimize this query / method" | `get_table_info` (for indexes) → `analyze_code_patterns` |
+| "Where is X used / what calls this?" | `find_references(targetName)` |
+| "How does X work / show me the structure" | `get_class_info` / `get_table_info` / `get_form_info` |
+
+**When the user pastes X++ code into the chat:** Always call `get_class_info(className)` first to get the full class context — never work solely from the pasted snippet.
+
+```
+User: "Fix the bug in SalesTableType.calcTotalAmount()"
+❌ code_search("calcTotalAmount")       → hangs 5+ min, returns raw unparseable XML
+✅ get_class_info("SalesTableType")     → returns all methods with source → diagnose
+```
+
 ## Critical Rules for Tool Usage
 
 ### Built-in Tools vs. MCP Tools
@@ -579,5 +601,3 @@ K:\AosService\PackagesLocalDirectory\{Model}\{Model}\AxView\{Name}.xml
 5. **Safety**: Built-in validation, backup, and rollback for modifications
 6. **Context**: Tools understand X++ language semantics, inheritance, and D365FO patterns
 7. **Analysis**: Tools provide call graphs, usage patterns, and completeness checks that built-in tools cannot perform
-5. **Safety**: Built-in validation, backup, and rollback for modifications
-6. **Context**: Tools understand X++ language semantics, inheritance, and D365FO patterns
