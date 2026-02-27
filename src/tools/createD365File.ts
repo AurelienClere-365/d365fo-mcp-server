@@ -159,6 +159,77 @@ function fieldTypeToAxType(fieldType: string): string {
  * XML Templates for different D365FO object types
  */
 export class XmlTemplateGenerator {
+
+  /**
+   * Split X++ class source into the Declaration block (class header + field
+   * declarations) and individual method bodies, as required by D365FO XML.
+   *
+   * D365FO XML structure:
+   *   <Declaration> = class keyword + field declarations (the outer {} block)
+   *   <Methods>     = one <Method><Name/><Source/></Method> per method body
+   *
+   * AI generators often emit the entire source (header + methods) as a single
+   * string.  This helper separates them so the generated XML is correct.
+   */
+  static splitXppClassSource(fullSource: string): {
+    declaration: string;
+    methods: Array<{ name: string; source: string }>;
+  } {
+    // Find the '{' that opens the class body
+    const firstBrace = fullSource.indexOf('{');
+    if (firstBrace === -1) return { declaration: fullSource, methods: [] };
+
+    // Walk to the matching '}' that closes the class header block
+    let depth = 0;
+    let classEndIdx = -1;
+    for (let i = firstBrace; i < fullSource.length; i++) {
+      if (fullSource[i] === '{') depth++;
+      else if (fullSource[i] === '}') {
+        depth--;
+        if (depth === 0) { classEndIdx = i; break; }
+      }
+    }
+    if (classEndIdx === -1) return { declaration: fullSource, methods: [] };
+
+    const declaration = fullSource.substring(0, classEndIdx + 1);
+    const rest = fullSource.substring(classEndIdx + 1);
+    if (!rest.trim()) return { declaration, methods: [] };
+
+    // Parse each method block from the remaining source
+    const methods: Array<{ name: string; source: string }> = [];
+    let pos = 0;
+    while (pos < rest.length) {
+      const nextBrace = rest.indexOf('{', pos);
+      if (nextBrace === -1) break;
+
+      const sigText = rest.substring(pos, nextBrace);
+
+      // Find the matching '}' for this method body (depth-counting)
+      let d = 0;
+      let bodyEnd = -1;
+      for (let i = nextBrace; i < rest.length; i++) {
+        if (rest[i] === '{') d++;
+        else if (rest[i] === '}') {
+          d--;
+          if (d === 0) { bodyEnd = i; break; }
+        }
+      }
+      if (bodyEnd === -1) break;
+
+      const methodSource = rest.substring(pos, bodyEnd + 1).trim();
+
+      // Extract method name: last identifier before '(' in the signature
+      const parenIdx = sigText.lastIndexOf('(');
+      const nameMatch =
+        parenIdx !== -1 ? sigText.substring(0, parenIdx).match(/(\w+)\s*$/) : null;
+      const methodName = nameMatch ? nameMatch[1] : `method${methods.length + 1}`;
+
+      methods.push({ name: methodName, source: methodSource });
+      pos = bodyEnd + 1;
+    }
+
+    return { declaration, methods };
+  }
   /**
    * Generate AxClass XML structure
    */
@@ -167,7 +238,13 @@ export class XmlTemplateGenerator {
     sourceCode?: string,
     properties?: Record<string, any>
   ): string {
-    const declaration = sourceCode || `public class ${className}\n{\n}`;
+    const rawSource = sourceCode || `public class ${className}\n{\n}`;
+
+    // Split full X++ source into Declaration (class header + fields) and Methods.
+    // D365FO XML requires member variable declarations in <Declaration> and
+    // each method body as a separate <Method> element under <Methods>.
+    const { declaration, methods } = XmlTemplateGenerator.splitXppClassSource(rawSource);
+
     const extendsAttr = properties?.extends
       ? `\t<Extends>${properties.extends}</Extends>\n`
       : '';
@@ -179,6 +256,16 @@ export class XmlTemplateGenerator {
       ? `\t<IsAbstract>Yes</IsAbstract>\n`
       : '';
 
+    const methodsXml =
+      methods.length === 0
+        ? '\t\t<Methods />\n'
+        : `\t\t<Methods>\n${methods
+            .map(
+              m =>
+                `\t\t\t<Method>\n\t\t\t\t<Name>${m.name}</Name>\n\t\t\t\t<Source><![CDATA[\n${m.source}\n]]></Source>\n\t\t\t</Method>`
+            )
+            .join('\n')}\n\t\t</Methods>\n`;
+
     return `<?xml version="1.0" encoding="utf-8"?>
 <AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
 \t<Name>${className}</Name>
@@ -186,8 +273,7 @@ ${extendsAttr}${implementsAttr}${isFinalAttr}${isAbstractAttr}\t<SourceCode>
 \t\t<Declaration><![CDATA[
 ${declaration}
 ]]></Declaration>
-\t\t<Methods />
-\t</SourceCode>
+${methodsXml}\t</SourceCode>
 </AxClass>
 `;
   }
@@ -448,25 +534,25 @@ ${dataSourceXml}\t\t<Pattern xmlns="">${pattern}</Pattern>
    *   designName    - AxReportDesign name               (default: 'Report')
    *   caption       - Design caption label ref           (e.g. '@MyModel:MyLabel')
    *   style         - Design style template             (e.g. 'TableStyleTemplate')
-   *   fields        - Array of { name, alias?, dataType?, caption? } → AxReportDataSetField
-   *   rdlContent    - Full RDL XML string to embed in <Text><![CDATA[...]]></Text>
+   *   aotQuery      - AOT query name for DynamicParameter (e.g. 'SalesTable')
+   *   fields        - Array of { name, alias?, dataType?, caption?, disableAutoCreate? } → AxReportDataSetField
+   *   datasets      - Array of { name, dpClassName, tmpTableName, fields?, aotQuery? } for multi-dataset reports
+   *   rdlContent    - Full RDL XML string to embed (auto-generated from fields when omitted)
    *
-   * AOT structure generated (matches VS Designer requirements):
+   * AOT structure generated (mirrors real D365FO reports like AslReports_CashOrder_CZ):
    *   <AxReport xmlns="Microsoft.Dynamics.AX.Metadata.V2">
    *     <DataMethods />
    *     <DataSets>
-   *       <AxReportDataSet xmlns="">
+   *       <AxReportDataSet xmlns="">           ← one per dataset
    *         <Fields>…</Fields>
-   *         <Parameters>   ← AX system params mapped into dataset query
+   *         <Parameters>   ← 6 AX system params + {DPCLASS}_DynamicParameter
    *       </AxReportDataSet>
    *     </DataSets>
-   *     <DefaultParameterGroup>   ← root-level param definitions (Designer "Parameters" node)
-   *       <ReportParameterBases>
-   *         <AxReportParameterBase i:type="AxReportParameter">…
-   *       </ReportParameterBases>
-   *     </DefaultParameterGroup>
+   *     <DefaultParameterGroup>               ← 6 AX params + DynamicParameter (with AOTQuery+DataType)
    *     <Designs>
-   *       <AxReportDesign xmlns="" i:type="AxReportPrecisionDesign">   ← both attrs required
+   *       <AxReportDesign xmlns="" i:type="AxReportPrecisionDesign">
+   *         <Text><![CDATA[…RDL…]]></Text>   ← 2016 schema with DataSources/DataSets/ReportParameters
+   *         <DisableIndividualTransformation><Name>…</Name></DisableIndividualTransformation>
    *     </Designs>
    *   </AxReport>
    */
@@ -474,37 +560,83 @@ ${dataSourceXml}\t\t<Pattern xmlns="">${pattern}</Pattern>
     reportName: string,
     properties?: Record<string, any>
   ): string {
-    const tmpTableName = properties?.tmpTableName || `${reportName}Tmp`;
-    const dpClassName  = properties?.dpClassName  || `${reportName}DP`;
-    const datasetName  = properties?.datasetName  || tmpTableName;
-    const designName   = properties?.designName   || 'Report';
+    // ── Type helpers ─────────────────────────────────────────────────────────
+    type FieldDef = {
+      name: string; alias?: string; dataType?: string;
+      caption?: string; disableAutoCreate?: boolean;
+    };
+    type DatasetDef = {
+      name: string; dpClassName: string; tmpTableName: string;
+      fields?: FieldDef[]; aotQuery?: string;
+    };
 
-    // --- Fields block ---
-    type FieldDef = { name: string; alias?: string; dataType?: string; caption?: string };
-    const fields = properties?.fields as FieldDef[] | undefined;
-    let fieldsXml: string;
-    if (fields && fields.length > 0) {
-      const entries = fields.map(f => {
-        const alias   = f.alias    || `${tmpTableName}.1.${f.name}`;
-        const capLine = f.caption  ? `\n\t\t\t\t<Caption>${f.caption}</Caption>`   : '';
-        const dtLine  = f.dataType ? `\n\t\t\t\t<DataType>${f.dataType}</DataType>` : '';
-        return [
-          `\t\t\t<AxReportDataSetField>`,
-          `\t\t\t\t<Name>${f.name}</Name>`,
-          `\t\t\t\t<Alias>${alias}</Alias>${capLine}${dtLine}`,
-          `\t\t\t\t<DisplayWidth>Auto</DisplayWidth>`,
-          `\t\t\t\t<UserDefined>false</UserDefined>`,
-          `\t\t\t</AxReportDataSetField>`,
-        ].join('\n');
-      });
-      fieldsXml = `\t\t\t<Fields>\n${entries.join('\n')}\n\t\t\t</Fields>`;
+    // ── Resolve datasets (multi-dataset array OR single-dataset shorthand) ──
+    let datasets: DatasetDef[];
+    if (properties?.datasets && Array.isArray(properties.datasets)) {
+      datasets = properties.datasets as DatasetDef[];
     } else {
-      fieldsXml = `\t\t\t<Fields />`;
+      const tmpTableName = properties?.tmpTableName || `${reportName}Tmp`;
+      const dpClassName  = properties?.dpClassName  || `${reportName}DP`;
+      const datasetName  = properties?.datasetName  || tmpTableName;
+      datasets = [{
+        name:         datasetName,
+        dpClassName,
+        tmpTableName,
+        fields:       properties?.fields    as FieldDef[] | undefined,
+        aotQuery:     properties?.aotQuery  as string     | undefined,
+      }];
     }
+    const designName = properties?.designName || 'Report';
 
-    // --- Dataset parameters block (AX system params mapped to dataset query) ---
-    // These are required for the VS Designer to show a Parameters node under the dataset.
-    const datasetParamsXml = `\t\t\t<Parameters>
+    // ── RDL .NET type mapping ──
+    const rdlType = (dt?: string): string => {
+      switch (dt) {
+        case 'System.Double':   return 'System.Double';
+        case 'System.Int32':    return 'System.Int32';
+        case 'System.Int64':    return 'System.Int64';
+        case 'System.DateTime': return 'System.DateTime';
+        case 'System.Byte[]':   return 'System.Byte[]';
+        default:                return 'System.String';
+      }
+    };
+
+    // ── UUID helper ──
+    const uuid = (): string =>
+      'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+
+    // ── Build one AxReportDataSet XML entry ──
+    const buildDatasetXml = (ds: DatasetDef): string => {
+      const dpParamName = `${ds.dpClassName.toUpperCase()}_DynamicParameter`;
+      let fieldsXml: string;
+      if (ds.fields && ds.fields.length > 0) {
+        const entries = ds.fields.map(f => {
+          const alias      = f.alias    || `${ds.tmpTableName}.1.${f.name}`;
+          const capLine    = f.caption          ? `\n\t\t\t\t<Caption>${f.caption}</Caption>`                                 : '';
+          const dtLine     = f.dataType         ? `\n\t\t\t\t<DataType>${f.dataType}</DataType>`                              : '';
+          const disableLine = f.disableAutoCreate ? `\n\t\t\t\t<DisableAutoCreateInDataRegion>true</DisableAutoCreateInDataRegion>` : '';
+          return [
+            `\t\t\t<AxReportDataSetField>`,
+            `\t\t\t\t<Name>${f.name}</Name>`,
+            `\t\t\t\t<Alias>${alias}</Alias>${capLine}${dtLine}${disableLine}`,
+            `\t\t\t\t<DisplayWidth>Auto</DisplayWidth>`,
+            `\t\t\t\t<UserDefined>false</UserDefined>`,
+            `\t\t\t</AxReportDataSetField>`,
+          ].join('\n');
+        });
+        fieldsXml = `\t\t\t<Fields>\n${entries.join('\n')}\n\t\t\t</Fields>`;
+      } else {
+        fieldsXml = `\t\t\t<Fields />`;
+      }
+      return `\t\t<AxReportDataSet xmlns="">
+\t\t\t<Name>${ds.name}</Name>
+\t\t\t<DataSourceType>ReportDataProvider</DataSourceType>
+\t\t\t<Query>SELECT * FROM ${ds.dpClassName}.${ds.tmpTableName}</Query>
+\t\t\t<FieldGroups />
+${fieldsXml}
+\t\t\t<Parameters>
 \t\t\t\t<AxReportDataSetParameter>
 \t\t\t\t\t<Name>AX_PartitionKey</Name>
 \t\t\t\t\t<Alias>AX_PartitionKey</Alias>
@@ -541,9 +673,23 @@ ${dataSourceXml}\t\t<Pattern xmlns="">${pattern}</Pattern>
 \t\t\t\t\t<DataType>System.String</DataType>
 \t\t\t\t\t<Parameter>AX_RdpPreProcessedId</Parameter>
 \t\t\t\t</AxReportDataSetParameter>
-\t\t\t</Parameters>`;
+\t\t\t\t<AxReportDataSetParameter>
+\t\t\t\t\t<Name>${dpParamName}</Name>
+\t\t\t\t\t<Alias>${dpParamName}</Alias>
+\t\t\t\t\t<DataType>Microsoft.Dynamics.AX.Framework.Services.Client.QueryMetadata</DataType>
+\t\t\t\t\t<Parameter>${dpParamName}</Parameter>
+\t\t\t\t</AxReportDataSetParameter>
+\t\t\t</Parameters>
+\t\t</AxReportDataSet>`;
+    };
 
-    // --- DefaultParameterGroup block (root-level — "Parameters" node in VS Designer) ---
+    const datasetsXml = datasets.map(buildDatasetXml).join('\n');
+
+    // ── DefaultParameterGroup (uses first dataset's DP for DynamicParameter) ──
+    const firstDs      = datasets[0];
+    const dpParamName  = `${firstDs.dpClassName.toUpperCase()}_DynamicParameter`;
+    const aotQueryLine = firstDs.aotQuery ? `\n\t\t\t\t<AOTQuery>${firstDs.aotQuery}</AOTQuery>` : '';
+
     const defaultParamGroupXml = `\t<DefaultParameterGroup>
 \t\t<Name xmlns="">Parameters</Name>
 \t\t<ReportParameterBases xmlns="">
@@ -599,37 +745,172 @@ ${dataSourceXml}\t\t<Pattern xmlns="">${pattern}</Pattern>
 \t\t\t\t<DefaultValue />
 \t\t\t\t<Values />
 \t\t\t</AxReportParameterBase>
+\t\t\t<AxReportParameterBase xmlns=""
+\t\t\t\t\ti:type="AxReportParameter">
+\t\t\t\t<Name>${dpParamName}</Name>${aotQueryLine}
+\t\t\t\t<AllowBlank>true</AllowBlank>
+\t\t\t\t<DataType>Microsoft.Dynamics.AX.Framework.Services.Client.QueryMetadata</DataType>
+\t\t\t\t<Nullable>true</Nullable>
+\t\t\t\t<UserVisibility>Hidden</UserVisibility>
+\t\t\t\t<DefaultValue />
+\t\t\t\t<Values />
+\t\t\t</AxReportParameterBase>
 \t\t</ReportParameterBases>
 \t</DefaultParameterGroup>`;
 
-    // --- Design block ---
+    // ── Auto-generate RDL skeleton (2016 namespace, mirrors real D365FO reports) ──
+    const buildRdlSkeleton = (): string => {
+      const ns2016 = 'http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition';
+      const nsRd   = 'http://schemas.microsoft.com/SQLServer/reporting/reportdesigner';
+
+      // DataSources block — single shared AX data source
+      const rdlDataSourcesXml =
+`  <DataSources>
+    <DataSource Name="AutoGen__ReportDataProvider">
+      <Transaction>true</Transaction>
+      <ConnectionProperties>
+        <DataProvider>AXREPORTDATAPROVIDER</DataProvider>
+        <ConnectString />
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:DataSourceID>${uuid()}</rd:DataSourceID>
+    </DataSource>
+  </DataSources>`;
+
+      // Build one RDL DataSet per AxReportDataSet
+      const buildRdlDataset = (ds: DatasetDef): string => {
+        const dsDpParam   = `${ds.dpClassName.toUpperCase()}_DynamicParameter`;
+        const paramNames  = [
+          'AX_PartitionKey', 'AX_CompanyName', 'AX_UserContext',
+          'AX_RenderingCulture', 'AX_ReportContext', 'AX_RdpPreProcessedId',
+          dsDpParam,
+        ];
+        const queryParams = paramNames
+          .map(p =>
+            `          <QueryParameter Name="${p}">\n            <Value>=Parameters!${p}.Value</Value>\n          </QueryParameter>`)
+          .join('\n');
+
+        let rdlFields = '';
+        if (ds.fields && ds.fields.length > 0) {
+          const flines = ds.fields.map(f => {
+            const alias = f.alias || `${ds.tmpTableName}.1.${f.name}`;
+            return `        <Field Name="${f.name}">\n          <DataField>${alias}</DataField>\n          <rd:TypeName>${rdlType(f.dataType)}</rd:TypeName>\n        </Field>`;
+          });
+          rdlFields = `      <Fields>\n${flines.join('\n')}\n      </Fields>\n`;
+        }
+        return `    <DataSet Name="${ds.name}">
+      <Query>
+        <DataSourceName>AutoGen__ReportDataProvider</DataSourceName>
+        <QueryParameters>
+${queryParams}
+        </QueryParameters>
+        <CommandText>SELECT * FROM ${ds.dpClassName}.${ds.tmpTableName}</CommandText>
+        <rd:UseGenericDesigner>true</rd:UseGenericDesigner>
+      </Query>
+${rdlFields}      <rd:DataSetInfo>
+        <rd:DataSetName>${ds.name}</rd:DataSetName>
+        <rd:TableName>Fields</rd:TableName>
+        <rd:TableAdapterFillMethod>Fill</rd:TableAdapterFillMethod>
+        <rd:TableAdapterGetDataMethod>GetData</rd:TableAdapterGetDataMethod>
+        <rd:TableAdapterName>FieldsTableAdapter</rd:TableAdapterName>
+      </rd:DataSetInfo>
+    </DataSet>`;
+      };
+
+      const rdlDatasetsXml = `  <DataSets>\n${datasets.map(buildRdlDataset).join('\n')}\n  </DataSets>`;
+
+      // ReportParameters — 6 AX system params + DynamicParameter (all hidden)
+      const rdlParamDefs = [
+        { name: 'AX_PartitionKey',      nullable: true,  blank: true,  usedInQuery: false },
+        { name: 'AX_CompanyName',        nullable: false, blank: false, usedInQuery: false },
+        { name: 'AX_UserContext',        nullable: true,  blank: true,  usedInQuery: false },
+        { name: 'AX_RenderingCulture',   nullable: true,  blank: true,  usedInQuery: false },
+        { name: 'AX_ReportContext',       nullable: true,  blank: true,  usedInQuery: true  },
+        { name: 'AX_RdpPreProcessedId',  nullable: true,  blank: true,  usedInQuery: false },
+        { name: dpParamName,             nullable: true,  blank: true,  usedInQuery: false },
+      ];
+      const rdlParamsXml = `  <ReportParameters>\n` +
+        rdlParamDefs.map(p => {
+          const nullLine  = p.nullable     ? `\n      <Nullable>true</Nullable>`        : '';
+          const blankLine = p.blank        ? `\n      <AllowBlank>true</AllowBlank>`    : '';
+          const usedLine  = p.usedInQuery  ? `\n      <UsedInQuery>True</UsedInQuery>` : '';
+          return `    <ReportParameter Name="${p.name}">\n      <DataType>String</DataType>${nullLine}${blankLine}\n      <Prompt>${p.name}</Prompt>\n      <Hidden>true</Hidden>${usedLine}\n    </ReportParameter>`;
+        }).join('\n') + `\n  </ReportParameters>`;
+
+      // ReportParametersLayout
+      const cellDefs = rdlParamDefs
+        .map((p, i) =>
+          `        <CellDefinition>\n          <ColumnIndex>${i}</ColumnIndex>\n          <RowIndex>0</RowIndex>\n          <ParameterName>${p.name}</ParameterName>\n        </CellDefinition>`)
+        .join('\n');
+      const rdlParamLayoutXml =
+`  <ReportParametersLayout>
+    <GridLayoutDefinition>
+      <NumberOfColumns>${rdlParamDefs.length}</NumberOfColumns>
+      <NumberOfRows>1</NumberOfRows>
+      <CellDefinitions>
+${cellDefs}
+      </CellDefinitions>
+    </GridLayoutDefinition>
+  </ReportParametersLayout>`;
+
+      return `<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="${ns2016}" xmlns:rd="${nsRd}">
+  <AutoRefresh>0</AutoRefresh>
+${rdlDataSourcesXml}
+${rdlDatasetsXml}
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems />
+        <Height>1in</Height>
+        <Style>
+          <Border>
+            <Style>None</Style>
+          </Border>
+        </Style>
+      </Body>
+      <Width>7.5in</Width>
+      <Page>
+        <PageHeight>11.69in</PageHeight>
+        <PageWidth>8.27in</PageWidth>
+        <InteractiveHeight>11in</InteractiveHeight>
+        <InteractiveWidth>8.5in</InteractiveWidth>
+        <LeftMargin>0.2in</LeftMargin>
+        <TopMargin>0.2in</TopMargin>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+${rdlParamsXml}
+${rdlParamLayoutXml}
+  <Language>en-US</Language>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>${uuid()}</rd:ReportID>
+</Report>`;
+    };
+
+    // ── Design block ──
     const captionLine = properties?.caption ? `\n\t\t\t<Caption>${properties.caption}</Caption>` : '';
     const styleLine   = properties?.style   ? `\n\t\t\t<Style>${properties.style}</Style>`       : '';
     const rdlContent  = properties?.rdlContent as string | undefined;
-    const textElement = rdlContent ? `\n\t\t\t<Text><![CDATA[${rdlContent}]]></Text>` : '';
+    const rdl         = rdlContent || buildRdlSkeleton();
+    const textElement = `\n\t\t\t<Text><![CDATA[${rdl}]]></Text>`;
 
     return `<?xml version="1.0" encoding="utf-8"?>
 <AxReport xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V2">
 \t<Name>${reportName}</Name>
 \t<DataMethods />
 \t<DataSets>
-\t\t<AxReportDataSet xmlns="">
-\t\t\t<Name>${datasetName}</Name>
-\t\t\t<DataSourceType>ReportDataProvider</DataSourceType>
-\t\t\t<Query>SELECT * FROM ${dpClassName}.${tmpTableName}</Query>
-\t\t\t<FieldGroups />
-${fieldsXml}
-${datasetParamsXml}
-\t\t</AxReportDataSet>
+${datasetsXml}
 \t</DataSets>
 ${defaultParamGroupXml}
 \t<Designs>
 \t\t<AxReportDesign xmlns=""
 \t\t\t\ti:type="AxReportPrecisionDesign">
-\t\t\t<Name>${designName}</Name>${captionLine}
-\t\t\t<DataSet>${datasetName}</DataSet>${styleLine}
-\t\t\t<AutoDesignSpecs />${textElement}
-\t\t\t<DisableIndividualTransformation />
+\t\t\t<Name>${designName}</Name>${captionLine}${styleLine}${textElement}
+\t\t\t<DisableIndividualTransformation>
+\t\t\t\t<Name>DisableIndividualTransformation</Name>
+\t\t\t</DisableIndividualTransformation>
 \t\t</AxReportDesign>
 \t</Designs>
 \t<EmbeddedImages />
@@ -859,25 +1140,369 @@ ${defaultParamGroupXml}
       console.error('[sanitizeReportXml] Added missing <DefaultParameterGroup>');
     }
 
-    // 8. Fix embedded RDL: move <PageHeader>/<PageFooter> inside <Page> when they
-    //    appear as direct children of <Report> — SSRS schema violation that causes
-    //    "Deserialization failed: invalid child element 'PageHeader'" in VS Designer.
+    // 8. Fix embedded RDL structural issues based on the SSRS namespace version:
+    //    2008/01 — <PageHeader>/<PageFooter> must be inside <Page> (direct child of <Report>).
+    //    2010/01+ (2010, 2016, future) — <Body> and <Page> must NOT be direct children of
+    //              <Report>; they must be wrapped in:
+    //              <ReportSections><ReportSection>...</ReportSection></ReportSections>
+    //              Placing <Page> directly under <Report> causes:
+    //              "Deserialization failed: invalid child element 'Page'" in VS Designer.
     xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/, (_whole, open, rdl, close) => {
-      if (!rdl.includes('<PageHeader') && !rdl.includes('<PageFooter')) return _whole;
-      // Already wrapped inside a <Page> element — nothing to do
-      if (rdl.match(/<Page[\s\S]*?<\/Page>/)) return _whole;
+      const is2008 = rdl.includes('reporting/2008/01/reportdefinition');
+      // Any SSRS namespace newer than 2008 requires ReportSections wrapping
+      const isModernRdl = !is2008 && /reporting\/20\d\d\/\d\d\/reportdefinition/.test(rdl);
+      const is2010 = isModernRdl; // kept for branch clarity below
       let fixedRdl = rdl;
-      let pageContent = '';
-      const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
-      if (phMatch) { pageContent += phMatch[0]; fixedRdl = fixedRdl.replace(phMatch[0], ''); }
-      const pfMatch = fixedRdl.match(/<PageFooter[\s\S]*?<\/PageFooter>/);
-      if (pfMatch) { pageContent += (pageContent ? '\n' : '') + pfMatch[0]; fixedRdl = fixedRdl.replace(pfMatch[0], ''); }
-      if (!pageContent) return _whole;
-      const pageEl = '<Page>\n' + pageContent.trim() + '\n</Page>';
-      fixedRdl = fixedRdl.includes('</Body>')
-        ? fixedRdl.replace('</Body>', '</Body>\n' + pageEl)
-        : fixedRdl.replace('</Report>', pageEl + '\n</Report>');
-      console.error('[sanitizeReportXml] Moved <PageHeader>/<PageFooter> inside <Page> in embedded RDL');
+      let changed = false;
+
+      if (is2010 && !rdl.includes('<ReportSections>')) {
+        // 2010 schema: collect any stray Body/Page/PageHeader/PageFooter that are direct
+        // children of <Report>, then wrap them in ReportSections/ReportSection.
+        let pageEl = '';
+        const existingPageMatch = fixedRdl.match(/<Page(?:\s[^>]*)?>([\s\S]*?)<\/Page>/);
+        if (existingPageMatch) {
+          pageEl = existingPageMatch[0];
+          fixedRdl = fixedRdl.replace(existingPageMatch[0], '');
+        } else {
+          let pageInner = '';
+          const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
+          if (phMatch) { pageInner += phMatch[0]; fixedRdl = fixedRdl.replace(phMatch[0], ''); }
+          const pfMatch = fixedRdl.match(/<PageFooter[\s\S]*?<\/PageFooter>/);
+          if (pfMatch) { pageInner += (pageInner ? '\n' : '') + pfMatch[0]; fixedRdl = fixedRdl.replace(pfMatch[0], ''); }
+          if (pageInner) pageEl = '<Page>\n' + pageInner.trim() + '\n</Page>';
+        }
+        const bodyMatch = fixedRdl.match(/<Body[\s\S]*?<\/Body>/);
+        let sectionContent = '';
+        if (bodyMatch) { sectionContent += bodyMatch[0]; fixedRdl = fixedRdl.replace(bodyMatch[0], ''); }
+        if (pageEl) sectionContent += (sectionContent ? '\n' : '') + pageEl;
+        if (sectionContent) {
+          const reportSections =
+            '<ReportSections>\n<ReportSection>\n' + sectionContent.trim() + '\n</ReportSection>\n</ReportSections>';
+          fixedRdl = fixedRdl.includes('</Report>')
+            ? fixedRdl.replace('</Report>', reportSections + '\n</Report>')
+            : fixedRdl + '\n' + reportSections;
+          changed = true;
+          const rdlVersion = rdl.match(/reporting\/(20\d\d\/\d\d)\/reportdefinition/)?.[1] ?? 'modern';
+          console.error(`[sanitizeReportXml] Wrapped Body+Page in <ReportSections>/<ReportSection> for ${rdlVersion} RDL`);
+        }
+
+      } else if (is2008 && (rdl.includes('<PageHeader') || rdl.includes('<PageFooter'))) {
+        // 2008 schema: <PageHeader>/<PageFooter> must be inside <Page>, not direct children of <Report>.
+        // A real D365FO RDL always has a <Page> element (PageWidth/Height/Margins) but PageHeader is
+        // still a sibling — the old guard `!rdl.match(/<Page...>/)` incorrectly skipped this case.
+        // Strategy:
+        //   a) If <Page> already exists — inject PageHeader/PageFooter before </Page>.
+        //   b) If <Page> doesn't exist — create one after </Body>.
+        const pageMatch = fixedRdl.match(/<Page(?:\s[^>]*)?>[\s\S]*?<\/Page>/);
+        const alreadyInPage = !!pageMatch &&
+          (pageMatch[0].includes('<PageHeader') || pageMatch[0].includes('<PageFooter'));
+        if (!alreadyInPage) {
+          let pageInner = '';
+          const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
+          if (phMatch) { pageInner += phMatch[0]; fixedRdl = fixedRdl.replace(phMatch[0], ''); }
+          const pfMatch = fixedRdl.match(/<PageFooter[\s\S]*?<\/PageFooter>/);
+          if (pfMatch) { pageInner += (pageInner ? '\n' : '') + pfMatch[0]; fixedRdl = fixedRdl.replace(pfMatch[0], ''); }
+          if (pageInner) {
+            if (pageMatch) {
+              // Inject into the existing <Page> before </Page>
+              const updatedPage = pageMatch[0].replace('</Page>', pageInner.trim() + '\n</Page>');
+              fixedRdl = fixedRdl.replace(pageMatch[0], updatedPage);
+            } else {
+              // No existing <Page> — create one after </Body>
+              const pageEl = '<Page>\n' + pageInner.trim() + '\n</Page>';
+              fixedRdl = fixedRdl.includes('</Body>')
+                ? fixedRdl.replace('</Body>', '</Body>\n' + pageEl)
+                : fixedRdl.replace('</Report>', pageEl + '\n</Report>');
+            }
+            changed = true;
+            console.error('[sanitizeReportXml] Moved <PageHeader>/<PageFooter> inside <Page> in 2008 RDL');
+          }
+        }
+      }
+
+      if (!changed) return _whole;
+      return open + fixedRdl + close;
+    });
+
+    // 9. Fix wrong margin element names inside embedded RDL.
+    //    Some AI-generated RDLs use CSS-style names (MarginTop, MarginLeft, …) instead of
+    //    the correct SSRS RDL names (TopMargin, LeftMargin, …).  All SSRS namespace versions
+    //    require the XMargin form — MarginX causes "invalid child element 'MarginTop'" in
+    //    VS Designer even though the value and namespace are otherwise correct.
+    if (xml.includes('<MarginTop>') || xml.includes('<MarginBottom>') ||
+        xml.includes('<MarginLeft>') || xml.includes('<MarginRight>')) {
+      xml = xml
+        .replace(/<MarginTop>/g,    '<TopMargin>')   .replace(/<\/MarginTop>/g,    '</TopMargin>')
+        .replace(/<MarginBottom>/g, '<BottomMargin>').replace(/<\/MarginBottom>/g, '</BottomMargin>')
+        .replace(/<MarginLeft>/g,   '<LeftMargin>')  .replace(/<\/MarginLeft>/g,   '</LeftMargin>')
+        .replace(/<MarginRight>/g,  '<RightMargin>') .replace(/<\/MarginRight>/g,  '</RightMargin>');
+      console.error('[sanitizeReportXml] Fixed wrong margin element names (MarginX → XMargin) in embedded RDL');
+    }
+
+    // 10. Ensure <Body> inside embedded RDL <ReportSection> has <ReportItems /> as its first
+    //     child element.  SSRS schema requires the order: ReportItems → Height → Style.
+    //     Without <ReportItems>, VS Designer can't surface the DataSet in the Report Data panel
+    //     (it appears as if the dataset "disappeared") and may refuse to open the report.
+    xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/, (_whole, open, rdl, close) => {
+      // Match a <Body> that contains <Height> or <Style> but lacks <ReportItems>
+      // (i.e., an empty skeleton body without any report items)
+      const fixedRdl = rdl.replace(
+        /<Body>\s*\n(\s*)((?!<ReportItems)[\s\S]*?)<\/Body>/,
+        (_bodyMatch: string, indent: string, bodyContent: string) => {
+          // Only add <ReportItems /> when the body has no report items at all
+          if (bodyContent.includes('<ReportItems')) return _bodyMatch;
+          console.error('[sanitizeReportXml] Added missing <ReportItems /> as first child of <Body> in embedded RDL');
+          return `<Body>\n${indent}<ReportItems />\n${indent}${bodyContent.trimStart()}</Body>`;
+        }
+      );
+      if (fixedRdl === rdl) return _whole;
+      return open + fixedRdl + close;
+    });
+
+    // 11. Fix doubled closing tags inside embedded RDL CDATA.
+    //     AI generators sometimes emit </Foo></Foo> (the closing tag twice).
+    //     These are invalid XML and cause "Deserialization failed" in VS Designer.
+    //     Pattern: </TagName></TagName>  →  </TagName>
+    xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/, (_whole, open, rdl, close) => {
+      const fixedRdl = rdl.replace(/<\/(\w+)><\/\1>/g, (_m: string, tag: string) => {
+        console.error(`[sanitizeReportXml] Removed doubled closing tag </${tag}></${tag}> in embedded RDL`);
+        return `</${tag}>`;
+      });
+      if (fixedRdl === rdl) return _whole;
+      return open + fixedRdl + close;
+    });
+
+    // 12. Fix <Value> as direct child of <Textbox> in embedded RDL.
+    //     SSRS 2008+ schema requires: <Textbox> → <Paragraphs><Paragraph><TextRuns><TextRun><Value>
+    //     AI generators sometimes emit <Value> directly inside <Textbox>, which causes:
+    //     "invalid child element 'Value'" error in VS Designer.
+    //     This fix wraps any bare <Value>…</Value> found as a direct child of <Textbox>
+    //     into the correct paragraph/textrun structure.
+    xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/, (_whole, open, rdl, close) => {
+      // Look for <Textbox ...> that contains a direct <Value> child (not inside <TextRun>)
+      const fixedRdl = rdl.replace(
+        /(<Textbox\b[^>]*>)([\s\S]*?)(<\/Textbox>)/g,
+        (tbMatch: string, tbOpen: string, tbContent: string, tbClose: string) => {
+          // Only act if there is a <Value> but no <Paragraphs> wrapping yet
+          if (!tbContent.includes('<Value>') && !tbContent.includes('<Value =')) return tbMatch;
+          if (tbContent.includes('<Paragraphs>')) return tbMatch;
+          const fixedContent = tbContent.replace(
+            /<Value>([\s\S]*?)<\/Value>/,
+            (_vMatch: string, val: string) => {
+              console.error('[sanitizeReportXml] Wrapped bare <Value> in <Textbox> into <Paragraphs> structure');
+              return `<Paragraphs>\n            <Paragraph>\n              <TextRuns>\n                <TextRun>\n                  <Value>${val}</Value>\n                  <Style />\n                </TextRun>\n              </TextRuns>\n              <Style />\n            </Paragraph>\n          </Paragraphs>`;
+            }
+          );
+          if (fixedContent === tbContent) return tbMatch;
+          return tbOpen + fixedContent + tbClose;
+        }
+      );
+      if (fixedRdl === rdl) return _whole;
+      return open + fixedRdl + close;
+    });
+
+    // 13. Fix <ColSpan>/<RowSpan> as direct children of <TablixCell>.
+    //     SSRS schema only allows CellContents, DataElementName, DataElementOutput
+    //     as direct children of <TablixCell>. ColSpan/RowSpan must be INSIDE
+    //     <CellContents> (after the report item, before </CellContents>).
+    //     AI generators emit them BEFORE or AFTER the <CellContents> block:
+    //       <TablixCell><ColSpan>2</ColSpan><CellContents>...</CellContents></TablixCell>
+    //       <TablixCell><CellContents>...</CellContents><ColSpan>2</ColSpan></TablixCell>
+    //     Both cause "invalid child element 'ColSpan'" deserialization error.
+    xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/, (_whole, open, rdl, close) => {
+      const fixedRdl = rdl.replace(
+        /(<TablixCell>)([\s\S]*?)(<\/TablixCell>)/g,
+        (tcMatch: string, tcOpen: string, tcContent: string, tcClose: string) => {
+          // Use indexOf to split tcContent into: beforeCC / ccBlock / afterCC.
+          // This reliably handles spans placed either before OR after CellContents.
+          const ccStart = tcContent.indexOf('<CellContents');
+          const ccEnd   = tcContent.indexOf('</CellContents>');
+          if (ccStart === -1 || ccEnd === -1) return tcMatch;
+
+          const beforeCC = tcContent.substring(0, ccStart);
+          const ccBlock  = tcContent.substring(ccStart, ccEnd + '</CellContents>'.length);
+          const afterCC  = tcContent.substring(ccEnd + '</CellContents>'.length);
+
+          // Collect ColSpan/RowSpan from anywhere outside CellContents
+          const spanTagRe = () => /[ \t\r\n]*<(ColSpan|RowSpan)>[^<]*<\/\1>/g;
+          let spans = '';
+          const cleanBefore = beforeCC.replace(spanTagRe(), (m) => { spans += '\n' + m.trim(); return ''; });
+          const cleanAfter  = afterCC.replace( spanTagRe(), (m) => { spans += '\n' + m.trim(); return ''; });
+
+          if (!spans) return tcMatch;
+
+          // Move collected spans inside CellContents, just before </CellContents>
+          const fixedCC = ccBlock.replace('</CellContents>', `${spans}\n</CellContents>`);
+          console.error('[sanitizeReportXml] Moved <ColSpan>/<RowSpan> from <TablixCell> into <CellContents> in embedded RDL');
+          return tcOpen + cleanBefore + fixedCC + cleanAfter + tcClose;
+        }
+      );
+      if (fixedRdl === rdl) return _whole;
+      return open + fixedRdl + close;
+    });
+
+    // 14. Fix flat border properties as direct children of <Style>.
+    //     SSRS <Style> only accepts <Border>, <TopBorder>, <BottomBorder>,
+    //     <LeftBorder>, <RightBorder> as border wrappers — not flat attributes
+    //     like <BorderStyle>, <BorderColor>, <BorderWidth>.
+    //     AI generators often emit:
+    //       <Style><BorderStyle>Solid</BorderStyle><BorderColor>#000</BorderColor></Style>
+    //     but the correct form is:
+    //       <Style><Border><Style>Solid</Style><Color>#000</Color></Border></Style>
+    //     Same pattern applies to TopBorderStyle/TopBorderColor/TopBorderWidth etc.
+    xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/, (_whole, open, rdl, close) => {
+      // Use lazy match so innermost <Style> is processed first;
+      // the outer <Style> is only matched when there are no inner <Style> tags.
+      const fixedRdl = rdl.replace(
+        /(<Style>)([\s\S]*?)(<\/Style>)/g,
+        (styleMatch: string, styleOpen: string, styleContent: string, styleClose: string) => {
+          // Each entry: [flat name prefix, wrapper element name]
+          const groups: Array<[string, string]> = [
+            ['Border',       'Border'],
+            ['TopBorder',    'TopBorder'],
+            ['BottomBorder', 'BottomBorder'],
+            ['LeftBorder',   'LeftBorder'],
+            ['RightBorder',  'RightBorder'],
+          ];
+
+          let content = styleContent;
+          let changed = false;
+
+          for (const [prefix, wrapper] of groups) {
+            const styleTag = `${prefix}Style`;
+            const colorTag = `${prefix}Color`;
+            const widthTag = `${prefix}Width`;
+
+            if (!new RegExp(`<(?:${styleTag}|${colorTag}|${widthTag})>`).test(content)) continue;
+
+            let bStyle = '', bColor = '', bWidth = '';
+            content = content.replace(new RegExp(`<${styleTag}>([^<]*)<\/${styleTag}>`), (_, v) => { bStyle = v; return ''; });
+            content = content.replace(new RegExp(`<${colorTag}>([^<]*)<\/${colorTag}>`), (_, v) => { bColor = v; return ''; });
+            content = content.replace(new RegExp(`<${widthTag}>([^<]*)<\/${widthTag}>`), (_, v) => { bWidth = v; return ''; });
+
+            let inner = '';
+            if (bStyle) inner += `<Style>${bStyle}</Style>`;
+            if (bColor) inner += `<Color>${bColor}</Color>`;
+            if (bWidth) inner += `<Width>${bWidth}</Width>`;
+
+            // Prepend the corrected wrapper before remaining style content
+            content = `<${wrapper}>${inner}</${wrapper}>` + content;
+            changed = true;
+          }
+
+          if (!changed) return styleMatch;
+          console.error('[sanitizeReportXml] Wrapped flat border properties into <Border> inside <Style> in embedded RDL');
+          return styleOpen + content + styleClose;
+        }
+      );
+      if (fixedRdl === rdl) return _whole;
+      return open + fixedRdl + close;
+    });
+
+    // 15. Fix absorbed TablixCells following a ColSpan > 1.
+    //     Confirmed by real D365FO reports: when <CellContents> has <ColSpan>N</ColSpan>,
+    //     the next N-1 sibling TablixCells in the same <TablixCells> block must be empty
+    //     (<TablixCell />). AI generators give those absorbed cells full CellContents,
+    //     causing VS Report Designer to render an empty/broken design surface.
+    //     Approach: for each <ColSpan>N</ColSpan>, trace past its containing
+    //     </CellContents></TablixCell> then depth-count-walk the next N-1 TablixCells
+    //     and replace any non-empty ones with <TablixCell />.
+    xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/, (_whole, open, rdl, close) => {
+      let fixedRdl = rdl;
+      const patches: { start: number; end: number }[] = [];
+
+      const csRe = /<ColSpan>(\d+)<\/ColSpan>/g;
+      let csMatch: RegExpExecArray | null;
+      while ((csMatch = csRe.exec(fixedRdl)) !== null) {
+        const span = parseInt(csMatch[1], 10);
+        if (span <= 1) continue;
+
+        // Find </CellContents> that closes the CellContents containing this ColSpan
+        const ccCloseIdx = fixedRdl.indexOf('</CellContents>', csMatch.index + csMatch[0].length);
+        if (ccCloseIdx === -1) continue;
+        // Find </TablixCell> that closes the TablixCell containing this CellContents
+        const tcCloseIdx = fixedRdl.indexOf('</TablixCell>', ccCloseIdx + '</CellContents>'.length);
+        if (tcCloseIdx === -1) continue;
+
+        let pos = tcCloseIdx + '</TablixCell>'.length;
+
+        for (let i = 0; i < span - 1; i++) {
+          // Skip whitespace
+          while (pos < fixedRdl.length && /\s/.test(fixedRdl[pos])) pos++;
+
+          if (fixedRdl.startsWith('<TablixCell />', pos) || fixedRdl.startsWith('<TablixCell/>', pos)) {
+            // Already empty — advance
+            pos += fixedRdl.startsWith('<TablixCell />', pos) ? '<TablixCell />'.length : '<TablixCell/>'.length;
+            continue;
+          }
+          if (!fixedRdl.startsWith('<TablixCell>', pos)) break; // Not a TablixCell
+
+          // Walk to balanced </TablixCell>, counting nested TablixCell depth
+          let depth = 1;
+          let search = pos + '<TablixCell>'.length;
+          while (depth > 0 && search < fixedRdl.length) {
+            const nextOpen  = fixedRdl.indexOf('<TablixCell>',  search);
+            const nextClose = fixedRdl.indexOf('</TablixCell>', search);
+            if (nextClose === -1) { depth = 0; break; }
+            if (nextOpen !== -1 && nextOpen < nextClose) {
+              depth++;
+              search = nextOpen + '<TablixCell>'.length;
+            } else {
+              depth--;
+              search = nextClose + '</TablixCell>'.length;
+            }
+          }
+          const cellEnd = search;
+          patches.push({ start: pos, end: cellEnd });
+          pos = cellEnd;
+        }
+      }
+
+      if (patches.length === 0) return _whole;
+      // Apply patches in reverse order to preserve string positions
+      patches.sort((a, b) => b.start - a.start);
+      let result = fixedRdl;
+      for (const p of patches) {
+        result = result.substring(0, p.start) + '<TablixCell />' + result.substring(p.end);
+      }
+      console.error(`[sanitizeReportXml] Emptied ${patches.length} absorbed TablixCell(s) following ColSpan in embedded RDL`);
+      return open + result + close;
+    });
+
+    // 16. Rename reversed border side wrapper element names.
+    //     SSRS schema expects <TopBorder>, <BottomBorder>, <LeftBorder>, <RightBorder>.
+    //     AI generators often emit them reversed: <BorderTop>, <BorderBottom>, etc.
+    //     The inner content (<Style>, <Color>, <Width>) is already correct — only
+    //     the wrapper element name needs to change.
+    if (xml.includes('<BorderTop>') || xml.includes('<BorderBottom>') ||
+        xml.includes('<BorderLeft>') || xml.includes('<BorderRight>')) {
+      xml = xml
+        .replace(/<BorderTop>/g,     '<TopBorder>')    .replace(/<\/BorderTop>/g,     '</TopBorder>')
+        .replace(/<BorderBottom>/g,  '<BottomBorder>') .replace(/<\/BorderBottom>/g,  '</BottomBorder>')
+        .replace(/<BorderLeft>/g,    '<LeftBorder>')   .replace(/<\/BorderLeft>/g,    '</LeftBorder>')
+        .replace(/<BorderRight>/g,   '<RightBorder>')  .replace(/<\/BorderRight>/g,   '</RightBorder>');
+      console.error('[sanitizeReportXml] Fixed reversed border side wrapper names (BorderXxx → XxxBorder) in RDL');
+    }
+
+    // 17. Add missing </Style> before </Paragraph> when Paragraph-level Style is
+    //     left unclosed. AI generators sometimes emit:
+    //       <Paragraph><TextRuns>...</TextRuns><Style><TextAlign>Right</TextAlign></Paragraph>
+    //     The </Style> before </Paragraph> is missing, which makes the XML
+    //     malformed (</Paragraph> appears to close inside <Style>) and causes
+    //     SSRS deserialization to fail entirely.
+    xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/, (_whole, open, rdl, close) => {
+      const fixedRdl = rdl.replace(
+        /<Paragraph>([\s\S]*?)<\/Paragraph>/g,
+        (match: string, inner: string) => {
+          const opens  = (inner.match(/<Style>/g)  || []).length;
+          const closes = (inner.match(/<\/Style>/g) || []).length;
+          if (opens === closes) return match;
+          const missing = opens - closes;
+          console.error('[sanitizeReportXml] Added missing </Style> tag(s) inside <Paragraph> in embedded RDL');
+          return `<Paragraph>${inner}${'</Style>'.repeat(missing)}</Paragraph>`;
+        }
+      );
+      if (fixedRdl === rdl) return _whole;
       return open + fixedRdl + close;
     });
 
