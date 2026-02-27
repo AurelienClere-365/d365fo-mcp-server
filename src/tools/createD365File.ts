@@ -1350,52 +1350,64 @@ ${defaultParamGroupXml}
     //     but the correct form is:
     //       <Style><Border><Style>Solid</Style><Color>#000</Color></Border></Style>
     //     Same pattern applies to TopBorderStyle/TopBorderColor/TopBorderWidth etc.
-    xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/, (_whole, open, rdl, close) => {
-      // Use lazy match so innermost <Style> is processed first;
-      // the outer <Style> is only matched when there are no inner <Style> tags.
-      const fixedRdl = rdl.replace(
-        /(<Style>)([\s\S]*?)(<\/Style>)/g,
-        (styleMatch: string, styleOpen: string, styleContent: string, styleClose: string) => {
-          // Each entry: [flat name prefix, wrapper element name]
-          const groups: Array<[string, string]> = [
-            ['Border',       'Border'],
-            ['TopBorder',    'TopBorder'],
-            ['BottomBorder', 'BottomBorder'],
-            ['LeftBorder',   'LeftBorder'],
-            ['RightBorder',  'RightBorder'],
-          ];
+    //
+    //     Previous approach (matching <Style>…</Style> blocks non-greedily) had a
+    //     nesting failure: if an outer <Style> contained a nested <Style> element
+    //     (e.g. <Border><Style>Solid</Style>…</Border>) BEFORE a flat <BorderStyle>,
+    //     the non-greedy regex would bind the outer opening <Style> to the inner
+    //     closing </Style>, leaving the flat tag unprocessed.
+    //
+    //     New approach: scan the CDATA directly for flat border-property clusters
+    //     and replace them with the correct wrapper, independent of the containing
+    //     <Style> block.  Adjacent flat tags (same group, separated only by
+    //     whitespace) are collapsed into a single wrapper element.
+    xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/g, (_whole, open, rdl, close) => {
+      let fixedRdl = rdl;
+      let changed = false;
 
-          let content = styleContent;
-          let changed = false;
+      const groups: Array<[string, string]> = [
+        ['Border',       'Border'],
+        ['TopBorder',    'TopBorder'],
+        ['BottomBorder', 'BottomBorder'],
+        ['LeftBorder',   'LeftBorder'],
+        ['RightBorder',  'RightBorder'],
+      ];
 
-          for (const [prefix, wrapper] of groups) {
-            const styleTag = `${prefix}Style`;
-            const colorTag = `${prefix}Color`;
-            const widthTag = `${prefix}Width`;
+      for (const [prefix, wrapper] of groups) {
+        const st = `${prefix}Style`;
+        const ct = `${prefix}Color`;
+        const wt = `${prefix}Width`;
 
-            if (!new RegExp(`<(?:${styleTag}|${colorTag}|${widthTag})>`).test(content)) continue;
+        if (!new RegExp(`<(?:${st}|${ct}|${wt})>`).test(fixedRdl)) continue;
 
-            let bStyle = '', bColor = '', bWidth = '';
-            content = content.replace(new RegExp(`<${styleTag}>([^<]*)<\/${styleTag}>`), (_, v) => { bStyle = v; return ''; });
-            content = content.replace(new RegExp(`<${colorTag}>([^<]*)<\/${colorTag}>`), (_, v) => { bColor = v; return ''; });
-            content = content.replace(new RegExp(`<${widthTag}>([^<]*)<\/${widthTag}>`), (_, v) => { bWidth = v; return ''; });
+        // Build a regex that matches a cluster of 1–3 adjacent flat border tags
+        // for this group (in any order, with optional whitespace between them).
+        const singleTag =
+          `(?:<${st}>([^<]*)<\\/${st}>|<${ct}>([^<]*)<\\/${ct}>|<${wt}>([^<]*)<\\/${wt}>)`;
+        const clusterRe = new RegExp(
+          `${singleTag}(?:\\s*${singleTag})?(?:\\s*${singleTag})?`,
+          'g'
+        );
 
-            let inner = '';
-            if (bStyle) inner += `<Style>${bStyle}</Style>`;
-            if (bColor) inner += `<Color>${bColor}</Color>`;
-            if (bWidth) inner += `<Width>${bWidth}</Width>`;
+        fixedRdl = fixedRdl.replace(clusterRe, (match: string) => {
+          // Extract each flat-tag value from the matched cluster via side-effect callbacks.
+          let bStyle = '', bColor = '', bWidth = '';
+          match.replace(new RegExp(`<${st}>([^<]*)<\\/${st}>`), (_: string, v: string) => { bStyle = v; return ''; });
+          match.replace(new RegExp(`<${ct}>([^<]*)<\\/${ct}>`), (_: string, v: string) => { bColor = v; return ''; });
+          match.replace(new RegExp(`<${wt}>([^<]*)<\\/${wt}>`), (_: string, v: string) => { bWidth = v; return ''; });
 
-            // Prepend the corrected wrapper before remaining style content
-            content = `<${wrapper}>${inner}</${wrapper}>` + content;
-            changed = true;
-          }
+          let inner = '';
+          if (bStyle) inner += `<Style>${bStyle}</Style>`;
+          if (bColor) inner += `<Color>${bColor}</Color>`;
+          if (bWidth) inner += `<Width>${bWidth}</Width>`;
 
-          if (!changed) return styleMatch;
-          console.error('[sanitizeReportXml] Wrapped flat border properties into <Border> inside <Style> in embedded RDL');
-          return styleOpen + content + styleClose;
-        }
-      );
-      if (fixedRdl === rdl) return _whole;
+          changed = true;
+          return `<${wrapper}>${inner}</${wrapper}>`;
+        });
+      }
+
+      if (!changed) return _whole;
+      console.error('[sanitizeReportXml] Wrapped flat border properties into <Border> inside <Style> in embedded RDL');
       return open + fixedRdl + close;
     });
 
@@ -1503,6 +1515,122 @@ ${defaultParamGroupXml}
         }
       );
       if (fixedRdl === rdl) return _whole;
+      return open + fixedRdl + close;
+    });
+
+    // 18. Reconcile TablixCells count with TablixColumns count.
+    //     Each TablixRow must have exactly as many TablixCell elements as there
+    //     are TablixColumn entries in the enclosing Tablix's TablixColumns block.
+    //     When the counts are mismatched VS Report Designer throws:
+    //       "Index was out of range. Must be non-negative and less than the size
+    //        of the collection. Parameter name: index"
+    //
+    //     Two cases are handled:
+    //       A) A TablixRow has FEWER cells than TablixColumns → pad with <TablixCell />
+    //       B) TablixColumns has FEWER entries than max cells per row → pad columns
+    //
+    //     The fix finds each top-level <Tablix>…</Tablix> block using depth
+    //     tracking (to handle multiple/nested Tablix controls correctly) and
+    //     reconciles column vs cell counts within each one independently.
+    xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/g, (_whole, open, rdl, close) => {
+      let fixedRdl = rdl;
+      let changed = false;
+
+      const processTablix = (block: string): string => {
+        // Count declared TablixColumn entries (exclude TablixColumns container)
+        const colsMatch = block.match(/<TablixColumns>([\s\S]*?)<\/TablixColumns>/);
+        if (!colsMatch) return block;
+        const colCount = (colsMatch[1].match(/<TablixColumn[\s>\/]/g) || []).length;
+        if (colCount === 0) return block;
+
+        // Sub-case A: pad each TablixCells block that has too few cells
+        let result = block.replace(
+          /(<TablixCells>)([\s\S]*?)(<\/TablixCells>)/g,
+          (m: string, o: string, inner: string, c: string) => {
+            const n = (inner.match(/<TablixCell[\s>\/]/g) || []).length;
+            if (n >= colCount) return m;
+            changed = true;
+            const padding = Array(colCount - n).fill('\t\t\t\t<TablixCell />').join('\n');
+            return `${o}${inner}\n${padding}\n\t\t\t${c}`;
+          }
+        );
+
+        // Sub-case B: ensure TablixColumns has enough entries
+        const cellsBlocks = result.match(/<TablixCells>([\s\S]*?)<\/TablixCells>/g) || [];
+        const maxCells = cellsBlocks.reduce((mx, b) => {
+          const n = (b.match(/<TablixCell[\s>\/]/g) || []).length;
+          return n > mx ? n : mx;
+        }, 0);
+        if (maxCells > colCount) {
+          const extra = Array(maxCells - colCount)
+            .fill('\t\t<TablixColumn><Width>1in</Width></TablixColumn>')
+            .join('\n');
+          result = result.replace('</TablixColumns>', `\n${extra}\n\t\t</TablixColumns>`);
+          changed = true;
+        }
+
+        return result;
+      };
+
+      // Depth-tracking scan for each top-level <Tablix>…</Tablix> block.
+      // Child elements (<TablixBody>, <TablixColumns>, <TablixCell>, …) all have
+      // letters immediately after '<Tablix', so the main element is identified by
+      // '<Tablix' followed by '>', ' ', tab, or newline.
+      let pos = 0;
+      while (pos < fixedRdl.length) {
+        const tagStart = fixedRdl.indexOf('<Tablix', pos);
+        if (tagStart < 0) break;
+
+        const ch = fixedRdl[tagStart + 7];
+        if (ch !== '>' && ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r') {
+          pos = tagStart + 8;
+          continue;
+        }
+
+        // Self-closing <Tablix /> — skip
+        const tagEndIdx = fixedRdl.indexOf('>', tagStart);
+        if (tagEndIdx < 0) break;
+        if (fixedRdl[tagEndIdx - 1] === '/') { pos = tagEndIdx + 1; continue; }
+
+        // Depth-scan for matching </Tablix>
+        let depth = 1;
+        let scan = tagEndIdx + 1;
+        let closeTagPos = -1;
+        while (depth > 0 && scan < fixedRdl.length) {
+          const nxtOpen  = fixedRdl.indexOf('<Tablix', scan);
+          const nxtClose = fixedRdl.indexOf('</Tablix>', scan);
+          if (nxtClose < 0) break;
+
+          if (nxtOpen >= 0 && nxtOpen < nxtClose) {
+            const nc = fixedRdl[nxtOpen + 7];
+            if (nc === '>' || nc === ' ' || nc === '\t' || nc === '\n' || nc === '\r') {
+              depth++;
+              const innerTagEnd = fixedRdl.indexOf('>', nxtOpen);
+              scan = innerTagEnd >= 0 ? innerTagEnd + 1 : nxtOpen + 8;
+            } else {
+              scan = nxtOpen + 8;
+            }
+          } else {
+            depth--;
+            if (depth === 0) closeTagPos = nxtClose;
+            scan = nxtClose + 9; // '</Tablix>'.length === 9
+          }
+        }
+
+        if (closeTagPos < 0) break;
+        const blockEnd = closeTagPos + 9;
+        const block = fixedRdl.substring(tagStart, blockEnd);
+        const fixed  = processTablix(block);
+        if (fixed !== block) {
+          fixedRdl = fixedRdl.substring(0, tagStart) + fixed + fixedRdl.substring(blockEnd);
+          pos = tagStart + fixed.length;
+        } else {
+          pos = blockEnd;
+        }
+      }
+
+      if (!changed) return _whole;
+      console.error('[sanitizeReportXml] Reconciled TablixCell count with TablixColumn count in embedded RDL');
       return open + fixedRdl + close;
     });
 

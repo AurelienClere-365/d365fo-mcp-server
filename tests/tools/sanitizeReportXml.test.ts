@@ -698,6 +698,30 @@ describe('XmlTemplateGenerator.sanitizeReportXml()', () => {
       const twice = XmlTemplateGenerator.sanitizeReportXml(once);
       expect(twice).toBe(once);
     });
+
+    it('fixes <BorderStyle> in outer <Style> that also contains nested <Style> via <Border>', () => {
+      // Regression: non-greedy <Style>…</Style> matching would bind the outer <Style>
+      // opening to the inner </Style> (from <Border><Style>Solid</Style></Border>),
+      // leaving the flat <BorderStyle> unprocessed.
+      const rdl = `<?xml version="1.0"?><Report xmlns="${NS}"><Textbox><Style><Border><Style>Solid</Style><Color>Black</Color></Border><BorderStyle>Dotted</BorderStyle></Style></Textbox></Report>`;
+      const xml = wrap(rdl);
+      const result = XmlTemplateGenerator.sanitizeReportXml(xml);
+      expect(result).not.toContain('<BorderStyle>');
+      // The originally-correct <Border><Style>Solid</Style>... should survive
+      expect(result).toContain('<Style>Solid</Style>');
+    });
+
+    it('fixes flat <BorderStyle> in a <Style> that has sibling nested <Style> elements (2008 namespace)', () => {
+      // Regression: same nesting failure with the 2008 RDL namespace
+      const NS2008 = 'http://schemas.microsoft.com/sqlserver/reporting/2008/01/reportdefinition';
+      const wrap2008 = (rdl: string) =>
+        `<AxReport xmlns="Microsoft.Dynamics.AX.Metadata.V2"><Name>R</Name><DataMethods /><Designs><AxReportDesign xmlns="" i:type="AxReportPrecisionDesign"><Name>Report</Name><Text><![CDATA[${rdl}]]></Text></AxReportDesign></Designs></AxReport>`;
+      const rdl = `<?xml version="1.0"?><Report xmlns="${NS2008}"><Textbox><Style><Border><Style>None</Style></Border><BorderStyle>Solid</BorderStyle><FontSize>10pt</FontSize></Style></Textbox></Report>`;
+      const xml = wrap2008(rdl);
+      const result = XmlTemplateGenerator.sanitizeReportXml(xml);
+      expect(result).not.toContain('<BorderStyle>');
+      expect(result).toContain('<FontSize>10pt</FontSize>');
+    });
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -851,4 +875,82 @@ describe('XmlTemplateGenerator.sanitizeReportXml()', () => {
       expect(twice).toBe(once);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────
+  // Fix 18 — TablixCells count must match TablixColumns count
+  // ─────────────────────────────────────────────────────────────
+  describe('fix 18: reconcile TablixCells with TablixColumns count', () => {
+    const NS = 'http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition';
+    const wrap = (rdl: string) =>
+      `<AxReport xmlns="Microsoft.Dynamics.AX.Metadata.V2"><Name>R</Name><DataMethods /><Designs><AxReportDesign xmlns="" i:type="AxReportPrecisionDesign"><Name>Report</Name><Text><![CDATA[${rdl}]]></Text></AxReportDesign></Designs></AxReport>`;
+
+    // Helper: build a simple Tablix with N declared columns and rows whose cell counts are specified
+    const tablix = (cols: number, ...rowCellCounts: number[]) => {
+      const columns = Array(cols).fill('<TablixColumn><Width>1in</Width></TablixColumn>').join('');
+      const rows = rowCellCounts.map(n => {
+        const cells = Array(n).fill('<TablixCell><CellContents><Textbox Name="X"><Paragraphs><Paragraph><TextRuns><TextRun><Value>v</Value><Style/></TextRun></TextRuns><Style/></Paragraph></Paragraphs><Height>0.25in</Height></Textbox></CellContents></TablixCell>').join('');
+        return `<TablixRow><Height>0.25in</Height><TablixCells>${cells}</TablixCells></TablixRow>`;
+      }).join('');
+      return `<Tablix Name="T1"><TablixBody><TablixColumns>${columns}</TablixColumns><TablixRows>${rows}</TablixRows></TablixBody></Tablix>`;
+    };
+
+    it('pads a TablixRow that has fewer cells than TablixColumns', () => {
+      // 3 declared columns, but data row only has 2 cells
+      const rdl = `<?xml version="1.0"?><Report xmlns="${NS}">${tablix(3, 2)}</Report>`;
+      const xml = wrap(rdl);
+      const result = XmlTemplateGenerator.sanitizeReportXml(xml);
+      // Should now have 3 TablixCell occurrences in the row
+      const cellMatches = result.match(/<TablixCell[\s>\/]/g) || [];
+      expect(cellMatches.length).toBe(3);
+    });
+
+    it('adds a missing TablixColumn when a row has more cells than declared columns', () => {
+      // 2 declared columns, but a row has 3 cells
+      const rdl = `<?xml version="1.0"?><Report xmlns="${NS}">${tablix(2, 3)}</Report>`;
+      const xml = wrap(rdl);
+      const result = XmlTemplateGenerator.sanitizeReportXml(xml);
+      // Should now have 3 TablixColumn occurrences
+      const colMatches = result.match(/<TablixColumn[\s>\/]/g) || [];
+      expect(colMatches.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('handles two rows where one has the right count and one is short', () => {
+      // 3 columns, row 0 has 3 cells (correct), row 1 has 2 cells (needs padding)
+      const rdl = `<?xml version="1.0"?><Report xmlns="${NS}">${tablix(3, 3, 2)}</Report>`;
+      const xml = wrap(rdl);
+      const result = XmlTemplateGenerator.sanitizeReportXml(xml);
+      // Total cells: 3 (row 0 unchanged) + 3 (row 1 padded) = 6
+      const cellMatches = result.match(/<TablixCell[\s>\/]/g) || [];
+      expect(cellMatches.length).toBe(6);
+    });
+
+    it('does not modify a Tablix where all counts already match', () => {
+      // 3 columns, 3 cells per row — already correct
+      const rdl = `<?xml version="1.0"?><Report xmlns="${NS}">${tablix(3, 3)}</Report>`;
+      const xml = wrap(rdl);
+      const result = XmlTemplateGenerator.sanitizeReportXml(xml);
+      expect(result).toBe(xml);
+    });
+
+    it('fix 18 is idempotent', () => {
+      const rdl = `<?xml version="1.0"?><Report xmlns="${NS}">${tablix(3, 2)}</Report>`;
+      const xml = wrap(rdl);
+      const once  = XmlTemplateGenerator.sanitizeReportXml(xml);
+      const twice = XmlTemplateGenerator.sanitizeReportXml(once);
+      expect(twice).toBe(once);
+    });
+
+    it('processes two independent Tablix blocks in the same report correctly', () => {
+      // First Tablix: 2 cols, row with 1 cell. Second Tablix: 3 cols, row with 3 cells.
+      const t1 = `<Tablix Name="T1"><TablixBody><TablixColumns><TablixColumn><Width>1in</Width></TablixColumn><TablixColumn><Width>1in</Width></TablixColumn></TablixColumns><TablixRows><TablixRow><Height>0.25in</Height><TablixCells><TablixCell><CellContents><Textbox Name="A"><Paragraphs><Paragraph><TextRuns><TextRun><Value>v</Value><Style/></TextRun></TextRuns><Style/></Paragraph></Paragraphs><Height>0.25in</Height></Textbox></CellContents></TablixCell></TablixCells></TablixRow></TablixRows></TablixBody></Tablix>`;
+      const t2 = tablix(3, 3);
+      const rdl = `<?xml version="1.0"?><Report xmlns="${NS}">${t1}${t2}</Report>`;
+      const xml = wrap(rdl);
+      const result = XmlTemplateGenerator.sanitizeReportXml(xml);
+      // T1: 1 cell padded to 2. T2: already 3 cells, unchanged. Total = 2 + 3 = 5.
+      const cellMatches = result.match(/<TablixCell[\s>\/]/g) || [];
+      expect(cellMatches.length).toBe(5);
+    });
+  });
 });
+
