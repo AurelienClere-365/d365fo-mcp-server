@@ -318,46 +318,98 @@ describe('XmlTemplateGenerator.sanitizeReportXml()', () => {
   });
 
   // ─────────────────────────────────────────────────────────────
-  // Fix 8 — RDL <PageHeader>/<PageFooter> inside <Page>
+  // Fix 8 — RDL schema-aware structural repair (2008 and 2010)
   // ─────────────────────────────────────────────────────────────
-  describe('fix 8: RDL <PageHeader>/<PageFooter> inside <Page>', () => {
-    const RDL_WRONG = `<?xml version="1.0"?><Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2008/01/reportdefinition"><PageHeader><Height>1cm</Height></PageHeader><Body><Height>10cm</Height></Body></Report>`;
-    const RDL_CORRECT = `<?xml version="1.0"?><Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2008/01/reportdefinition"><DataSources /><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></Report>`;
+  describe('fix 8: RDL schema-aware structural repair', () => {
+    const NS_2008 = 'http://schemas.microsoft.com/sqlserver/reporting/2008/01/reportdefinition';
+    const NS_2010 = 'http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition';
+
+    // 2008: PageHeader as direct child of Report (wrong — must be inside Page)
+    const RDL_2008_WRONG = `<?xml version="1.0"?><Report xmlns="${NS_2008}"><PageHeader><Height>1cm</Height></PageHeader><Body><Height>10cm</Height></Body></Report>`;
+    // 2008: PageHeader already inside Page (correct for 2008)
+    const RDL_2008_CORRECT = `<?xml version="1.0"?><Report xmlns="${NS_2008}"><DataSources /><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></Report>`;
+    // 2010: Body and Page as direct children of Report (wrong — must be inside ReportSections)
+    const RDL_2010_WRONG_PAGE = `<?xml version="1.0"?><Report xmlns="${NS_2010}"><DataSources /><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></Report>`;
+    // 2010: PageHeader as stray direct child (must end up inside ReportSections/ReportSection/Page)
+    const RDL_2010_WRONG_PH = `<?xml version="1.0"?><Report xmlns="${NS_2010}"><PageHeader><Height>1cm</Height></PageHeader><Body><Height>10cm</Height></Body></Report>`;
+    // 2010: already correct — ReportSections present
+    const RDL_2010_CORRECT = `<?xml version="1.0"?><Report xmlns="${NS_2010}"><DataSources /><ReportSections><ReportSection><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></ReportSection></ReportSections></Report>`;
 
     const makeAxReport = (rdl: string) =>
       `<AxReport xmlns="Microsoft.Dynamics.AX.Metadata.V2"><Name>R</Name><DataMethods /><Designs><AxReportDesign xmlns="" i:type="AxReportPrecisionDesign"><Name>Report</Name><Text><![CDATA[${rdl}]]></Text></AxReportDesign></Designs></AxReport>`;
 
-    it('should move <PageHeader> inside <Page> when it is a direct child of <Report>', () => {
-      const xml = makeAxReport(RDL_WRONG);
+    // ── 2008 tests ────────────────────────────────────────────
+    it('2008: moves <PageHeader> inside <Page> when it is a direct child of <Report>', () => {
+      const xml = makeAxReport(RDL_2008_WRONG);
       const result = XmlTemplateGenerator.sanitizeReportXml(xml);
-      // PageHeader should now be inside Page
       expect(result).toContain('<Page>');
       expect(result).toContain('<PageHeader>');
-      // PageHeader must appear after <Page> in the output
       const pageIdx = result.indexOf('<Page>');
       const phIdx = result.indexOf('<PageHeader>');
       expect(phIdx).toBeGreaterThan(pageIdx);
     });
 
-    it('should not modify RDL when <PageHeader> is already inside <Page>', () => {
-      const xml = makeAxReport(RDL_CORRECT);
+    it('2008: does not modify RDL when <PageHeader> is already inside <Page>', () => {
+      const xml = makeAxReport(RDL_2008_CORRECT);
       const result = XmlTemplateGenerator.sanitizeReportXml(xml);
-      // The CDATA content should be unchanged (no extra <Page> wrapping)
       const cdataMatch = result.match(/<!\[CDATA\[([\s\S]*?)\]\]>/);
       expect(cdataMatch).toBeTruthy();
-      expect(cdataMatch![1]).toBe(RDL_CORRECT);
+      expect(cdataMatch![1]).toBe(RDL_2008_CORRECT);
+    });
+
+    it('2008: fix is idempotent', () => {
+      const xml = makeAxReport(RDL_2008_WRONG);
+      const once = XmlTemplateGenerator.sanitizeReportXml(xml);
+      const twice = XmlTemplateGenerator.sanitizeReportXml(once);
+      expect(twice).toBe(once);
+    });
+
+    // ── 2010 tests ────────────────────────────────────────────
+    it('2010: wraps Body+Page in <ReportSections>/<ReportSection> when they are direct children of <Report>', () => {
+      const xml = makeAxReport(RDL_2010_WRONG_PAGE);
+      const result = XmlTemplateGenerator.sanitizeReportXml(xml);
+      expect(result).toContain('<ReportSections>');
+      expect(result).toContain('<ReportSection>');
+      // Body and Page must be INSIDE ReportSection
+      const sectionIdx = result.indexOf('<ReportSection>');
+      const bodyIdx    = result.indexOf('<Body>');
+      const pageIdx    = result.indexOf('<Page>');
+      expect(bodyIdx).toBeGreaterThan(sectionIdx);
+      expect(pageIdx).toBeGreaterThan(sectionIdx);
+      // Page must NOT be a direct child of Report
+      const reportOpenEnd = result.indexOf('>',  result.indexOf('<Report '));
+      expect(pageIdx).toBeGreaterThan(reportOpenEnd + 1); // not immediately after <Report>
+    });
+
+    it('2010: wraps stray <PageHeader> (direct child of <Report>) inside ReportSections/ReportSection/Page', () => {
+      const xml = makeAxReport(RDL_2010_WRONG_PH);
+      const result = XmlTemplateGenerator.sanitizeReportXml(xml);
+      expect(result).toContain('<ReportSections>');
+      expect(result).toContain('<Page>');
+      expect(result).toContain('<PageHeader>');
+      const sectionIdx = result.indexOf('<ReportSection>');
+      const phIdx      = result.indexOf('<PageHeader>');
+      expect(phIdx).toBeGreaterThan(sectionIdx);
+    });
+
+    it('2010: does not modify RDL when <ReportSections> already present', () => {
+      const xml = makeAxReport(RDL_2010_CORRECT);
+      const result = XmlTemplateGenerator.sanitizeReportXml(xml);
+      const cdataMatch = result.match(/<!\[CDATA\[([\s\S]*?)\]\]>/);
+      expect(cdataMatch).toBeTruthy();
+      expect(cdataMatch![1]).toBe(RDL_2010_CORRECT);
+    });
+
+    it('2010: fix is idempotent', () => {
+      const xml = makeAxReport(RDL_2010_WRONG_PAGE);
+      const once = XmlTemplateGenerator.sanitizeReportXml(xml);
+      const twice = XmlTemplateGenerator.sanitizeReportXml(once);
+      expect(twice).toBe(once);
     });
 
     it('should not modify XML when no <Text><![CDATA[ present', () => {
       const result = XmlTemplateGenerator.sanitizeReportXml(CORRECT_XML);
       expect(result).toBe(CORRECT_XML);
-    });
-
-    it('fix 8 is idempotent', () => {
-      const xml = makeAxReport(RDL_WRONG);
-      const once = XmlTemplateGenerator.sanitizeReportXml(xml);
-      const twice = XmlTemplateGenerator.sanitizeReportXml(once);
-      expect(twice).toBe(once);
     });
   });
 });

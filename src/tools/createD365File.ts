@@ -859,25 +859,66 @@ ${defaultParamGroupXml}
       console.error('[sanitizeReportXml] Added missing <DefaultParameterGroup>');
     }
 
-    // 8. Fix embedded RDL: move <PageHeader>/<PageFooter> inside <Page> when they
-    //    appear as direct children of <Report> — SSRS schema violation that causes
-    //    "Deserialization failed: invalid child element 'PageHeader'" in VS Designer.
+    // 8. Fix embedded RDL structural issues based on the SSRS namespace version:
+    //    2008/01 — <PageHeader>/<PageFooter> must be inside <Page> (direct child of <Report>).
+    //    2010/01 — <Body> and <Page> must NOT be direct children of <Report>; they must be
+    //              wrapped in <ReportSections><ReportSection>...</ReportSection></ReportSections>.
+    //              Placing <Page> directly under <Report> (as the old fix did) causes:
+    //              "Deserialization failed: invalid child element 'Page'" in VS Designer.
     xml = xml.replace(/(<Text><!\[CDATA\[)([\s\S]*?)(\]\]><\/Text>)/, (_whole, open, rdl, close) => {
-      if (!rdl.includes('<PageHeader') && !rdl.includes('<PageFooter')) return _whole;
-      // Already wrapped inside a <Page> element — nothing to do
-      if (rdl.match(/<Page[\s\S]*?<\/Page>/)) return _whole;
+      const is2010 = rdl.includes('reporting/2010/01/reportdefinition');
+      const is2008 = rdl.includes('reporting/2008/01/reportdefinition');
       let fixedRdl = rdl;
-      let pageContent = '';
-      const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
-      if (phMatch) { pageContent += phMatch[0]; fixedRdl = fixedRdl.replace(phMatch[0], ''); }
-      const pfMatch = fixedRdl.match(/<PageFooter[\s\S]*?<\/PageFooter>/);
-      if (pfMatch) { pageContent += (pageContent ? '\n' : '') + pfMatch[0]; fixedRdl = fixedRdl.replace(pfMatch[0], ''); }
-      if (!pageContent) return _whole;
-      const pageEl = '<Page>\n' + pageContent.trim() + '\n</Page>';
-      fixedRdl = fixedRdl.includes('</Body>')
-        ? fixedRdl.replace('</Body>', '</Body>\n' + pageEl)
-        : fixedRdl.replace('</Report>', pageEl + '\n</Report>');
-      console.error('[sanitizeReportXml] Moved <PageHeader>/<PageFooter> inside <Page> in embedded RDL');
+      let changed = false;
+
+      if (is2010 && !rdl.includes('<ReportSections>')) {
+        // 2010 schema: collect any stray Body/Page/PageHeader/PageFooter that are direct
+        // children of <Report>, then wrap them in ReportSections/ReportSection.
+        let pageEl = '';
+        const existingPageMatch = fixedRdl.match(/<Page(?:\s[^>]*)?>([\s\S]*?)<\/Page>/);
+        if (existingPageMatch) {
+          pageEl = existingPageMatch[0];
+          fixedRdl = fixedRdl.replace(existingPageMatch[0], '');
+        } else {
+          let pageInner = '';
+          const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
+          if (phMatch) { pageInner += phMatch[0]; fixedRdl = fixedRdl.replace(phMatch[0], ''); }
+          const pfMatch = fixedRdl.match(/<PageFooter[\s\S]*?<\/PageFooter>/);
+          if (pfMatch) { pageInner += (pageInner ? '\n' : '') + pfMatch[0]; fixedRdl = fixedRdl.replace(pfMatch[0], ''); }
+          if (pageInner) pageEl = '<Page>\n' + pageInner.trim() + '\n</Page>';
+        }
+        const bodyMatch = fixedRdl.match(/<Body[\s\S]*?<\/Body>/);
+        let sectionContent = '';
+        if (bodyMatch) { sectionContent += bodyMatch[0]; fixedRdl = fixedRdl.replace(bodyMatch[0], ''); }
+        if (pageEl) sectionContent += (sectionContent ? '\n' : '') + pageEl;
+        if (sectionContent) {
+          const reportSections =
+            '<ReportSections>\n<ReportSection>\n' + sectionContent.trim() + '\n</ReportSection>\n</ReportSections>';
+          fixedRdl = fixedRdl.includes('</Report>')
+            ? fixedRdl.replace('</Report>', reportSections + '\n</Report>')
+            : fixedRdl + '\n' + reportSections;
+          changed = true;
+          console.error('[sanitizeReportXml] Wrapped Body+Page in <ReportSections>/<ReportSection> for 2010 RDL');
+        }
+
+      } else if (is2008 && !rdl.match(/<Page[\s\S]*?<\/Page>/) && (rdl.includes('<PageHeader') || rdl.includes('<PageFooter'))) {
+        // 2008 schema: <PageHeader>/<PageFooter> as direct children of <Report> — move inside <Page>.
+        let pageContent = '';
+        const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
+        if (phMatch) { pageContent += phMatch[0]; fixedRdl = fixedRdl.replace(phMatch[0], ''); }
+        const pfMatch = fixedRdl.match(/<PageFooter[\s\S]*?<\/PageFooter>/);
+        if (pfMatch) { pageContent += (pageContent ? '\n' : '') + pfMatch[0]; fixedRdl = fixedRdl.replace(pfMatch[0], ''); }
+        if (pageContent) {
+          const pageEl = '<Page>\n' + pageContent.trim() + '\n</Page>';
+          fixedRdl = fixedRdl.includes('</Body>')
+            ? fixedRdl.replace('</Body>', '</Body>\n' + pageEl)
+            : fixedRdl.replace('</Report>', pageEl + '\n</Report>');
+          changed = true;
+          console.error('[sanitizeReportXml] Moved <PageHeader>/<PageFooter> inside <Page> in 2008 RDL');
+        }
+      }
+
+      if (!changed) return _whole;
       return open + fixedRdl + close;
     });
 
