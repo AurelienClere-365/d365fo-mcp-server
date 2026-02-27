@@ -905,20 +905,37 @@ ${defaultParamGroupXml}
           console.error(`[sanitizeReportXml] Wrapped Body+Page in <ReportSections>/<ReportSection> for ${rdlVersion} RDL`);
         }
 
-      } else if (is2008 && !rdl.match(/<Page[\s\S]*?<\/Page>/) && (rdl.includes('<PageHeader') || rdl.includes('<PageFooter'))) {
-        // 2008 schema: <PageHeader>/<PageFooter> as direct children of <Report> — move inside <Page>.
-        let pageContent = '';
-        const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
-        if (phMatch) { pageContent += phMatch[0]; fixedRdl = fixedRdl.replace(phMatch[0], ''); }
-        const pfMatch = fixedRdl.match(/<PageFooter[\s\S]*?<\/PageFooter>/);
-        if (pfMatch) { pageContent += (pageContent ? '\n' : '') + pfMatch[0]; fixedRdl = fixedRdl.replace(pfMatch[0], ''); }
-        if (pageContent) {
-          const pageEl = '<Page>\n' + pageContent.trim() + '\n</Page>';
-          fixedRdl = fixedRdl.includes('</Body>')
-            ? fixedRdl.replace('</Body>', '</Body>\n' + pageEl)
-            : fixedRdl.replace('</Report>', pageEl + '\n</Report>');
-          changed = true;
-          console.error('[sanitizeReportXml] Moved <PageHeader>/<PageFooter> inside <Page> in 2008 RDL');
+      } else if (is2008 && (rdl.includes('<PageHeader') || rdl.includes('<PageFooter'))) {
+        // 2008 schema: <PageHeader>/<PageFooter> must be inside <Page>, not direct children of <Report>.
+        // A real D365FO RDL always has a <Page> element (PageWidth/Height/Margins) but PageHeader is
+        // still a sibling — the old guard `!rdl.match(/<Page...>/)` incorrectly skipped this case.
+        // Strategy:
+        //   a) If <Page> already exists — inject PageHeader/PageFooter before </Page>.
+        //   b) If <Page> doesn't exist — create one after </Body>.
+        const pageMatch = fixedRdl.match(/<Page(?:\s[^>]*)?>[\s\S]*?<\/Page>/);
+        const alreadyInPage = !!pageMatch &&
+          (pageMatch[0].includes('<PageHeader') || pageMatch[0].includes('<PageFooter'));
+        if (!alreadyInPage) {
+          let pageInner = '';
+          const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
+          if (phMatch) { pageInner += phMatch[0]; fixedRdl = fixedRdl.replace(phMatch[0], ''); }
+          const pfMatch = fixedRdl.match(/<PageFooter[\s\S]*?<\/PageFooter>/);
+          if (pfMatch) { pageInner += (pageInner ? '\n' : '') + pfMatch[0]; fixedRdl = fixedRdl.replace(pfMatch[0], ''); }
+          if (pageInner) {
+            if (pageMatch) {
+              // Inject into the existing <Page> before </Page>
+              const updatedPage = pageMatch[0].replace('</Page>', pageInner.trim() + '\n</Page>');
+              fixedRdl = fixedRdl.replace(pageMatch[0], updatedPage);
+            } else {
+              // No existing <Page> — create one after </Body>
+              const pageEl = '<Page>\n' + pageInner.trim() + '\n</Page>';
+              fixedRdl = fixedRdl.includes('</Body>')
+                ? fixedRdl.replace('</Body>', '</Body>\n' + pageEl)
+                : fixedRdl.replace('</Report>', pageEl + '\n</Report>');
+            }
+            changed = true;
+            console.error('[sanitizeReportXml] Moved <PageHeader>/<PageFooter> inside <Page> in 2008 RDL');
+          }
         }
       }
 

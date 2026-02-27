@@ -327,14 +327,16 @@ describe('XmlTemplateGenerator.sanitizeReportXml()', () => {
 
     // 2008: PageHeader as direct child of Report (wrong — must be inside Page)
     const RDL_2008_WRONG = `<?xml version="1.0"?><Report xmlns="${NS_2008}"><PageHeader><Height>1cm</Height></PageHeader><Body><Height>10cm</Height></Body></Report>`;
+    // 2008: Real-world scenario — <Page> already exists (page dimensions) but <PageHeader> is still a stray direct child
+    const RDL_2008_WRONG_WITH_PAGE = `<?xml version="1.0"?><Report xmlns="${NS_2008}"><DataSources><DataSource Name="AX"><DataSourceReference>AX</DataSourceReference></DataSource></DataSources><PageHeader><Height>1cm</Height></PageHeader><Body><Height>10cm</Height></Body><Page><PageWidth>21cm</PageWidth><PageHeight>29cm</PageHeight><TopMargin>2cm</TopMargin><BottomMargin>2cm</BottomMargin><LeftMargin>2cm</LeftMargin><RightMargin>2cm</RightMargin></Page></Report>`;
     // 2008: PageHeader already inside Page (correct for 2008)
-    const RDL_2008_CORRECT = `<?xml version="1.0"?><Report xmlns="${NS_2008}"><DataSources /><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></Report>`;
+    const RDL_2008_CORRECT = `<?xml version="1.0"?><Report xmlns="${NS_2008}"><DataSources><DataSource Name="AX"><DataSourceReference>AX</DataSourceReference></DataSource></DataSources><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader><PageWidth>21cm</PageWidth></Page></Report>`;
     // 2010: Body and Page as direct children of Report (wrong — must be inside ReportSections)
-    const RDL_2010_WRONG_PAGE = `<?xml version="1.0"?><Report xmlns="${NS_2010}"><DataSources /><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></Report>`;
+    const RDL_2010_WRONG_PAGE = `<?xml version="1.0"?><Report xmlns="${NS_2010}"><DataSources><DataSource Name="AX"><DataSourceReference>AX</DataSourceReference></DataSource></DataSources><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></Report>`;
     // 2010: PageHeader as stray direct child (must end up inside ReportSections/ReportSection/Page)
     const RDL_2010_WRONG_PH = `<?xml version="1.0"?><Report xmlns="${NS_2010}"><PageHeader><Height>1cm</Height></PageHeader><Body><Height>10cm</Height></Body></Report>`;
     // 2010: already correct — ReportSections present
-    const RDL_2010_CORRECT = `<?xml version="1.0"?><Report xmlns="${NS_2010}"><DataSources /><ReportSections><ReportSection><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></ReportSection></ReportSections></Report>`;
+    const RDL_2010_CORRECT = `<?xml version="1.0"?><Report xmlns="${NS_2010}"><DataSources><DataSource Name="AX"><DataSourceReference>AX</DataSourceReference></DataSource></DataSources><ReportSections><ReportSection><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></ReportSection></ReportSections></Report>`;
 
     const makeAxReport = (rdl: string) =>
       `<AxReport xmlns="Microsoft.Dynamics.AX.Metadata.V2"><Name>R</Name><DataMethods /><Designs><AxReportDesign xmlns="" i:type="AxReportPrecisionDesign"><Name>Report</Name><Text><![CDATA[${rdl}]]></Text></AxReportDesign></Designs></AxReport>`;
@@ -360,6 +362,34 @@ describe('XmlTemplateGenerator.sanitizeReportXml()', () => {
 
     it('2008: fix is idempotent', () => {
       const xml = makeAxReport(RDL_2008_WRONG);
+      const once = XmlTemplateGenerator.sanitizeReportXml(xml);
+      const twice = XmlTemplateGenerator.sanitizeReportXml(once);
+      expect(twice).toBe(once);
+    });
+
+    it('2008: moves stray <PageHeader> into existing <Page> when <Page> has page-dimension settings', () => {
+      // Real-world case: RDL already has <Page> for PageWidth/Height/Margins, yet <PageHeader>
+      // is still a direct child of <Report>. The old guard `!rdl.match(/<Page...>/)` blocked this.
+      const xml = makeAxReport(RDL_2008_WRONG_WITH_PAGE);
+      const result = XmlTemplateGenerator.sanitizeReportXml(xml);
+      const cdataMatch = result.match(/<!\[CDATA\[([\s\S]*?)\]\]>/);
+      expect(cdataMatch).toBeTruthy();
+      const fixed = cdataMatch![1];
+      // PageHeader must be inside the Page element
+      expect(fixed).toContain('<Page>');
+      expect(fixed).toContain('<PageHeader>');
+      const pageStart = fixed.indexOf('<Page>');
+      const pageEnd   = fixed.indexOf('</Page>');
+      const phIdx     = fixed.indexOf('<PageHeader>');
+      expect(phIdx).toBeGreaterThan(pageStart);
+      expect(phIdx).toBeLessThan(pageEnd);
+      // PageHeader must no longer be a direct child of Report (not before <Body>)
+      const bodyIdx = fixed.indexOf('<Body>');
+      expect(phIdx).toBeGreaterThan(bodyIdx);
+    });
+
+    it('2008: fix with existing <Page> is idempotent', () => {
+      const xml = makeAxReport(RDL_2008_WRONG_WITH_PAGE);
       const once = XmlTemplateGenerator.sanitizeReportXml(xml);
       const twice = XmlTemplateGenerator.sanitizeReportXml(once);
       expect(twice).toBe(once);
@@ -410,7 +440,7 @@ describe('XmlTemplateGenerator.sanitizeReportXml()', () => {
 
     // ── 2016 tests ────────────────────────────────────────────
     it('2016: wraps Body+Page in <ReportSections>/<ReportSection>', () => {
-      const RDL_2016_WRONG = `<?xml version="1.0"?><Report xmlns="${NS_2016}"><DataSources /><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></Report>`;
+      const RDL_2016_WRONG = `<?xml version="1.0"?><Report xmlns="${NS_2016}"><DataSources><DataSource Name="AX"><DataSourceReference>AX</DataSourceReference></DataSource></DataSources><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></Report>`;
       const xml = makeAxReport(RDL_2016_WRONG);
       const result = XmlTemplateGenerator.sanitizeReportXml(xml);
       expect(result).toContain('<ReportSections>');
@@ -423,7 +453,7 @@ describe('XmlTemplateGenerator.sanitizeReportXml()', () => {
     });
 
     it('2016: fix is idempotent', () => {
-      const RDL_2016_WRONG = `<?xml version="1.0"?><Report xmlns="${NS_2016}"><DataSources /><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></Report>`;
+      const RDL_2016_WRONG = `<?xml version="1.0"?><Report xmlns="${NS_2016}"><DataSources><DataSource Name="AX"><DataSourceReference>AX</DataSourceReference></DataSource></DataSources><Body><Height>10cm</Height></Body><Page><PageHeader><Height>1cm</Height></PageHeader></Page></Report>`;
       const xml = makeAxReport(RDL_2016_WRONG);
       const once  = XmlTemplateGenerator.sanitizeReportXml(xml);
       const twice = XmlTemplateGenerator.sanitizeReportXml(once);
