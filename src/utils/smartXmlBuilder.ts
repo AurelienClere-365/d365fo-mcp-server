@@ -261,8 +261,32 @@ export class SmartXmlBuilder {
   /**
    * Map EDT/type hint to D365FO AxTableField i:type attribute value.
    * Based on real XML analysis from K:\AosService\PackagesLocalDirectory.
+   *
+   * Order of precedence:
+   *  1. Explicit `type` (primitive base type from DB or caller) — most accurate
+   *  2. EDT name heuristics — fallback when type is not known
    */
   private getAxTableFieldType(edt?: string, type?: string): string {
+    // 1. Explicit primitive type takes priority (may be DB-resolved via resolveEdtBaseType)
+    if (type) {
+      const typeMap: Record<string, string> = {
+        String:      'AxTableFieldString',
+        Integer:     'AxTableFieldInt',
+        Int64:       'AxTableFieldInt64',
+        Real:        'AxTableFieldReal',
+        Date:        'AxTableFieldDate',
+        DateTime:    'AxTableFieldUtcDateTime',
+        UtcDateTime: 'AxTableFieldUtcDateTime',
+        Enum:        'AxTableFieldEnum',
+        Container:   'AxTableFieldContainer',
+        Guid:        'AxTableFieldGuid',
+        GUID:        'AxTableFieldGuid',
+      };
+      const mapped = typeMap[type];
+      if (mapped) return mapped;
+    }
+
+    // 2. Fall back to EDT name heuristics
     if (edt) {
       const e = edt.toLowerCase();
       if (e === 'recid' || e.endsWith('recid') || e.includes('refrecid')) return 'AxTableFieldInt64';
@@ -274,20 +298,7 @@ export class SmartXmlBuilder {
       if ((e.endsWith('int') || e.includes('count') || e.includes('level'))
           && !e.includes('account') && !e.includes('name')) return 'AxTableFieldInt';
     }
-    if (type) {
-      const typeMap: Record<string, string> = {
-        String: 'AxTableFieldString',
-        Integer: 'AxTableFieldInt',
-        Int64: 'AxTableFieldInt64',
-        Real: 'AxTableFieldReal',
-        Date: 'AxTableFieldDate',
-        DateTime: 'AxTableFieldUtcDateTime',
-        Enum: 'AxTableFieldEnum',
-        Container: 'AxTableFieldContainer',
-        Guid: 'AxTableFieldGuid',
-      };
-      return typeMap[type] || 'AxTableFieldString';
-    }
+
     return 'AxTableFieldString';
   }
 

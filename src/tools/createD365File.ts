@@ -138,20 +138,42 @@ class ProjectFileFinder {
 
 /**
  * Map a D365FO base type name to the XML i:type attribute used in <AxTableField>.
+ * If the explicit fieldType is not a known primitive, fall back to name-based heuristics
+ * using edtName (same heuristics as SmartXmlBuilder.getAxTableFieldType).
  */
-function fieldTypeToAxType(fieldType: string): string {
+function fieldTypeToAxType(fieldType: string, edtName?: string): string {
   const typeMap: Record<string, string> = {
-    String:   'AxTableFieldString',
-    Integer:  'AxTableFieldInt',
-    Int64:    'AxTableFieldInt64',
-    Real:     'AxTableFieldReal',
-    Date:     'AxTableFieldDate',
-    DateTime: 'AxTableFieldDateTime',
-    Enum:     'AxTableFieldEnum',
-    GUID:     'AxTableFieldGuid',
-    Container:'AxTableFieldContainer',
+    String:      'AxTableFieldString',
+    Integer:     'AxTableFieldInt',
+    Int64:       'AxTableFieldInt64',
+    Real:        'AxTableFieldReal',
+    Date:        'AxTableFieldDate',
+    DateTime:    'AxTableFieldUtcDateTime',
+    UtcDateTime: 'AxTableFieldUtcDateTime',
+    Enum:        'AxTableFieldEnum',
+    GUID:        'AxTableFieldGuid',
+    Guid:        'AxTableFieldGuid',
+    Container:   'AxTableFieldContainer',
   };
-  return typeMap[fieldType] || 'AxTableFieldString';
+
+  const explicit = typeMap[fieldType];
+  if (explicit) return explicit;
+
+  // Fall back to EDT name heuristics (mirrors SmartXmlBuilder.getAxTableFieldType)
+  const hint = edtName || fieldType;
+  if (hint) {
+    const e = hint.toLowerCase();
+    if (e === 'recid' || e.endsWith('recid') || e.includes('refrecid')) return 'AxTableFieldInt64';
+    if (e.includes('utcdatetime') || (e.includes('datetime') && !e.includes('transdate'))) return 'AxTableFieldUtcDateTime';
+    if (e.includes('date') && !e.includes('time') && !e.includes('update')) return 'AxTableFieldDate';
+    if (e.includes('amount') || e.includes('mst') || e.includes('price') || e.includes('qty')
+        || e.includes('percent') || e === 'real') return 'AxTableFieldReal';
+    if (e === 'noyesid' || e.endsWith('noyesid') || e === 'noyes') return 'AxTableFieldEnum';
+    if ((e.endsWith('int') || e.includes('count') || e.includes('level'))
+        && !e.includes('account') && !e.includes('name')) return 'AxTableFieldInt';
+  }
+
+  return 'AxTableFieldString';
 }
 
 /**
@@ -349,7 +371,9 @@ ${methodsXml}\t</SourceCode>
     } else {
       fieldsXml = '\t<Fields>\n';
       for (const f of fieldSpecs) {
-        const iType = f.edt ? 'AxTableFieldString' : fieldTypeToAxType(f.type || 'String');
+        // Determine i:type: use explicit type if provided, otherwise derive from EDT name heuristics.
+        // NEVER default to AxTableFieldString blindly when an EDT is present — EDT base type matters!
+        const iType = fieldTypeToAxType(f.type || 'String', f.edt);
         fieldsXml += `\t\t<AxTableField xmlns="" i:type="${iType}">\n`;
         fieldsXml += `\t\t\t<Name>${f.name}</Name>\n`;
         if (f.edt)       fieldsXml += `\t\t\t<ExtendedDataType>${f.edt}</ExtendedDataType>\n`;

@@ -930,23 +930,40 @@ function getRootKey(objectType: string): string {
 }
 
 /**
- * Get field node name based on field type
+ * Get AxTableField i:type attribute value from a primitive type name or EDT name.
+ * Checks explicit primitive types first; falls back to EDT name heuristics.
  */
 function getFieldNodeName(fieldType: string): string {
-  // Map EDT to field node type
+  // Map primitive type names
   const typeMap: Record<string, string> = {
-    String: 'AxTableFieldString',
-    Integer: 'AxTableFieldInt',
-    Real: 'AxTableFieldReal',
-    Date: 'AxTableFieldDate',
-    DateTime: 'AxTableFieldDateTime',
-    Enum: 'AxTableFieldEnum',
-    Int64: 'AxTableFieldInt64',
-    GUID: 'AxTableFieldGuid',
+    String:      'AxTableFieldString',
+    Integer:     'AxTableFieldInt',
+    Real:        'AxTableFieldReal',
+    Date:        'AxTableFieldDate',
+    DateTime:    'AxTableFieldUtcDateTime',
+    UtcDateTime: 'AxTableFieldUtcDateTime',
+    Enum:        'AxTableFieldEnum',
+    Int64:       'AxTableFieldInt64',
+    GUID:        'AxTableFieldGuid',
+    Guid:        'AxTableFieldGuid',
+    Container:   'AxTableFieldContainer',
   };
 
-  // Default to string if unknown
-  return typeMap[fieldType] || 'AxTableFieldString';
+  const explicit = typeMap[fieldType];
+  if (explicit) return explicit;
+
+  // Fall back to EDT name heuristics (for when caller passes EDT name instead of base type)
+  const e = fieldType.toLowerCase();
+  if (e === 'recid' || e.endsWith('recid') || e.includes('refrecid')) return 'AxTableFieldInt64';
+  if (e.includes('utcdatetime') || (e.includes('datetime') && !e.includes('transdate'))) return 'AxTableFieldUtcDateTime';
+  if (e.includes('date') && !e.includes('time') && !e.includes('update')) return 'AxTableFieldDate';
+  if (e.includes('amount') || e.includes('mst') || e.includes('price') || e.includes('qty')
+      || e.includes('percent') || e === 'real') return 'AxTableFieldReal';
+  if (e === 'noyesid' || e.endsWith('noyesid') || e === 'noyes') return 'AxTableFieldEnum';
+  if ((e.endsWith('int') || e.includes('count') || e.includes('level'))
+      && !e.includes('account') && !e.includes('name')) return 'AxTableFieldInt';
+
+  return 'AxTableFieldString';
 }
 
 export const modifyD365FileToolDefinition = {

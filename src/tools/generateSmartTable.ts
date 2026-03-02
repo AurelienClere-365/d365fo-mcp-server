@@ -306,6 +306,17 @@ export async function handleGenerateSmartTable(
     }
   }
 
+  // Resolve EDT base type from edt_metadata for each field that has an EDT but no explicit type.
+  // Without this, all EDT fields default to AxTableFieldString even for Real/Date/Int64 EDTs.
+  {
+    const db = symbolIndex.db;
+    for (const f of fields) {
+      if (f.edt && !f.type) {
+        f.type = resolveEdtBaseType(f.edt, db);
+      }
+    }
+  }
+
   // If primaryKeyFields is specified, mark those fields as mandatory (overrides auto-detection)
   if (primaryKeyFields && primaryKeyFields.length > 0) {
     for (const pkFieldName of primaryKeyFields) {
@@ -665,6 +676,41 @@ export async function handleGenerateSmartTable(
       },
     ],
   };
+}
+
+/**
+ * Resolve the primitive base type for a D365FO EDT by walking the edt_metadata chain.
+ * The `extends` column in edt_metadata stores either a primitive type name
+ * (String, Real, Int64, Date, UtcDateTime, Enum, Container, Guid, Integer) or
+ * another EDT name. We follow the chain until we reach a primitive type.
+ *
+ * Returns a base type string compatible with fieldTypeToAxType(), e.g.:
+ *   "Qty" → "Real", "TransDate" → "Date", "ItemId" → "String"
+ */
+function resolveEdtBaseType(edtName: string, db: any, depth = 0): string {
+  // D365FO primitive types − these map directly to AxTableField types
+  const PRIMITIVES = new Set([
+    'String', 'Integer', 'Int64', 'Real', 'Date', 'UtcDateTime', 'DateTime',
+    'Enum', 'Container', 'Guid', 'GUID',
+  ]);
+
+  if (depth > 8) return 'String'; // guard against circular chains
+
+  if (PRIMITIVES.has(edtName)) return edtName;
+
+  try {
+    const row = db.prepare(
+      `SELECT extends FROM edt_metadata WHERE edt_name = ? LIMIT 1`
+    ).get(edtName) as { extends: string | null } | undefined;
+
+    if (!row || !row.extends) return 'String';
+    if (PRIMITIVES.has(row.extends)) return row.extends;
+
+    // Follow chain to the parent EDT
+    return resolveEdtBaseType(row.extends, db, depth + 1);
+  } catch {
+    return 'String';
+  }
 }
 
 /**
