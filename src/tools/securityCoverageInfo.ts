@@ -45,7 +45,10 @@ export async function securityCoverageInfoTool(request: CallToolRequest, context
          WHERE target_object = ?
          ORDER BY menu_item_type, menu_item_name`
       ).all(objName) as any[];
-    } catch { /**/ }
+    } catch (e) {
+      // menu_item_targets table may not exist in older databases — non-fatal
+      if (process.env.DEBUG_LOGGING === 'true') console.warn('[securityCoverageInfo] menu_item_targets query failed:', e);
+    }
 
     // Fallback: if the object IS a menu item, use it directly
     if (menuItems.length === 0 && (resolvedType === 'menu-item' || resolvedType === 'auto')) {
@@ -80,6 +83,72 @@ export async function securityCoverageInfoTool(request: CallToolRequest, context
     const allDuties = new Set<string>();
     const allRoles = new Set<string>();
 
+    // ── Steps 3-5: Batch-fetch entire privilege→duty→role chain in 3 queries ──
+    // This replaces the previous O(N·M·K) nested-loop pattern where each
+    // privilege and duty triggered individual DB round-trips.
+
+    // 3. All privileges for all menu items at once
+    const miNames = menuItems.map(mi => mi.menu_item_name);
+    const miPH = miNames.map(() => '?').join(',');
+    const allPrivEntries = db.prepare(
+      `SELECT DISTINCT entry_point_name, privilege_name, object_type, access_level
+       FROM security_privilege_entries
+       WHERE entry_point_name IN (${miPH})
+       ORDER BY entry_point_name, privilege_name`
+    ).all(...miNames) as any[];
+
+    const privilegesByMi = new Map<string, any[]>();
+    for (const pe of allPrivEntries) {
+      if (!privilegesByMi.has(pe.entry_point_name)) privilegesByMi.set(pe.entry_point_name, []);
+      privilegesByMi.get(pe.entry_point_name)!.push(pe);
+    }
+
+    // 4. All duties for all privilege names at once
+    const allPrivNames = [...new Set(allPrivEntries.map(pe => pe.privilege_name))];
+    const dutiesByPrivilege = new Map<string, string[]>();
+    const dutiesCounts = new Map<string, number>();
+    const rolesByDuty = new Map<string, string[]>();
+    const rolesCounts = new Map<string, number>();
+
+    if (allPrivNames.length > 0) {
+      const privPH = allPrivNames.map(() => '?').join(',');
+      const allDutyRows = db.prepare(
+        `SELECT privilege_name, duty_name FROM security_duty_privileges
+         WHERE privilege_name IN (${privPH})
+         ORDER BY duty_name`
+      ).all(...allPrivNames) as any[];
+
+      for (const d of allDutyRows) {
+        if (!dutiesByPrivilege.has(d.privilege_name)) dutiesByPrivilege.set(d.privilege_name, []);
+        dutiesByPrivilege.get(d.privilege_name)!.push(d.duty_name);
+      }
+      for (const [k, v] of dutiesByPrivilege) {
+        dutiesCounts.set(k, v.length);
+        dutiesByPrivilege.set(k, v.slice(0, 5));
+      }
+
+      // 5. All roles for all duty names at once
+      const allDutyNames = [...new Set(allDutyRows.map(d => d.duty_name))];
+      if (allDutyNames.length > 0) {
+        const dutyPH = allDutyNames.map(() => '?').join(',');
+        const allRoleRows = db.prepare(
+          `SELECT duty_name, role_name FROM security_role_duties
+           WHERE duty_name IN (${dutyPH})
+           ORDER BY role_name`
+        ).all(...allDutyNames) as any[];
+
+        for (const r of allRoleRows) {
+          if (!rolesByDuty.has(r.duty_name)) rolesByDuty.set(r.duty_name, []);
+          rolesByDuty.get(r.duty_name)!.push(r.role_name);
+        }
+        for (const [k, v] of rolesByDuty) {
+          rolesCounts.set(k, v.length);
+          rolesByDuty.set(k, v.slice(0, 3));
+        }
+      }
+    }
+
+    // Build output from pre-fetched data — no DB queries inside these loops
     for (const mi of menuItems) {
       const typeLabel = mi.menu_item_type === 'menu-item-display' ? 'MenuItemDisplay'
         : mi.menu_item_type === 'menu-item-action' ? 'MenuItemAction'
@@ -89,12 +158,7 @@ export async function securityCoverageInfoTool(request: CallToolRequest, context
 
       output += `  ${mi.menu_item_name} (${typeLabel}):\n`;
 
-      // ── Step 3: Find privileges granting this menu item ──
-      const privileges = db.prepare(
-        `SELECT DISTINCT privilege_name, object_type, access_level FROM security_privilege_entries
-         WHERE entry_point_name = ?
-         ORDER BY privilege_name`
-      ).all(mi.menu_item_name) as any[];
+      const privileges = privilegesByMi.get(mi.menu_item_name) || [];
 
       if (privileges.length === 0) {
         output += `    No privileges found granting this menu item\n`;
@@ -105,41 +169,20 @@ export async function securityCoverageInfoTool(request: CallToolRequest, context
           allPrivileges.add(priv.privilege_name);
           output += `      ${priv.privilege_name} [${priv.access_level}]`;
 
-          // ── Step 4: Duties for this privilege ──
-          const duties = db.prepare(
-            `SELECT DISTINCT duty_name FROM security_duty_privileges
-             WHERE privilege_name = ?
-             ORDER BY duty_name LIMIT 5`
-          ).all(priv.privilege_name) as any[];
-
-          const totalDuties = (db.prepare(
-            `SELECT COUNT(*) as cnt FROM security_duty_privileges WHERE privilege_name = ?`
-          ).get(priv.privilege_name) as any)?.cnt ?? 0;
+          const duties = dutiesByPrivilege.get(priv.privilege_name) || [];
+          const totalDuties = dutiesCounts.get(priv.privilege_name) ?? 0;
 
           if (duties.length > 0) {
-            output += ` → Duty: ${duties.map((d: any) => d.duty_name).join(', ')}`;
+            output += ` → Duty: ${duties.join(', ')}`;
             if (totalDuties > 5) output += ` (+${totalDuties - 5} more)`;
 
-            for (const duty of duties) {
-              allDuties.add(duty.duty_name);
-
-              // ── Step 5: Roles for this duty ──
-              const roles = db.prepare(
-                `SELECT DISTINCT role_name FROM security_role_duties
-                 WHERE duty_name = ?
-                 ORDER BY role_name LIMIT 3`
-              ).all(duty.duty_name) as any[];
-
-              const totalRoles = (db.prepare(
-                `SELECT COUNT(*) as cnt FROM security_role_duties WHERE duty_name = ?`
-              ).get(duty.duty_name) as any)?.cnt ?? 0;
-
-              for (const role of roles) {
-                allRoles.add(role.role_name);
-              }
-
-              if (roles.length > 0) {
-                output += ` → Role: ${roles.map((r: any) => r.role_name).join(', ')}`;
+            for (const dutyName of duties) {
+              allDuties.add(dutyName);
+              const roleNames = rolesByDuty.get(dutyName) || [];
+              const totalRoles = rolesCounts.get(dutyName) ?? 0;
+              for (const roleName of roleNames) allRoles.add(roleName);
+              if (roleNames.length > 0) {
+                output += ` → Role: ${roleNames.join(', ')}`;
                 if (totalRoles > 3) output += ` (+${totalRoles - 3} more)`;
               }
             }

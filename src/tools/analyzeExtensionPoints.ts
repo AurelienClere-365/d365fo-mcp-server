@@ -59,7 +59,10 @@ export async function analyzeExtensionPointsTool(request: CallToolRequest, conte
            WHERE base_object_name = ? AND extension_type LIKE ?
            ORDER BY model, extension_name`
         ).all(objName, extType) as any[];
-      } catch { /**/ }
+      } catch (e) {
+        // extension_metadata table may not exist in older databases — non-fatal
+        if (process.env.DEBUG_LOGGING === 'true') console.warn('[analyzeExtensionPoints] extension_metadata query failed:', e);
+      }
     }
 
     // Build maps of already-extended methods and subscribed events
@@ -106,7 +109,10 @@ export async function analyzeExtensionPointsTool(request: CallToolRequest, conte
           }
         }
       }
-    } catch { /**/ }
+    } catch (e) {
+      // symbols scan is supplemental — non-fatal if it fails
+      if (process.env.DEBUG_LOGGING === 'true') console.warn('[analyzeExtensionPoints] symbols SubscribesTo scan failed:', e);
+    }
 
     // ── Step 3: For classes — analyze methods ──
     if (resolvedType === 'class' || resolvedType === 'auto') {

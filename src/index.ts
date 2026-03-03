@@ -18,7 +18,9 @@ import { initializeConfig } from './utils/configManager.js';
 import { SERVER_MODE, WRITE_TOOLS } from './server/serverMode.js';
 import * as fs from 'fs/promises';
 
-// Filter debug logs unless DEBUG_LOGGING is enabled
+// Filter verbose debug progress messages unless DEBUG_LOGGING is enabled.
+// Only suppress messages that are KNOWN debug output (tool-handler progress)
+// and do NOT contain any error/warning indicators.
 const originalConsoleError = console.error;
 const DEBUG_LOGGING = process.env.DEBUG_LOGGING === 'true';
 console.error = (...args: any[]) => {
@@ -26,21 +28,21 @@ console.error = (...args: any[]) => {
     originalConsoleError(...args);
     return;
   }
-  // Only log actual errors, not debug info from tool handlers
   const firstArg = String(args[0]);
-  if (firstArg.includes('[create_d365fo_file]') || 
-      firstArg.includes('[generate_d365fo_xml]') ||
-      firstArg.includes('[ProjectFileManager]')) {
-    // Skip debug logs from tool handlers unless it's an actual error
-    if (firstArg.includes('Failed') || 
-        firstArg.includes('Error') || 
-        firstArg.includes('❌') ||
-        firstArg.includes('⚠️  Redis')) {
-      originalConsoleError(...args);
-    }
-    return;
+  // Suppress only verbose debug progress from known tool handler prefixes,
+  // but NEVER suppress if the message contains error/warning indicators.
+  const isToolDebugMessage =
+    (firstArg.includes('[create_d365fo_file]') ||
+     firstArg.includes('[generate_d365fo_xml]') ||
+     firstArg.includes('[ProjectFileManager]')) &&
+    !firstArg.includes('Failed') &&
+    !firstArg.includes('Error') &&
+    !firstArg.includes('error') &&
+    !firstArg.includes('❌') &&
+    !firstArg.includes('⚠️');
+  if (!isToolDebugMessage) {
+    originalConsoleError(...args);
   }
-  originalConsoleError(...args);
 };
 
 const PORT = parseInt(process.env.PORT || '8080');
@@ -192,6 +194,8 @@ async function initializeServices() {
         // Try again with fresh database
         symbolIndex = new XppSymbolIndex(DB_PATH, LABELS_DB_PATH);
         symbolCount = symbolIndex.getSymbolCount();
+        console.log('   ⚠️  Symbol index is now empty. To restore, run:');
+        console.log('       npm run index-metadata');
       } else {
         throw error;
       }

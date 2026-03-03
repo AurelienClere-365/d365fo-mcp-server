@@ -368,12 +368,25 @@ export async function findD365FileOnDisk(
 }
 
 /**
- * Create file backup
+ * Create file backup and verify it was written successfully.
+ * Throws if the source file is missing or the copy fails, so callers
+ * always know whether a valid backup exists before overwriting.
  */
 async function createFileBackup(filePath: string): Promise<void> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
   const backupPath = `${filePath}.backup-${timestamp}`;
-  await fs.copyFile(filePath, backupPath);
+  try {
+    await fs.copyFile(filePath, backupPath);
+    // Confirm the backup has non-zero size before proceeding
+    const stat = await fs.stat(backupPath);
+    if (stat.size === 0) {
+      throw new Error('Backup file was created but is empty');
+    }
+  } catch (error) {
+    throw new Error(
+      `Failed to create backup at "${backupPath}": ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 /**

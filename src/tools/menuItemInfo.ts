@@ -60,6 +60,65 @@ export async function menuItemInfoTool(request: CallToolRequest, context: XppSer
       return { content: [{ type: 'text', text: notFoundText }] };
     }
 
+    // ── Batch-fetch security chain for all symbols at once (3 queries total) ──
+    // Replaces the previous O(N·M·K) nested per-privilege / per-duty query pattern.
+    const symNames = symbols.map(s => s.name);
+    const symPH = symNames.map(() => '?').join(',');
+
+    const allPrivEntries = db.prepare(
+      `SELECT DISTINCT entry_point_name, privilege_name, object_type, access_level
+       FROM security_privilege_entries
+       WHERE entry_point_name IN (${symPH})
+       ORDER BY entry_point_name, privilege_name`
+    ).all(...symNames) as any[];
+
+    const privilegesBySymbol = new Map<string, any[]>();
+    for (const pe of allPrivEntries) {
+      if (!privilegesBySymbol.has(pe.entry_point_name)) privilegesBySymbol.set(pe.entry_point_name, []);
+      privilegesBySymbol.get(pe.entry_point_name)!.push(pe);
+    }
+
+    const allPrivNames = [...new Set(allPrivEntries.map(pe => pe.privilege_name))];
+    const dutiesByPriv = new Map<string, string[]>();
+    const dutiesCountByPriv = new Map<string, number>();
+    const rolesByDutyName = new Map<string, string[]>();
+    const rolesCountByDuty = new Map<string, number>();
+
+    if (allPrivNames.length > 0) {
+      const privPH = allPrivNames.map(() => '?').join(',');
+      const allDutyRows = db.prepare(
+        `SELECT privilege_name, duty_name FROM security_duty_privileges
+         WHERE privilege_name IN (${privPH}) ORDER BY duty_name`
+      ).all(...allPrivNames) as any[];
+
+      for (const d of allDutyRows) {
+        if (!dutiesByPriv.has(d.privilege_name)) dutiesByPriv.set(d.privilege_name, []);
+        dutiesByPriv.get(d.privilege_name)!.push(d.duty_name);
+      }
+      for (const [k, v] of dutiesByPriv) {
+        dutiesCountByPriv.set(k, v.length);
+        dutiesByPriv.set(k, v.slice(0, 5));
+      }
+
+      const allDutyNames = [...new Set(allDutyRows.map(d => d.duty_name))];
+      if (allDutyNames.length > 0) {
+        const dutyPH = allDutyNames.map(() => '?').join(',');
+        const allRoleRows = db.prepare(
+          `SELECT duty_name, role_name FROM security_role_duties
+           WHERE duty_name IN (${dutyPH}) ORDER BY role_name`
+        ).all(...allDutyNames) as any[];
+
+        for (const r of allRoleRows) {
+          if (!rolesByDutyName.has(r.duty_name)) rolesByDutyName.set(r.duty_name, []);
+          rolesByDutyName.get(r.duty_name)!.push(r.role_name);
+        }
+        for (const [k, v] of rolesByDutyName) {
+          rolesCountByDuty.set(k, v.length);
+          rolesByDutyName.set(k, v.slice(0, 5));
+        }
+      }
+    }
+
     let output = '';
 
     for (const symbol of symbols) {
@@ -91,45 +150,30 @@ export async function menuItemInfoTool(request: CallToolRequest, context: XppSer
         output += `Target: ${symbol.signature}\n`;
       }
 
-      // Security chain: find privileges referencing this menu item as entry point
-      const privileges = db.prepare(
-        `SELECT DISTINCT privilege_name, object_type, access_level FROM security_privilege_entries
-         WHERE entry_point_name = ? ORDER BY privilege_name`
-      ).all(symbol.name) as any[];
+      // Security chain — use pre-fetched data (no DB queries inside this loop)
+      const privileges = privilegesBySymbol.get(symbol.name) || [];
 
       if (privileges.length > 0) {
         output += `\nSecurity Chain:\n`;
         for (const priv of privileges) {
           output += `  Privilege: ${priv.privilege_name} [${priv.access_level}]\n`;
 
-          // Duties using this privilege
-          const duties = db.prepare(
-            `SELECT DISTINCT duty_name FROM security_duty_privileges
-             WHERE privilege_name = ? ORDER BY duty_name LIMIT 5`
-          ).all(priv.privilege_name) as any[];
+          const duties = dutiesByPriv.get(priv.privilege_name) || [];
+          const totalDuties = dutiesCountByPriv.get(priv.privilege_name) ?? 0;
 
-          for (const duty of duties) {
-            output += `    → Duty: ${duty.duty_name}\n`;
+          for (const dutyName of duties) {
+            output += `    → Duty: ${dutyName}\n`;
 
-            // Roles using this duty
-            const roles = db.prepare(
-              `SELECT DISTINCT role_name FROM security_role_duties
-               WHERE duty_name = ? ORDER BY role_name LIMIT 5`
-            ).all(duty.duty_name) as any[];
+            const roles = rolesByDutyName.get(dutyName) || [];
+            const totalRoles = rolesCountByDuty.get(dutyName) ?? 0;
 
-            for (const role of roles) {
-              output += `      → Role: ${role.role_name}\n`;
+            for (const roleName of roles) {
+              output += `      → Role: ${roleName}\n`;
             }
-            const totalRoles = (db.prepare(
-              `SELECT COUNT(*) as cnt FROM security_role_duties WHERE duty_name = ?`
-            ).get(duty.duty_name) as any)?.cnt ?? 0;
             if (totalRoles > 5) {
               output += `      → ... and ${totalRoles - 5} more roles\n`;
             }
           }
-          const totalDuties = (db.prepare(
-            `SELECT COUNT(*) as cnt FROM security_duty_privileges WHERE privilege_name = ?`
-          ).get(priv.privilege_name) as any)?.cnt ?? 0;
           if (totalDuties > 5) {
             output += `    → ... and ${totalDuties - 5} more duties\n`;
           }

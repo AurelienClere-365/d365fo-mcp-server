@@ -2201,7 +2201,19 @@ export async function handleCreateD365File(
     );
     const fileName = `${finalObjectName}.xml`;
     const fullPath = path.join(modelPath, fileName);
-    
+
+    // Security: prevent path traversal. path.join() resolves ".." segments,
+    // so a crafted modelName/objectName could escape basePath entirely.
+    // Resolve both paths and assert the target stays within basePath.
+    const resolvedBase = path.resolve(basePath);
+    const resolvedTarget = path.resolve(fullPath);
+    if (!resolvedTarget.startsWith(resolvedBase + path.sep) && resolvedTarget !== resolvedBase) {
+      throw new Error(
+        `❌ Security error: resolved path "${resolvedTarget}" is outside base directory "${resolvedBase}".\n` +
+        `Check modelName, packageName, objectName, and packagePath for path traversal sequences.`
+      );
+    }
+
     // Normalize path to Windows format (backslashes) for consistency
     const normalizedFullPath = fullPath.replace(/\//g, '\\');
 

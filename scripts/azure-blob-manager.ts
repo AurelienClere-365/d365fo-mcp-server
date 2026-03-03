@@ -21,9 +21,13 @@ const LOCAL_METADATA_PATH = process.env.METADATA_PATH || './extracted-metadata';
 console.log(`📦 Container: ${BLOB_CONTAINER}`);
 console.log(`📁 Local path: ${LOCAL_METADATA_PATH}`);
 
-// Concurrency limit to avoid EMFILE errors (too many open files)
-const MAX_CONCURRENT_UPLOADS = 50;
-const MAX_CONCURRENT_DOWNLOADS = 50;
+// Concurrency limit — keep low to avoid ECONNREFUSED / throttling from Azure Blob Storage
+const MAX_CONCURRENT_UPLOADS = 5;
+const MAX_CONCURRENT_DOWNLOADS = 10;
+
+// Retry settings for transient network errors (ECONNREFUSED, ETIMEDOUT, 503, 500)
+const MAX_RETRIES = 4;
+const RETRY_BASE_DELAY_MS = 500;
 
 // Blob structure:
 // /metadata/standard/{ModelName}/...  - Standard metadata (změna párkrát ročně)
@@ -409,16 +413,33 @@ export class AzureBlobMetadataManager {
         // Recursively upload subdirectories (controlled parallelism at file level)
         uploadTasks.push(() => this.uploadDirectory(localPath, blobPath));
       } else {
-        // Create upload task (not executed yet)
+        // Create upload task with retry logic
         uploadTasks.push(async () => {
-          try {
-            const blockBlobClient = this.containerClient.getBlockBlobClient(blobPath);
-            await blockBlobClient.uploadFile(localPath);
-            return 1;
-          } catch (error) {
-            console.error(`   ❌ Error uploading ${localPath}:`, error);
-            return 0;
+          for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+              const blockBlobClient = this.containerClient.getBlockBlobClient(blobPath);
+              await blockBlobClient.uploadFile(localPath);
+              return 1;
+            } catch (error: any) {
+              const isTransient =
+                error.code === 'ECONNREFUSED' ||
+                error.code === 'ECONNRESET' ||
+                error.code === 'ETIMEDOUT' ||
+                error.code === 'ENOTFOUND' ||
+                error.statusCode === 500 ||
+                error.statusCode === 503;
+
+              if (isTransient && attempt < MAX_RETRIES) {
+                const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+                console.warn(`   ⚠️  Transient error uploading ${blobPath} (attempt ${attempt}/${MAX_RETRIES}), retrying in ${delay}ms: ${error.code || error.statusCode}`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+              } else {
+                console.error(`   ❌ Error uploading ${blobPath}:`, error);
+                return 0;
+              }
+            }
           }
+          return 0;
         });
       }
     }

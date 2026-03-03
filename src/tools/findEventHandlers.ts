@@ -46,7 +46,10 @@ export async function findEventHandlersTool(request: CallToolRequest, context: X
            WHERE (event_subscriptions LIKE ? OR event_subscriptions LIKE ?)
            ORDER BY model, extension_name`
         ).all(`%classStr(${targetName}%`, `%tableStr(${targetName}%`) as any[];
-      } catch { /**/ }
+      } catch (e) {
+        // extension_metadata table may not exist in older databases — non-fatal
+        if (process.env.DEBUG_LOGGING === 'true') console.warn('[findEventHandlers] extension_metadata query failed:', e);
+      }
     }
 
     // ── 2. FTS search on source_snippet for SubscribesTo ──

@@ -98,18 +98,26 @@ export async function downloadDatabaseFromBlob(options?: DownloadOptions): Promi
       const sizeInMB = ((properties.contentLength || 0) / (1024 * 1024)).toFixed(2);
       console.log(`   Size: ${sizeInMB} MB`);
 
-      // Download to temporary file with timeout
+      // Download to temporary file with timeout.
+      // AbortController cancels the underlying stream so it stops writing to
+      // tmpPath after the deadline fires (unlike Promise.race which leaves the
+      // stream running and producing a corrupted temp file).
       const startTime = Date.now();
-      const downloadPromise = blobClient.downloadToFile(tmpPath, 0, undefined, {
-        maxRetryRequests: 5,
-      });
-      
-      // Race against timeout
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Download timeout')), timeoutMs)
-      );
-      
-      await Promise.race([downloadPromise, timeoutPromise]);
+      const abortCtrl = new AbortController();
+      const timeoutId = setTimeout(() => abortCtrl.abort(), timeoutMs);
+      try {
+        await blobClient.downloadToFile(tmpPath, 0, undefined, {
+          maxRetryRequests: 5,
+          abortSignal: abortCtrl.signal,
+        });
+      } catch (err: any) {
+        if (err.name === 'AbortError' || err.code === 'ERR_ABORTED') {
+          throw new Error(`Download timeout after ${timeoutMs / 1000}s`);
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeoutId);
+      }
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
       console.log(`   Downloaded in ${duration}s`);
 
@@ -139,12 +147,20 @@ export async function downloadDatabaseFromBlob(options?: DownloadOptions): Promi
           const labelsSizeInMB = ((labelsProperties.contentLength || 0) / (1024 * 1024)).toFixed(2);
           console.log(`   Labels size: ${labelsSizeInMB} MB`);
 
-          const labelsDownloadPromise = labelsBlobClient.downloadToFile(labelsTmpPath);
-          const labelsTimeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Labels download timeout')), timeoutMs)
-          );
-
-          await Promise.race([labelsDownloadPromise, labelsTimeoutPromise]);
+          const labelsAbortCtrl = new AbortController();
+          const labelsTimeoutId = setTimeout(() => labelsAbortCtrl.abort(), timeoutMs);
+          try {
+            await labelsBlobClient.downloadToFile(labelsTmpPath, 0, undefined, {
+              abortSignal: labelsAbortCtrl.signal,
+            });
+          } catch (err: any) {
+            if (err.name === 'AbortError' || err.code === 'ERR_ABORTED') {
+              throw new Error(`Labels download timeout after ${timeoutMs / 1000}s`);
+            }
+            throw err;
+          } finally {
+            clearTimeout(labelsTimeoutId);
+          }
 
           // Validate labels database
           console.log(`   Validating labels database integrity...`);

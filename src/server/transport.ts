@@ -224,15 +224,19 @@ export class CustomHttpTransport implements Transport {
           }
 
           const responsePromise = new Promise<JSONRPCMessage>((resolve, reject) => {
-            this.pendingRequests.set(request.id, resolve);
-            
-            // Timeout after 30 seconds
-            setTimeout(() => {
+            const timeoutId = setTimeout(() => {
               if (this.pendingRequests.has(request.id)) {
                 this.pendingRequests.delete(request.id);
                 reject(new Error('Request timeout'));
               }
             }, 30000);
+
+            // Wrap resolve so the timeout is always cancelled when a response arrives,
+            // preventing the timer from leaking after the promise is already settled.
+            this.pendingRequests.set(request.id, (message) => {
+              clearTimeout(timeoutId);
+              resolve(message);
+            });
           });
 
           // Send request to MCP server

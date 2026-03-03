@@ -39,7 +39,10 @@ export async function tableExtensionInfoTool(request: CallToolRequest, context: 
          WHERE base_object_name = ? AND extension_type = 'table-extension'
          ORDER BY model, extension_name`
       ).all(tableName) as any[];
-    } catch { /**/ }
+    } catch (e) {
+      // extension_metadata table may not exist in older databases — non-fatal
+      if (process.env.DEBUG_LOGGING === 'true') console.warn('[tableExtensionInfo] extension_metadata query failed:', e);
+    }
 
     // Fallback: symbols with extends_class pointing to the table
     const symbolExts = db.prepare(

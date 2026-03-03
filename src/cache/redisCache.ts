@@ -46,7 +46,11 @@ export class RedisCacheService {
           // Parse the Redis URL to extract connection details for Cluster client
           const parsed = new URL(redisUrl);
           const host = parsed.hostname;
+          if (!host) throw new Error(`REDIS_URL is missing a hostname: "${redisUrl}"`);
           const port = parseInt(parsed.port || '6380', 10);
+          if (isNaN(port) || port < 1 || port > 65535) {
+            throw new Error(`REDIS_URL has an invalid port "${parsed.port}" (must be 1–65535)`);
+          }
           const password = parsed.password ? decodeURIComponent(parsed.password) : undefined;
           const useTls = parsed.protocol === 'rediss:';
 

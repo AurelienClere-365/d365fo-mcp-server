@@ -190,8 +190,16 @@ export class XppSymbolIndex {
         ['related_methods', 'TEXT'],
         ['api_patterns', 'TEXT'],
       ];
+      // Validate column names and types before using them in DDL.
+      // exec() does not support parameters for DDL, so we guard against
+      // any future accidental mutation of newCols with external data.
+      const allowedColNames = new Set(newCols.map(([col]) => col));
+      const allowedColTypePat = /^(TEXT|INTEGER|INTEGER DEFAULT \d+)$/;
       for (const [col, def] of newCols) {
         if (!existingCols.has(col)) {
+          if (!allowedColNames.has(col) || !allowedColTypePat.test(def)) {
+            throw new Error(`symbolIndex: unexpected column definition: "${col} ${def}"`);
+          }
           this.db.exec(`ALTER TABLE symbols ADD COLUMN ${col} ${def};`);
         }
       }
@@ -2130,28 +2138,26 @@ export class XppSymbolIndex {
    */
   clearModels(modelNames: string[], shouldVacuum: boolean = false): void {
     if (modelNames.length === 0) return;
-    
-    const placeholders = modelNames.map(() => '?').join(',');
-    
-    // Clear symbols
-    const stmt = this.db.prepare(`DELETE FROM symbols WHERE model IN (${placeholders})`);
-    stmt.run(...modelNames);
-    
-    // Clear extended metadata tables
-    const stmtRelations = this.db.prepare(`DELETE FROM table_relations WHERE model IN (${placeholders})`);
-    stmtRelations.run(...modelNames);
-    
-    const stmtFormDs = this.db.prepare(`DELETE FROM form_datasources WHERE model IN (${placeholders})`);
-    stmtFormDs.run(...modelNames);
-    
-    const stmtEdt = this.db.prepare(`DELETE FROM edt_metadata WHERE model IN (${placeholders})`);
-    stmtEdt.run(...modelNames);
 
-    this.db.prepare(`DELETE FROM security_privilege_entries WHERE model IN (${placeholders})`).run(...modelNames);
-    this.db.prepare(`DELETE FROM security_duty_privileges WHERE model IN (${placeholders})`).run(...modelNames);
-    this.db.prepare(`DELETE FROM security_role_duties WHERE model IN (${placeholders})`).run(...modelNames);
-    this.db.prepare(`DELETE FROM menu_item_targets WHERE model IN (${placeholders})`).run(...modelNames);
-    this.db.prepare(`DELETE FROM extension_metadata WHERE model IN (${placeholders})`).run(...modelNames);
+    // NOTE: `placeholders` is built from '?' characters only — it never contains
+    // user-supplied data. The actual model name values flow through SQLite's
+    // parameterized binding via .run(...modelNames), so there is no injection risk.
+    const placeholders = modelNames.map(() => '?').join(',');
+
+    // Wrap all deletes in a single transaction so the database never ends up
+    // in a partially-cleared state if one statement fails mid-way.
+    const deleteAll = this.db.transaction(() => {
+      this.db.prepare(`DELETE FROM symbols WHERE model IN (${placeholders})`).run(...modelNames);
+      this.db.prepare(`DELETE FROM table_relations WHERE model IN (${placeholders})`).run(...modelNames);
+      this.db.prepare(`DELETE FROM form_datasources WHERE model IN (${placeholders})`).run(...modelNames);
+      this.db.prepare(`DELETE FROM edt_metadata WHERE model IN (${placeholders})`).run(...modelNames);
+      this.db.prepare(`DELETE FROM security_privilege_entries WHERE model IN (${placeholders})`).run(...modelNames);
+      this.db.prepare(`DELETE FROM security_duty_privileges WHERE model IN (${placeholders})`).run(...modelNames);
+      this.db.prepare(`DELETE FROM security_role_duties WHERE model IN (${placeholders})`).run(...modelNames);
+      this.db.prepare(`DELETE FROM menu_item_targets WHERE model IN (${placeholders})`).run(...modelNames);
+      this.db.prepare(`DELETE FROM extension_metadata WHERE model IN (${placeholders})`).run(...modelNames);
+    });
+    deleteAll();
 
     console.log(`🗑️  Cleared symbols for models: ${modelNames.join(', ')}`);
     

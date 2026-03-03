@@ -6,6 +6,21 @@ import type { Request, Response } from 'express';
  */
 
 /**
+ * Safely parse an integer environment variable.
+ * Returns defaultVal when the value is missing, non-numeric, or outside [min, max].
+ */
+function parseEnvInt(key: string, defaultVal: number, min: number, max: number): number {
+  const raw = process.env[key];
+  if (raw === undefined) return defaultVal;
+  const parsed = parseInt(raw, 10);
+  if (isNaN(parsed) || parsed < min || parsed > max) {
+    console.warn(`[rateLimiter] Invalid ${key}="${raw}" (expected ${min}–${max}), using default ${defaultVal}`);
+    return defaultVal;
+  }
+  return parsed;
+}
+
+/**
  * Custom key generator that handles IP addresses with ports
  * Uses ipKeyGenerator helper for proper IPv6 support
  * Fixes Azure App Service proxy scenarios where IP comes as "IP:PORT"
@@ -29,8 +44,8 @@ function generateKey(req: Request): string {
  * Default: 100 requests per 15 minutes per IP
  */
 export const apiRateLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
+  windowMs: parseEnvInt('RATE_LIMIT_WINDOW_MS', 900000, 10000, 86400000), // 10s–24h
+  max: parseEnvInt('RATE_LIMIT_MAX_REQUESTS', 100, 1, 10000),
   keyGenerator: generateKey,
   validate: {
     // We safely use ipKeyGenerator in our custom generateKey function
@@ -60,8 +75,8 @@ export const apiRateLimiter = rateLimit({
  * Default: 20 requests per 15 minutes per IP
  */
 export const strictRateLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_STRICT_MAX_REQUESTS || '20', 10),
+  windowMs: parseEnvInt('RATE_LIMIT_WINDOW_MS', 900000, 10000, 86400000),
+  max: parseEnvInt('RATE_LIMIT_STRICT_MAX_REQUESTS', 20, 1, 1000),
   keyGenerator: generateKey,
   validate: {
     // We safely use ipKeyGenerator in our custom generateKey function
@@ -87,8 +102,8 @@ export const strictRateLimiter = rateLimit({
  * Default: 5 requests per 15 minutes per IP
  */
 export const authRateLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_AUTH_MAX_REQUESTS || '5', 10),
+  windowMs: parseEnvInt('RATE_LIMIT_WINDOW_MS', 900000, 10000, 86400000),
+  max: parseEnvInt('RATE_LIMIT_AUTH_MAX_REQUESTS', 5, 1, 100),
   keyGenerator: generateKey,
   validate: {
     // We safely use ipKeyGenerator in our custom generateKey function
