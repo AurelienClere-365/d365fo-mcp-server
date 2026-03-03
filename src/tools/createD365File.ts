@@ -14,7 +14,8 @@ import { PackageResolver } from '../utils/packageResolver.js';
 
 const CreateD365FileArgsSchema = z.object({
   objectType: z
-    .enum(['class', 'table', 'enum', 'form', 'query', 'view', 'data-entity', 'report'])
+    .enum(['class', 'table', 'enum', 'form', 'query', 'view', 'data-entity', 'report',
+           'menu-item-display', 'menu-item-action', 'menu-item-output'])
     .describe('Type of D365FO object to create'),
   objectName: z
     .string()
@@ -1011,6 +1012,10 @@ ${defaultParamGroupXml}
         return this.generateAxDataEntityXml(objectName, properties);
       case 'report':
         return this.generateAxReportXml(objectName, properties);
+      case 'menu-item-display':
+      case 'menu-item-action':
+      case 'menu-item-output':
+        return this.generateAxMenuItemXml(objectType, objectName, properties);
       default:
         throw new Error(`Unsupported object type: ${objectType}`);
     }
@@ -1714,6 +1719,36 @@ ${defaultParamGroupXml}
       return `<Text>${encoded}</Text>`;
     });
   }
+
+  /**
+   * Generate AxMenuItemDisplay / AxMenuItemAction / AxMenuItemOutput XML.
+   *
+   * AOT folder mapping:
+   *   menu-item-display → AxMenuItemDisplay  (ObjectType: Form)
+   *   menu-item-action  → AxMenuItemAction   (ObjectType: Class)
+   *   menu-item-output  → AxMenuItemOutput   (ObjectType: Report)
+   */
+  static generateAxMenuItemXml(
+    itemType: 'menu-item-display' | 'menu-item-action' | 'menu-item-output',
+    name: string,
+    properties?: Record<string, any>
+  ): string {
+    const elemName = itemType === 'menu-item-action' ? 'AxMenuItemAction'
+      : itemType === 'menu-item-output' ? 'AxMenuItemOutput'
+      : 'AxMenuItemDisplay';
+    const objType = itemType === 'menu-item-action' ? 'Class'
+      : itemType === 'menu-item-output' ? 'Report'
+      : 'Form';
+    const targetObject = properties?.targetObject || properties?.object || name;
+    const label = properties?.label || '@TODO:LabelId';
+    return `<?xml version="1.0" encoding="utf-8"?>
+<${elemName} xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+\t<Name>${name}</Name>
+\t<Label>${label}</Label>
+\t<Object>${targetObject}</Object>
+\t<ObjectType>${objType}</ObjectType>
+</${elemName}>`;
+  }
 }
 
 /**
@@ -1752,6 +1787,9 @@ export class ProjectFileManager {
       'form-extension': 'Form Extensions',
       'data-entity-extension': 'Data Entity Extensions',
       report: 'Reports',
+      'menu-item-display': 'Menu Items Display',
+      'menu-item-action': 'Menu Items Action',
+      'menu-item-output': 'Menu Items Output',
     };
     return folderMap[objectType] || 'Classes';
   }
@@ -1773,6 +1811,9 @@ export class ProjectFileManager {
       'form-extension': 'AxFormExtension',
       'data-entity-extension': 'AxDataEntityViewExtension',
       report: 'AxReport',
+      'menu-item-display': 'AxMenuItemDisplay',
+      'menu-item-action': 'AxMenuItemAction',
+      'menu-item-output': 'AxMenuItemOutput',
     };
     return prefixMap[objectType] || 'AxClass';
   }
@@ -2134,6 +2175,9 @@ export async function handleCreateD365File(
       table: 'AxTable',
       enum: 'AxEnum',
       form: 'AxForm',
+      'menu-item-display': 'AxMenuItemDisplay',
+      'menu-item-action': 'AxMenuItemAction',
+      'menu-item-output': 'AxMenuItemOutput',
       query: 'AxQuery',
       view: 'AxView',
       'data-entity': 'AxDataEntityView',
