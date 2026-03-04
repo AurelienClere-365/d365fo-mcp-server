@@ -1338,6 +1338,23 @@ ${defaultParamGroupXml}
         if (existingPageMatch) {
           pageEl = existingPageMatch[0];
           fixedRdl = fixedRdl.replace(existingPageMatch[0], '');
+          // PageHeader/PageFooter may still be direct children of <Report> (outside the <Page>
+          // element we just extracted). Inject them into pageEl before </Page>.
+          let extraPageContent = '';
+          const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
+          if (phMatch && !pageEl.includes('<PageHeader')) {
+            extraPageContent += phMatch[0];
+            fixedRdl = fixedRdl.replace(phMatch[0], '');
+          }
+          const pfMatch = fixedRdl.match(/<PageFooter[\s\S]*?<\/PageFooter>/);
+          if (pfMatch && !pageEl.includes('<PageFooter')) {
+            extraPageContent += (extraPageContent ? '\n' : '') + pfMatch[0];
+            fixedRdl = fixedRdl.replace(pfMatch[0], '');
+          }
+          if (extraPageContent) {
+            pageEl = pageEl.replace('</Page>', extraPageContent.trim() + '\n</Page>');
+            console.error('[sanitizeReportXml] Moved stray <PageHeader>/<PageFooter> into existing <Page> (2010 RDL)');
+          }
         } else {
           let pageInner = '';
           const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
