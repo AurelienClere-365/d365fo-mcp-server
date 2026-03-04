@@ -67,12 +67,9 @@ export class SmartXmlBuilder {
     xml += `\t\t<Declaration><![CDATA[\npublic class ${name} extends common\n{\n}\n]]></Declaration>\n`;
     if (methods && methods.length > 0) {
       xml += `\t\t<Methods>\n`;
-      for (const method of methods) {
-        xml += `\t\t\t<Method>\n`;
-        xml += `\t\t\t\t<Name>${method.name}</Name>\n`;
-        xml += `\t\t\t\t<Source><![CDATA[\n${method.source}\n]]></Source>\n`;
-        xml += `\t\t\t</Method>\n`;
-      }
+      xml += methods
+        .map(m => `\t\t\t<Method>\n\t\t\t\t<Name>${m.name}</Name>\n\t\t\t\t<Source><![CDATA[\n${m.source}\n]]></Source>\n\t\t\t</Method>`)
+        .join('\n\n') + '\n';
       xml += `\t\t</Methods>\n`;
     } else {
       xml += `\t\t<Methods />\n`;

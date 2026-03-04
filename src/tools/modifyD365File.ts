@@ -72,29 +72,40 @@ const ModifyD365FileArgsSchema = z.object({
   
   // Options
   createBackup: z.boolean().optional().default(false).describe('Create backup before modification (default: false)'),
-  modelName: z.string().optional().describe('Model name (auto-detected if not provided)'),
+  modelName: z.string().optional().describe('Model name (auto-detected if not provided). Pass this if the file was just created and is not yet indexed.'),
   packageName: z.string().optional().describe('Package name. Auto-resolved if omitted.'),
   workspacePath: z.string().optional().describe('Path to workspace for finding file'),
+  filePath: z.string().optional().describe(
+    'Absolute path to the XML file. Use this when the object was just created and the path is already known ' +
+    '(e.g. from create_d365fo_file output). Bypasses symbol DB lookup entirely.'
+  ),
 });
 
 export async function modifyD365FileTool(request: CallToolRequest, context: XppServerContext) {
   try {
     const args = ModifyD365FileArgsSchema.parse(request.params.arguments);
     const { symbolIndex } = context;
-    const { 
-      objectType, 
-      objectName, 
-      operation, 
+    const {
+      objectType,
+      objectName,
+      operation,
       createBackup,
       modelName,
-      workspacePath 
+      workspacePath,
+      filePath: explicitFilePath,
     } = args;
 
     // 1. Find the file
-    const filePath = await findD365File(symbolIndex, objectType, objectName, modelName, workspacePath);
-    
+    const filePath = await findD365File(symbolIndex, objectType, objectName, modelName, workspacePath, explicitFilePath);
+
     if (!filePath) {
-      throw new Error(`File not found for ${objectType} "${objectName}". Make sure the object exists and is indexed.`);
+      throw new Error(
+        `File not found for ${objectType} "${objectName}".\n\n` +
+        `Retry options (do NOT use PowerShell — this tool can handle it):\n` +
+        `  1. Pass modelName="<YourModel>" — triggers filesystem lookup by path.\n` +
+        `  2. Pass filePath="K:\\\\AosService\\\\PackagesLocalDirectory\\\\<pkg>\\\\<model>\\\\${objectName}.xml" — bypasses all lookup.\n` +
+        `  3. If the object was just created, re-run create_d365fo_file first and use the returned path as filePath.`
+      );
     }
 
     // 2. Resolve actual XML file path (DB may store JSON metadata with sourcePath)
@@ -187,7 +198,9 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
       headless: false,
     });
     
-    const newXml = builder.buildObject(xmlObj);
+    // Add blank line between <Method> elements — xml2js Builder doesn't insert them.
+    const newXml = builder.buildObject(xmlObj)
+      .replace(/<\/Method>\n(\t*)<Method>/g, '</Method>\n\n$1<Method>');
     await fs.writeFile(actualFilePath, newXml, 'utf-8');
 
     // 6. Return success
@@ -221,10 +234,17 @@ async function findD365File(
   objectType: string,
   objectName: string,
   modelName?: string,
-  _workspacePath?: string
+  _workspacePath?: string,
+  explicitFilePath?: string
 ): Promise<string | null> {
-  // Map object type to symbol type
-  const typeMap: Record<string, string> = {
+  // Explicit path bypasses all lookup — use when caller knows the exact location
+  // (e.g. the path was returned by create_d365fo_file).
+  if (explicitFilePath) {
+    return explicitFilePath;
+  }
+
+  // Symbol DB only indexes a subset of types — for the rest go straight to filesystem.
+  const dbTypeMap: Record<string, string> = {
     class: 'class',
     table: 'table',
     form: 'form',
@@ -233,39 +253,39 @@ async function findD365File(
     view: 'view',
   };
 
-  const symbolType = typeMap[objectType];
-  if (!symbolType) {
-    throw new Error(`Unsupported object type: ${objectType}`);
+  const symbolType = dbTypeMap[objectType];
+
+  // Query database when a symbol type mapping exists
+  if (symbolType) {
+    let dbResult: string | null = null;
+    if (modelName) {
+      const stmt = symbolIndex.db.prepare(`
+        SELECT file_path
+        FROM symbols
+        WHERE type = ? AND name = ? AND model = ?
+        LIMIT 1
+      `);
+      const row = stmt.get(symbolType, objectName, modelName);
+      dbResult = row ? row.file_path : null;
+    } else {
+      const stmt = symbolIndex.db.prepare(`
+        SELECT file_path
+        FROM symbols
+        WHERE type = ? AND name = ?
+        ORDER BY model
+        LIMIT 1
+      `);
+      const row = stmt.get(symbolType, objectName);
+      dbResult = row ? row.file_path : null;
+    }
+
+    if (dbResult) {
+      return dbResult;
+    }
   }
 
-  // Query database first
-  let dbResult: string | null = null;
-  if (modelName) {
-    const stmt = symbolIndex.db.prepare(`
-      SELECT file_path
-      FROM symbols
-      WHERE type = ? AND name = ? AND model = ?
-      LIMIT 1
-    `);
-    const row = stmt.get(symbolType, objectName, modelName);
-    dbResult = row ? row.file_path : null;
-  } else {
-    const stmt = symbolIndex.db.prepare(`
-      SELECT file_path
-      FROM symbols
-      WHERE type = ? AND name = ?
-      ORDER BY model
-      LIMIT 1
-    `);
-    const row = stmt.get(symbolType, objectName);
-    dbResult = row ? row.file_path : null;
-  }
-
-  if (dbResult) {
-    return dbResult;
-  }
-
-  // Filesystem fallback: handles newly created files not yet in the symbol index
+  // Filesystem fallback: handles newly created files not yet in the symbol index,
+  // and all types not covered by the symbol DB (edt, report, extensions, security, menu …).
   return findD365FileOnDisk(objectType, objectName, modelName);
 }
 
@@ -950,9 +970,22 @@ function getRootKey(objectType: string): string {
     'data-entity': 'AxDataEntityView',
     report: 'AxReport',
     'table-extension': 'AxTableExtension',
-    'class-extension': 'AxClassExtension',
+    'class-extension': 'AxClass',
     'form-extension': 'AxFormExtension',
     'enum-extension': 'AxEnumExtension',
+    'edt-extension': 'AxEdtExtension',
+    'data-entity-extension': 'AxDataEntityViewExtension',
+    'menu-item-display': 'AxMenuItemDisplay',
+    'menu-item-action': 'AxMenuItemAction',
+    'menu-item-output': 'AxMenuItemOutput',
+    'menu-item-display-extension': 'AxMenuItemDisplayExtension',
+    'menu-item-action-extension': 'AxMenuItemActionExtension',
+    'menu-item-output-extension': 'AxMenuItemOutputExtension',
+    menu: 'AxMenu',
+    'menu-extension': 'AxMenuExtension',
+    'security-privilege': 'AxSecurityPrivilege',
+    'security-duty': 'AxSecurityDuty',
+    'security-role': 'AxSecurityRole',
   };
 
   const key = keyMap[objectType];

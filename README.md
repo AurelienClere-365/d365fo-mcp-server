@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**40 AI tools that know every X++ class, table, method, and EDT in your D365FO codebase**
+**41 AI tools that know every X++ class, table, method, and EDT in your D365FO codebase**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24.0.0-brightgreen.svg)](https://nodejs.org/)
@@ -18,7 +18,7 @@
 
 GitHub Copilot is great at C#, Python, and JavaScript. It struggles with X++ because it doesn't know your D365FO codebase: method signatures, field types, which CoC extensions already exist, or how your custom ISV code is structured.
 
-This MCP server pre-indexes your entire D365FO installation — 584,799+ symbols — and makes it available to Copilot as 40 specialized tools. Copilot stops guessing and starts generating code that compiles on the first try.
+This MCP server pre-indexes your entire D365FO installation — 584,799+ symbols — and makes it available to Copilot as 41 specialized tools. Copilot stops guessing and starts generating code that compiles on the first try.
 
 ```
 ┌─────────────────────────┐   MCP / HTTP    ┌────────────────────────────────────┐
@@ -88,7 +88,7 @@ Copy-Item -Path ".github" -Destination "C:\Path\To\YourSolution\" -Recurse
 
 ---
 
-## What Copilot can do — 40 X++ tools
+## What Copilot can do — 41 X++ tools
 
 ### Search & Discovery
 | Ask Copilot | Tool used |
@@ -127,6 +127,7 @@ Copy-Item -Path ".github" -Destination "C:\Path\To\YourSolution\" -Recurse
 | `Create a security privilege + duty for our new form` | `generate_code` (security-privilege pattern) |
 | `Add a new field TransQty (EDT: InventQty) to my table` | `modify_d365fo_file` |
 | `Create a new class and add it to the VS project` | `create_d365fo_file` |
+| `Check that all created objects exist on disk and in the project` | `verify_d365fo_project` |
 
 ### Security & Extensions
 | Ask Copilot | Tool used |
@@ -169,7 +170,7 @@ Setup guide: [docs/SETUP.md](docs/SETUP.md) · CI/CD pipeline: [docs/PIPELINES.m
 |------|---------|
 | [docs/SETUP.md](docs/SETUP.md) | Installation, configuration, Azure deployment |
 | [docs/MCP_CONFIG.md](docs/MCP_CONFIG.md) | `.mcp.json` reference — workspace paths, UDE, project settings |
-| [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md) | All 40 tools with parameters and example prompts |
+| [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md) | All 41 tools with parameters and example prompts |
 | [docs/USAGE_EXAMPLES.md](docs/USAGE_EXAMPLES.md) | Practical examples: search, CoC, SysOperation, security |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical architecture, dual-database design |
 | [docs/CUSTOM_EXTENSIONS.md](docs/CUSTOM_EXTENSIONS.md) | ISV / custom model configuration |

@@ -14,6 +14,7 @@ import { getQueryInfoToolDefinition } from './queryInfo.js';
 import { getViewInfoToolDefinition } from './viewInfo.js';
 import { getEnumInfoToolDefinition } from './enumInfo.js';
 import { getEdtInfoToolDefinition } from './edtInfo.js';
+import { verifyD365ProjectToolDefinition } from './verifyD365Project.js';
 
 // ============================================
 // Tool Input Schemas
@@ -824,4 +825,5 @@ export const toolDefinitions: ToolDefinition[] = [
   getViewInfoToolDefinition,
   getEnumInfoToolDefinition,
   getEdtInfoToolDefinition,
+  verifyD365ProjectToolDefinition,
 ];

@@ -1835,6 +1835,53 @@ Examples:
           required: ['proposedName', 'objectType'],
         },
       },
+      {
+        name: 'verify_d365fo_project',
+        description: `Verify that D365FO objects exist on disk at the correct AOT path and are referenced in the Visual Studio project (.rnrproj) file.
+
+Use this INSTEAD OF PowerShell to check whether create_d365fo_file placed files correctly.
+Reports ✅/❌ for each object on both disk presence and project inclusion.
+
+Examples:
+  { objects: [{ objectType: "table", objectName: "MyTable" }, { objectType: "class", objectName: "MyClass" }], projectPath: "K:\\\\AosService\\\\PackagesLocalDirectory\\\\MyPkg\\\\MyModel\\\\MyModel.rnrproj" }
+  { objects: [{ objectType: "menu-item-action", objectName: "MyMenuItem" }], modelName: "MyModel" }`,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            objects: {
+              type: 'array',
+              description: 'List of objects to verify',
+              items: {
+                type: 'object',
+                properties: {
+                  objectType: {
+                    type: 'string',
+                    enum: ['class', 'table', 'enum', 'form', 'query', 'view', 'data-entity', 'report',
+                      'edt', 'edt-extension', 'table-extension', 'form-extension', 'data-entity-extension',
+                      'enum-extension', 'menu-item-display', 'menu-item-action', 'menu-item-output',
+                      'menu-item-display-extension', 'menu-item-action-extension', 'menu-item-output-extension',
+                      'menu', 'menu-extension', 'security-privilege', 'security-duty', 'security-role'],
+                    description: 'Type of D365FO object',
+                  },
+                  objectName: { type: 'string', description: 'Name of the object' },
+                },
+                required: ['objectType', 'objectName'],
+              },
+            },
+            projectPath: {
+              type: 'string',
+              description: 'Absolute path to the .rnrproj file. Required for project-reference check.',
+            },
+            modelName: {
+              type: 'string',
+              description: 'Model name. Auto-detected from mcp.json if omitted.',
+            },
+            packageName: { type: 'string', description: 'Package name. Auto-resolved from model name if omitted.' },
+            packagePath: { type: 'string', description: 'Base package path (default: K:\\AosService\\PackagesLocalDirectory)' },
+          },
+          required: ['objects'],
+        },
+      },
     ],
     };
 

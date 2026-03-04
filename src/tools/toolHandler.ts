@@ -85,6 +85,7 @@ import { findEventHandlersTool } from './findEventHandlers.js';
 import { securityCoverageInfoTool } from './securityCoverageInfo.js';
 import { analyzeExtensionPointsTool } from './analyzeExtensionPoints.js';
 import { validateObjectNamingTool } from './validateObjectNaming.js';
+import { verifyD365ProjectTool } from './verifyD365Project.js';
 
 /**
  * Centralized tool handler that dispatches to individual tool implementations
@@ -262,6 +263,8 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
         return analyzeExtensionPointsTool(request, context);
       case 'validate_object_naming':
         return validateObjectNamingTool(request, context);
+      case 'verify_d365fo_project':
+        return verifyD365ProjectTool(request, context);
       default:
         return {
           content: [

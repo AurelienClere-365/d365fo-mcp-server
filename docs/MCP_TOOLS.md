@@ -1,7 +1,7 @@
 # All Available Tools
 
 When you ask GitHub Copilot a question about D365FO code, it automatically calls one of these
-40 tools to look up the answer or generate code. You do not need to name the tools yourself —
+41 tools to look up the answer or generate code. You do not need to name the tools yourself —
 just ask in plain English.
 
 ---
@@ -78,6 +78,7 @@ just ask in plain English.
 | **get_data_entity_info** | Data entity category, OData name, data sources, keys | "Show me CustCustomerV3Entity details" |
 | **analyze_extension_points** | CoC-eligible methods, delegates, events — what can be extended | "What can I extend on SalesLine?" |
 | **validate_object_naming** | Validate proposed extension/object names against D365FO conventions | "Is SalesTableExtension a valid extension class name?" |
+| **verify_d365fo_project** | Verify objects exist on disk and are referenced in the .rnrproj file | "Check that all created files are in place" |
 
 ### Label Management (4 tools)
 
@@ -684,6 +685,47 @@ Generate MyOrderForm with datasource and controls for displaying orders
   - Control hierarchy (grids, buttons, groups)
   - Form pattern application (SimpleList, DetailsTransaction, etc.)
   - Common action buttons (New, Delete, Refresh)
+
+---
+
+### verify_d365fo_project
+
+Verifies that D365FO objects exist on disk at the correct AOT path and are referenced in the Visual Studio project file. Use this instead of PowerShell after `create_d365fo_file` to confirm that files were created and registered correctly.
+
+**Parameters:**
+- `objects` (required): Array of `{ objectType, objectName }` pairs to check
+- `projectPath` (optional): Absolute path to `.rnrproj` — required for project-reference check
+- `modelName` (optional): Model name — auto-detected from `mcp.json` if omitted
+- `packageName` / `packagePath` (optional): Override auto-resolved package location
+
+**Returns:** Markdown table with ✅/❌ for each object on disk presence and project inclusion, plus a summary.
+
+**Example:**
+```json
+{
+  "objects": [
+    { "objectType": "table",            "objectName": "AslInventByZoneTmp" },
+    { "objectType": "report",           "objectName": "AslInventByZone" },
+    { "objectType": "menu-item-action", "objectName": "AslInventByZone" }
+  ],
+  "projectPath": "K:\\AosService\\PackagesLocalDirectory\\fm-mcp\\fm-mcp\\fm-mcp.rnrproj"
+}
+```
+
+**Example output:**
+```
+## Verification Results — fm-mcp
+
+| Object | Type | Disk | Project |
+|--------|------|------|---------|
+| AslInventByZoneTmp | table | ✅ `K:\...\AxTable\AslInventByZoneTmp.xml` | ✅ |
+| AslInventByZone | report | ✅ ... | ✅ |
+| AslInventByZone | menu-item-action | ❌ Missing — expected: `K:\...\AxMenuItemAction\AslInventByZone.xml` | ✅ |
+
+### Summary
+- Checked: 3   On disk ✅: 2   Missing from disk ❌: 1
+- In project ✅: 3   Missing from project ❌: 0
+```
 
 ---
 

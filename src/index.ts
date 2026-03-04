@@ -313,7 +313,7 @@ async function main() {
     console.log('✅ Stdio transport connected');
     
     // Log actual tool count based on server mode
-    const totalTools = 40;
+    const totalTools = 41;
     const writeToolCount = WRITE_TOOLS.size;
     const toolCount = SERVER_MODE === 'write-only' ? writeToolCount :
                      SERVER_MODE === 'read-only' ? totalTools - writeToolCount : totalTools;
@@ -426,6 +426,7 @@ async function main() {
           { name: 'get_data_entity_info',         desc: 'Data entity: category, OData settings, data sources, keys' },
           { name: 'analyze_extension_points',     desc: 'CoC-eligible methods, delegates, events — what can be extended?' },
           { name: 'validate_object_naming',       desc: 'Validate proposed extensions and object names against D365FO conventions' },
+          { name: 'verify_d365fo_project',        desc: 'Verify objects exist on disk and are referenced in the .rnrproj project file' },
         ]},
       ];
 

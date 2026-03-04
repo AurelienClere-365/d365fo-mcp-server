@@ -284,6 +284,7 @@ export class XmlTemplateGenerator {
 
     return { declaration, methods };
   }
+
   /**
    * Generate AxClass XML structure
    */
@@ -346,6 +347,7 @@ ${methodsXml}\t</SourceCode>
   ): string {
     const label = properties?.label || tableName;
     const tableGroup = properties?.tableGroup || 'Main';
+    const tableType = properties?.tableType || '';
     const titleField1 = properties?.titleField1 || '';
     const titleField2 = properties?.titleField2 || '';
     const configKey = properties?.configurationKey || '';
@@ -365,6 +367,11 @@ ${methodsXml}\t</SourceCode>
     // Build optional primary index (NOTE: ClusteredIndex is NOT in real D365FO files)
     const primaryIndexXml = primaryIndex
       ? `\t<PrimaryIndex>${primaryIndex}</PrimaryIndex>\n\t<ReplacementKey>${primaryIndex}</ReplacementKey>\n`
+      : '';
+
+    // Build optional TableType (TempDB, InMemory; omit for Regular — it's the default)
+    const tableTypeXml = tableType
+      ? `\t<TableType>${tableType}</TableType>\n`
       : '';
 
     // Build <Fields> block from properties.fields array (TableFieldSpec[]).
@@ -405,7 +412,7 @@ public class ${tableName} extends common
 \t</SourceCode>
 ${configKeyXml}\t<Label>${label}</Label>
 \t<TableGroup>${tableGroup}</TableGroup>
-\t<TitleField1>${titleField1}</TitleField1>
+${tableTypeXml}\t<TitleField1>${titleField1}</TitleField1>
 \t<TitleField2>${titleField2}</TitleField2>
 ${cacheLookupXml}${primaryIndexXml}\t<DeleteActions />
 \t<FieldGroups>
@@ -431,7 +438,8 @@ ${cacheLookupXml}${primaryIndexXml}\t<DeleteActions />
 \t\t\t<Fields />
 \t\t</AxTableFieldGroup>
 \t</FieldGroups>
-${fieldsXml}\t<Indexes />
+${fieldsXml}\t<FullTextIndexes />
+\t<Indexes />
 \t<Mappings />
 \t<Relations />
 \t<StateMachines />
@@ -524,8 +532,23 @@ ${dataSourceXml}\t\t<Pattern xmlns="">${pattern}</Pattern>
     const title = properties?.title || queryName;
 
     return `<?xml version="1.0" encoding="utf-8"?>
-<AxQuery xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+<AxQuery xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns=""
+\ti:type="AxQuerySimple">
 \t<Name>${queryName}</Name>
+\t<SourceCode>
+\t\t<Methods>
+\t\t\t<Method>
+\t\t\t\t<Name>classDeclaration</Name>
+\t\t\t\t<Source><![CDATA[
+[Query]
+public class ${queryName} extends QueryRun
+{
+}
+
+]]></Source>
+\t\t\t</Method>
+\t\t</Methods>
+\t</SourceCode>
 \t<Title>${title}</Title>
 \t<DataSources />
 </AxQuery>
@@ -1057,6 +1080,26 @@ ${defaultParamGroupXml}
   }
 
   /**
+   * Sanitize AxQuery XML — ensures xmlns="" and i:type="AxQuerySimple" are present
+   * on the root <AxQuery> element. D365FO deserializer requires both attributes.
+   */
+  static sanitizeQueryXml(xml: string): string {
+    return xml.replace(
+      /<AxQuery(\s[^>]*)?>/,
+      (_match, attrs: string | undefined) => {
+        let a = attrs || '';
+        if (!a.includes('xmlns=""')) {
+          a += ' xmlns=""';
+        }
+        if (!a.includes('i:type="AxQuerySimple"')) {
+          a += '\n\ti:type="AxQuerySimple"';
+        }
+        return `<AxQuery${a}>`;
+      }
+    );
+  }
+
+  /**
    * Sanitize AxReport XML to guarantee the structural elements required by the D365FO
    * Visual Studio Designer metadata loader, regardless of whether the XML was generated
    * by the template or supplied verbatim by a caller via the xmlContent parameter.
@@ -1069,6 +1112,46 @@ ${defaultParamGroupXml}
    *  5. <AxReportDesign> has xmlns="" and i:type="AxReportPrecisionDesign" attributes
    *     (VS Designer won't show Designs sub-nodes without these)
    */
+
+  /**
+   * Sanitize AxTable XML to ensure correct D365FO field element format.
+   *
+   * D365FO requires fields as:
+   *   <AxTableField xmlns="" i:type="AxTableFieldString"> ... </AxTableField>
+   *
+   * AI generators often emit the shorter form:
+   *   <AxTableFieldString> ... </AxTableFieldString>
+   *
+   * This method also ensures <FullTextIndexes /> is present between </Fields> and <Indexes>.
+   */
+  static sanitizeTableXml(xml: string): string {
+    const fieldTypes = [
+      'AxTableFieldString', 'AxTableFieldInt', 'AxTableFieldInt64',
+      'AxTableFieldReal', 'AxTableFieldDate', 'AxTableFieldUtcDateTime',
+      'AxTableFieldEnum', 'AxTableFieldGuid', 'AxTableFieldContainer',
+    ];
+
+    for (const ft of fieldTypes) {
+      // Opening tag: <AxTableFieldString ...> → <AxTableField xmlns="" i:type="AxTableFieldString" ...>
+      // Only replace if NOT already inside a correct <AxTableField xmlns="" i:type="..."> wrapper
+      const openRe = new RegExp(`<${ft}(\\s[^>]*)?>`, 'g');
+      xml = xml.replace(openRe, (_match, attrs: string | undefined) => {
+        const extra = attrs ? attrs : '';
+        return `<AxTableField xmlns="" i:type="${ft}"${extra}>`;
+      });
+      // Closing tag
+      xml = xml.replace(new RegExp(`<\\/${ft}>`, 'g'), '</AxTableField>');
+    }
+
+    // Ensure <FullTextIndexes /> is present between </Fields> and <Indexes>
+    if (!xml.includes('<FullTextIndexes')) {
+      xml = xml.replace('</Fields>\n\t<Indexes', '</Fields>\n\t<FullTextIndexes />\n\t<Indexes');
+      xml = xml.replace('</Fields>\n<Indexes', '</Fields>\n<FullTextIndexes />\n<Indexes');
+    }
+
+    return xml;
+  }
+
   static sanitizeReportXml(xml: string): string {
     // 1. Ensure xmlns="Microsoft.Dynamics.AX.Metadata.V2" on <AxReport> opening tag
     if (!xml.includes('xmlns="Microsoft.Dynamics.AX.Metadata.V2"')) {
@@ -1256,6 +1339,23 @@ ${defaultParamGroupXml}
         if (existingPageMatch) {
           pageEl = existingPageMatch[0];
           fixedRdl = fixedRdl.replace(existingPageMatch[0], '');
+          // PageHeader/PageFooter may still be direct children of <Report> (outside the <Page>
+          // element we just extracted). Inject them into pageEl before </Page>.
+          let extraPageContent = '';
+          const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
+          if (phMatch && !pageEl.includes('<PageHeader')) {
+            extraPageContent += phMatch[0];
+            fixedRdl = fixedRdl.replace(phMatch[0], '');
+          }
+          const pfMatch = fixedRdl.match(/<PageFooter[\s\S]*?<\/PageFooter>/);
+          if (pfMatch && !pageEl.includes('<PageFooter')) {
+            extraPageContent += (extraPageContent ? '\n' : '') + pfMatch[0];
+            fixedRdl = fixedRdl.replace(pfMatch[0], '');
+          }
+          if (extraPageContent) {
+            pageEl = pageEl.replace('</Page>', extraPageContent.trim() + '\n</Page>');
+            console.error('[sanitizeReportXml] Moved stray <PageHeader>/<PageFooter> into existing <Page> (2010 RDL)');
+          }
         } else {
           let pageInner = '';
           const phMatch = fixedRdl.match(/<PageHeader[\s\S]*?<\/PageHeader>/);
@@ -1925,12 +2025,28 @@ ${defaultParamGroupXml}
     const targetObject = properties?.targetObject || properties?.object || name;
     const label = properties?.label || '@TODO:LabelId';
     return `<?xml version="1.0" encoding="utf-8"?>
-<${elemName} xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+<${elemName} xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V1">
 \t<Name>${name}</Name>
 \t<Label>${label}</Label>
 \t<Object>${targetObject}</Object>
 \t<ObjectType>${objType}</ObjectType>
 </${elemName}>`;
+  }
+
+  /**
+   * Ensure AxMenuItemAction/Display/Output XML always has the required
+   * xmlns="Microsoft.Dynamics.AX.Metadata.V1" namespace on the root element.
+   * D365FO metadata deserializer rejects the file without it.
+   */
+  static sanitizeMenuItemXml(xml: string): string {
+    return xml.replace(
+      /<(AxMenuItem(?:Action|Display|Output))(\s[^>]*)?>/,
+      (match, tag: string, attrs: string | undefined) => {
+        const current = attrs || '';
+        if (current.includes('xmlns="Microsoft.Dynamics.AX.Metadata.V1"')) return match;
+        return `<${tag}${current} xmlns="Microsoft.Dynamics.AX.Metadata.V1">`;
+      }
+    );
   }
 }
 
@@ -2609,6 +2725,24 @@ export async function handleCreateD365File(
       // sanitizeReportXml operates on CDATA internally; this final step converts
       // the output so that D365FO VS Designer renders the design correctly.
       xmlContent = XmlTemplateGenerator.encodeReportTextElement(xmlContent);
+    }
+
+    // Sanitize menu item XML — D365FO metadata deserializer requires
+    // xmlns="Microsoft.Dynamics.AX.Metadata.V1" on the root element.
+    if (args.objectType === 'menu-item-display' ||
+        args.objectType === 'menu-item-action' ||
+        args.objectType === 'menu-item-output') {
+      xmlContent = XmlTemplateGenerator.sanitizeMenuItemXml(xmlContent);
+    }
+
+    // Sanitize table XML — ensures correct field element format required by D365FO deserializer.
+    if (args.objectType === 'table') {
+      xmlContent = XmlTemplateGenerator.sanitizeTableXml(xmlContent);
+    }
+
+    // Sanitize query XML — ensures xmlns="" and i:type="AxQuerySimple" on root element.
+    if (args.objectType === 'query') {
+      xmlContent = XmlTemplateGenerator.sanitizeQueryXml(xmlContent);
     }
 
     // Debug: Log XML content length
