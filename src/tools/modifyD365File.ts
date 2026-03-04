@@ -198,7 +198,9 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
       headless: false,
     });
     
-    const newXml = builder.buildObject(xmlObj);
+    // Add blank line between <Method> elements — xml2js Builder doesn't insert them.
+    const newXml = builder.buildObject(xmlObj)
+      .replace(/<\/Method>\n(\t*)<Method>/g, '</Method>\n\n$1<Method>');
     await fs.writeFile(actualFilePath, newXml, 'utf-8');
 
     // 6. Return success
