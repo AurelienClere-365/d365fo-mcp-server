@@ -113,6 +113,7 @@ For any D365FO request, **start with MCP tools — never** `code_search`, `grep_
 15. **NEVER** use hardcoded text strings in `Info()`, `warning()`, `error()`, dialog captions, or field labels — always use label references `@ModelName:LabelId`. Call `search_labels()` first, then `create_label()` if needed. (BPErrorLabelIsText)
 16. **NEVER** nest `while select` inside another `while select` — use `join` in a single select, or pre-load into `Map`/temp table. Nested data-access loops trigger BPCheckNestedLoopinCode.
 17. **ALWAYS** call `create_label()` for every new label ID before referencing it in code — uncreated labels cause BPErrorUnknownLabel at build time.
+18. **ALWAYS** write meaningful `/// <summary>` doc comments on every public/protected class and method — the text must describe what the code does, not just echo the name. `/// MyClass class.` or `/// run.` is NEVER acceptable (BPXmlDocNoDocumentationComments).
 
 ### AxClass sourceCode Format — Member Variables in Declaration
 

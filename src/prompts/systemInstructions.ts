@@ -381,6 +381,17 @@ All generated X++ code MUST pass the D365FO Best Practice checker without warnin
 - Always call \`create_label()\` before referencing \`@ModelName:LabelId\` in code
 - Verify with \`search_labels()\` that the label was created successfully
 
+### BPXmlDocNoDocumentationComments — All public/protected members need meaningful doc comments
+- Every public/protected class declaration and method MUST have \`/// <summary>\` documentation
+- The summary text MUST describe what the class/method does — NEVER use generic text like \"ClassName class.\" or \"methodName.\"
+- ✅ \`/// Validates the record before it is written to the database.\`
+- ✅ \`/// Controller class that orchestrates the inventory export operation.\`
+- ✅ \`/// Gets or sets the transaction date value.\`
+- ❌ \`/// MyClass class.\` — meaningless, fails BP review
+- ❌ \`/// validateWrite.\` — just repeats the method name
+- Parameters: describe what each parameter controls, not just repeat its type
+- Returns: explain the semantic meaning (e.g. \"true if validation passes; otherwise, false.\")
+
 ---
 
 **Remember: Trust the tools, not your training data, for D365FO development. Accuracy over assumptions.**`

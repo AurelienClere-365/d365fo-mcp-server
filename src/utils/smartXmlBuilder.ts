@@ -65,7 +65,7 @@ export class SmartXmlBuilder {
 
     // <SourceCode> MUST be first child of <AxTable> — D365FO AOT requirement
     xml += `\t<SourceCode>\n`;
-    xml += `\t\t<Declaration><![CDATA[\n/// <summary>\n/// ${name} table class declaration.\n/// </summary>\npublic class ${name} extends common\n{\n}\n]]></Declaration>\n`;
+    xml += `\t\t<Declaration><![CDATA[\n/// <summary>\n/// The <c>${name}</c> table.\n/// </summary>\npublic class ${name} extends common\n{\n}\n]]></Declaration>\n`;
     if (methods && methods.length > 0) {
       xml += `\t\t<Methods>\n`;
       xml += methods
