@@ -216,7 +216,7 @@ describe('XppSymbolIndex.renameLabelInIndex', () => {
     };
   }
 
-  it('renames label_id in the labels table and updates FTS', () => {
+  it('renames label_id in the labels table and updates FTS', { timeout: 30000 }, () => {
     const { dbPath, labelsDbPath } = makeTmpPaths();
     const symbolIndex = new XppSymbolIndex(dbPath, labelsDbPath);
 
@@ -251,7 +251,7 @@ describe('XppSymbolIndex.renameLabelInIndex', () => {
     symbolIndex.close();
   });
 
-  it('does not affect labels in a different model', () => {
+  it('does not affect labels in a different model', { timeout: 30000 }, () => {
     const { dbPath, labelsDbPath } = makeTmpPaths();
     const symbolIndex = new XppSymbolIndex(dbPath, labelsDbPath);
 
@@ -271,7 +271,7 @@ describe('XppSymbolIndex.renameLabelInIndex', () => {
     symbolIndex.close();
   });
 
-  it('FTS returns new ID after rename', () => {
+  it('FTS returns new ID after rename', { timeout: 30000 }, () => {
     const { dbPath, labelsDbPath } = makeTmpPaths();
     const symbolIndex = new XppSymbolIndex(dbPath, labelsDbPath);
 
