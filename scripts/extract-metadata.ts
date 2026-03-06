@@ -103,6 +103,8 @@ interface ModelWorkItem {
   modelName: string;
   modelPath: string;
   expectedXmlFiles: number;
+  /** True for custom/ISV models whose paths should be normalised to relative form. */
+  isCustom: boolean;
 }
 
 function formatDuration(ms: number): string {
@@ -400,7 +402,10 @@ async function extractMetadata() {
       }
 
       const expectedXmlFiles = await countModelXmlFiles(modelPath);
-      modelWorkItems.push({ packageName, modelName, modelPath, expectedXmlFiles });
+      // In UDE mode: custom iff the package lives under customRoot.
+      // In traditional mode: fall back to name-based detection.
+      const isCustom = customRoot ? rootPath === customRoot : isCustomModel(modelName);
+      modelWorkItems.push({ packageName, modelName, modelPath, expectedXmlFiles, isCustom });
     }
   }
 
@@ -422,47 +427,49 @@ async function extractMetadata() {
     const modelStart = Date.now();
     console.log(`   📂 Model: ${modelItem.modelName} (${formatCount(modelItem.expectedXmlFiles)} XML files)`);
 
+    const { modelPath, modelName, isCustom } = modelItem;
+
     // Extract classes
-    await extractClasses(parser, modelItem.modelPath, modelItem.modelName, stats);
+    await extractClasses(parser, modelPath, modelName, stats, isCustom);
 
     // Extract tables
-    await extractTables(parser, modelItem.modelPath, modelItem.modelName, stats);
+    await extractTables(parser, modelPath, modelName, stats, isCustom);
 
     // Extract forms
-    await extractForms(parser, modelItem.modelPath, modelItem.modelName, stats);
+    await extractForms(parser, modelPath, modelName, stats, isCustom);
 
     // Extract queries
-    await extractQueries(parser, modelItem.modelPath, modelItem.modelName, stats);
+    await extractQueries(parser, modelPath, modelName, stats, isCustom);
 
     // Extract views
-    await extractViews(parser, modelItem.modelPath, modelItem.modelName, stats);
+    await extractViews(parser, modelPath, modelName, stats, isCustom);
 
     // Extract enums
-    await extractEnums(parser, modelItem.modelPath, modelItem.modelName, stats);
+    await extractEnums(parser, modelPath, modelName, stats, isCustom);
 
     // Extract EDTs
-    await extractEdts(parser, modelItem.modelPath, modelItem.modelName, stats);
+    await extractEdts(parser, modelPath, modelName, stats, isCustom);
 
     // Extract Reports
-    await extractReports(modelItem.modelPath, modelItem.modelName, stats);
+    await extractReports(modelPath, modelName, stats, isCustom);
 
     // Extract security objects
-    await extractSecurityPrivileges(parser, modelItem.modelPath, modelItem.modelName, stats);
-    await extractSecurityDuties(parser, modelItem.modelPath, modelItem.modelName, stats);
-    await extractSecurityRoles(parser, modelItem.modelPath, modelItem.modelName, stats);
+    await extractSecurityPrivileges(parser, modelPath, modelName, stats, isCustom);
+    await extractSecurityDuties(parser, modelPath, modelName, stats, isCustom);
+    await extractSecurityRoles(parser, modelPath, modelName, stats, isCustom);
 
     // Extract menu items
-    await extractMenuItems(parser, modelItem.modelPath, modelItem.modelName, 'display', stats);
-    await extractMenuItems(parser, modelItem.modelPath, modelItem.modelName, 'action', stats);
-    await extractMenuItems(parser, modelItem.modelPath, modelItem.modelName, 'output', stats);
+    await extractMenuItems(parser, modelPath, modelName, 'display', stats, isCustom);
+    await extractMenuItems(parser, modelPath, modelName, 'action', stats, isCustom);
+    await extractMenuItems(parser, modelPath, modelName, 'output', stats, isCustom);
 
     // Extract extensions
-    await extractExtensions(parser, modelItem.modelPath, modelItem.modelName, 'table-extension', 'AxTableExtension', stats);
-    await extractExtensions(parser, modelItem.modelPath, modelItem.modelName, 'class-extension', 'AxClassExtension', stats);
-    await extractExtensions(parser, modelItem.modelPath, modelItem.modelName, 'form-extension', 'AxFormExtension', stats);
-    await extractExtensions(parser, modelItem.modelPath, modelItem.modelName, 'enum-extension', 'AxEnumExtension', stats);
-    await extractExtensions(parser, modelItem.modelPath, modelItem.modelName, 'edt-extension', 'AxEdtExtension', stats);
-    await extractExtensions(parser, modelItem.modelPath, modelItem.modelName, 'data-entity-extension', 'AxDataEntityViewExtension', stats);
+    await extractExtensions(parser, modelPath, modelName, 'table-extension', 'AxTableExtension', stats, isCustom);
+    await extractExtensions(parser, modelPath, modelName, 'class-extension', 'AxClassExtension', stats, isCustom);
+    await extractExtensions(parser, modelPath, modelName, 'form-extension', 'AxFormExtension', stats, isCustom);
+    await extractExtensions(parser, modelPath, modelName, 'enum-extension', 'AxEnumExtension', stats, isCustom);
+    await extractExtensions(parser, modelPath, modelName, 'edt-extension', 'AxEdtExtension', stats, isCustom);
+    await extractExtensions(parser, modelPath, modelName, 'data-entity-extension', 'AxDataEntityViewExtension', stats, isCustom);
 
     const modelDuration = Date.now() - modelStart;
     cumulativeModelDuration += modelDuration;
@@ -511,7 +518,8 @@ async function extractClasses(
   parser: XppMetadataParser,
   modelPath: string,
   modelName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   // Support both uppercase and lowercase directory names (Linux case-sensitivity)
   let classesPath = path.join(modelPath, 'AxClass');
@@ -550,7 +558,7 @@ async function extractClasses(
       const outputDir = path.join(OUTPUT_PATH, modelName, 'classes');
       await fs.mkdir(outputDir, { recursive: true });
       const outputFile = path.join(outputDir, `${classInfo.data.name}.json`);
-      await fs.writeFile(outputFile, JSON.stringify(classInfo.data, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify(classInfo.data, isCustom ? sourcePathReplacer : undefined, 2));
 
       stats.classes++;
     } catch (error) {
@@ -565,7 +573,8 @@ async function extractTables(
   parser: XppMetadataParser,
   modelPath: string,
   modelName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   // Support both uppercase and lowercase directory names (Linux case-sensitivity)
   let tablesPath = path.join(modelPath, 'AxTable');
@@ -604,7 +613,7 @@ async function extractTables(
       const outputDir = path.join(OUTPUT_PATH, modelName, 'tables');
       await fs.mkdir(outputDir, { recursive: true });
       const outputFile = path.join(outputDir, `${tableInfo.data.name}.json`);
-      await fs.writeFile(outputFile, JSON.stringify(tableInfo.data, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify(tableInfo.data, isCustom ? sourcePathReplacer : undefined, 2));
 
       stats.tables++;
     } catch (error) {
@@ -619,7 +628,8 @@ async function extractForms(
   parser: XppMetadataParser,
   modelPath: string,
   modelName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   // Support both uppercase and lowercase directory names (Linux case-sensitivity)
   let formsPath = path.join(modelPath, 'AxForm');
@@ -660,7 +670,7 @@ async function extractForms(
       const outputDir = path.join(OUTPUT_PATH, modelName, 'forms');
       await fs.mkdir(outputDir, { recursive: true });
       const outputFile = path.join(outputDir, `${formInfo.name}.json`);
-      await fs.writeFile(outputFile, JSON.stringify(formInfo, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify(formInfo, isCustom ? sourcePathReplacer : undefined, 2));
 
       stats.forms++;
     } catch (error) {
@@ -675,7 +685,8 @@ async function extractQueries(
   parser: XppMetadataParser,
   modelPath: string,
   modelName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   // Support both uppercase and lowercase directory names (Linux case-sensitivity)
   let queriesPath = path.join(modelPath, 'AxQuery');
@@ -714,7 +725,7 @@ async function extractQueries(
       const outputDir = path.join(OUTPUT_PATH, modelName, 'queries');
       await fs.mkdir(outputDir, { recursive: true });
       const outputFile = path.join(outputDir, `${queryName}.json`);
-      await fs.writeFile(outputFile, JSON.stringify(queryInfo, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify(queryInfo, isCustom ? sourcePathReplacer : undefined, 2));
 
       stats.queries++;
     } catch (error) {
@@ -729,7 +740,8 @@ async function extractViews(
   parser: XppMetadataParser,
   modelPath: string,
   modelName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   const sourceDirs: string[] = [];
 
@@ -767,7 +779,7 @@ async function extractViews(
         const outputDir = path.join(OUTPUT_PATH, modelName, 'views');
         await fs.mkdir(outputDir, { recursive: true });
         const outputFile = path.join(outputDir, `${viewInfo.data.name}.json`);
-        await fs.writeFile(outputFile, JSON.stringify(viewInfo.data, sourcePathReplacer, 2));
+        await fs.writeFile(outputFile, JSON.stringify(viewInfo.data, isCustom ? sourcePathReplacer : undefined, 2));
 
         if (viewInfo.data.type === 'data-entity') {
           stats.dataEntities++;
@@ -788,7 +800,8 @@ async function extractEnums(
   parser: XppMetadataParser,
   modelPath: string,
   modelName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   // Support both uppercase and lowercase directory names (Linux case-sensitivity)
   let enumsPath = path.join(modelPath, 'AxEnum');
@@ -820,7 +833,7 @@ async function extractEnums(
       const outputDir = path.join(OUTPUT_PATH, modelName, 'enums');
       await fs.mkdir(outputDir, { recursive: true });
       const outputFile = path.join(outputDir, file.replace('.xml', '.json'));
-      await fs.writeFile(outputFile, JSON.stringify({ raw: content }, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify({ raw: content }, isCustom ? sourcePathReplacer : undefined, 2));
 
       stats.enums++;
     } catch (error) {
@@ -835,7 +848,8 @@ async function extractEdts(
   parser: XppMetadataParser,
   modelPath: string,
   modelName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   // Support both uppercase and lowercase directory names (Linux case-sensitivity)
   let edtsPath = path.join(modelPath, 'AxEdt');
@@ -876,7 +890,7 @@ async function extractEdts(
       const outputDir = path.join(OUTPUT_PATH, modelName, 'edts');
       await fs.mkdir(outputDir, { recursive: true });
       const outputFile = path.join(outputDir, `${edtInfo.name}.json`);
-      await fs.writeFile(outputFile, JSON.stringify(edtInfo, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify(edtInfo, isCustom ? sourcePathReplacer : undefined, 2));
 
       stats.edts++;
     } catch (error) {
@@ -896,7 +910,8 @@ async function extractEdts(
 async function extractReports(
   modelPath: string,
   modelName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   // Support both uppercase and lowercase directory names (Linux case-sensitivity)
   let reportsPath = path.join(modelPath, 'AxReport');
@@ -937,7 +952,7 @@ async function extractReports(
       };
 
       const outputFile = path.join(outputDir, `${name}.json`);
-      await fs.writeFile(outputFile, JSON.stringify(stub, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify(stub, isCustom ? sourcePathReplacer : undefined, 2));
 
       stats.reports++;
     } catch (error) {
@@ -951,7 +966,8 @@ async function extractSecurityPrivileges(
   parser: XppMetadataParser,
   modelPath: string,
   modelName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   let dirPath = path.join(modelPath, 'AxSecurityPrivilege');
   try { await fs.access(dirPath); } catch {
@@ -970,7 +986,7 @@ async function extractSecurityPrivileges(
       const result = await parser.parseSecurityPrivilegeFile(filePath);
       if (!result.success || !result.data) { stats.errors++; continue; }
       const outputFile = path.join(outputDir, `${result.data.name}.json`);
-      await fs.writeFile(outputFile, JSON.stringify({ ...result.data, model: modelName, type: 'security-privilege' }, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify({ ...result.data, model: modelName, type: 'security-privilege' }, isCustom ? sourcePathReplacer : undefined, 2));
       stats.securityPrivileges++;
     } catch (error) {
       console.error(`   ❌ Error extracting security privilege ${file}:`, error);
@@ -983,7 +999,8 @@ async function extractSecurityDuties(
   parser: XppMetadataParser,
   modelPath: string,
   modelName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   let dirPath = path.join(modelPath, 'AxSecurityDuty');
   try { await fs.access(dirPath); } catch {
@@ -1002,7 +1019,7 @@ async function extractSecurityDuties(
       const result = await parser.parseSecurityDutyFile(filePath);
       if (!result.success || !result.data) { stats.errors++; continue; }
       const outputFile = path.join(outputDir, `${result.data.name}.json`);
-      await fs.writeFile(outputFile, JSON.stringify({ ...result.data, model: modelName, type: 'security-duty' }, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify({ ...result.data, model: modelName, type: 'security-duty' }, isCustom ? sourcePathReplacer : undefined, 2));
       stats.securityDuties++;
     } catch (error) {
       console.error(`   ❌ Error extracting security duty ${file}:`, error);
@@ -1015,7 +1032,8 @@ async function extractSecurityRoles(
   parser: XppMetadataParser,
   modelPath: string,
   modelName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   let dirPath = path.join(modelPath, 'AxSecurityRole');
   try { await fs.access(dirPath); } catch {
@@ -1034,7 +1052,7 @@ async function extractSecurityRoles(
       const result = await parser.parseSecurityRoleFile(filePath);
       if (!result.success || !result.data) { stats.errors++; continue; }
       const outputFile = path.join(outputDir, `${result.data.name}.json`);
-      await fs.writeFile(outputFile, JSON.stringify({ ...result.data, model: modelName, type: 'security-role' }, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify({ ...result.data, model: modelName, type: 'security-role' }, isCustom ? sourcePathReplacer : undefined, 2));
       stats.securityRoles++;
     } catch (error) {
       console.error(`   ❌ Error extracting security role ${file}:`, error);
@@ -1048,7 +1066,8 @@ async function extractMenuItems(
   modelPath: string,
   modelName: string,
   itemType: 'display' | 'action' | 'output',
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   const dirName = itemType === 'display' ? 'AxMenuItemDisplay'
     : itemType === 'action' ? 'AxMenuItemAction' : 'AxMenuItemOutput';
@@ -1073,7 +1092,7 @@ async function extractMenuItems(
       const result = await parser.parseMenuItemFile(filePath, itemType);
       if (!result.success || !result.data) { stats.errors++; continue; }
       const outputFile = path.join(outputDir, `${result.data.name}.json`);
-      await fs.writeFile(outputFile, JSON.stringify({ ...result.data, model: modelName, type: `menu-item-${itemType}` }, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify({ ...result.data, model: modelName, type: `menu-item-${itemType}` }, isCustom ? sourcePathReplacer : undefined, 2));
       (stats as any)[statKey]++;
     } catch (error) {
       console.error(`   ❌ Error extracting menu item (${itemType}) ${file}:`, error);
@@ -1088,7 +1107,8 @@ async function extractExtensions(
   modelName: string,
   extensionType: string,
   axDirName: string,
-  stats: ExtractionStats
+  stats: ExtractionStats,
+  isCustom = false
 ) {
   const outDirName = extensionType + 's'; // table-extensions, class-extensions, etc.
   const statKeyMap: Record<string, string> = {
@@ -1117,7 +1137,7 @@ async function extractExtensions(
       const result = await parser.parseExtensionFile(filePath, extensionType);
       if (!result.success || !result.data) { stats.errors++; continue; }
       const outputFile = path.join(outputDir, `${result.data.name}.json`);
-      await fs.writeFile(outputFile, JSON.stringify({ ...result.data, model: modelName, type: extensionType }, sourcePathReplacer, 2));
+      await fs.writeFile(outputFile, JSON.stringify({ ...result.data, model: modelName, type: extensionType }, isCustom ? sourcePathReplacer : undefined, 2));
       const statKey = statKeyMap[extensionType];
       if (statKey) (stats as any)[statKey]++;
     } catch (error) {
