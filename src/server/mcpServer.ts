@@ -617,7 +617,17 @@ EXAMPLES:
               },
               properties: {
                 type: 'object',
-                description: 'Additional properties (extends, implements, label, etc.)'
+                description:
+                  'Additional properties for the object being created. Supported keys by objectType:\n' +
+                  '• class:           extends, implements, isFinal, isAbstract\n' +
+                  '• table:           label, tableGroup, tableType, titleField1, titleField2, fields[]\n' +
+                  '• enum:            label, isExtensible, enumValues[{name,value?,label?,helpText?}]\n' +
+                  '• table-extension: fields[{name,edt?,label?,mandatory?}]\n' +
+                  '• edt:             label, extends, edtType, stringSize\n' +
+                  '• form:            caption, formTemplate, dataSource\n' +
+                  '• menu-item-*:     label, object, objectType\n' +
+                  'Example enum: properties={"label":"@FmMcp:Status","enumValues":[{"name":"Open","value":0,"label":"@FmMcp:Open"},{"name":"Closed","value":1,"label":"@FmMcp:Closed"}]}\n' +
+                  'Example table-extension: properties={"fields":[{"name":"ContosoField","edt":"CustAccount","label":"@Contoso:Customer"}]}'
               },
               addToProject: {
                 type: 'boolean',

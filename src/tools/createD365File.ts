@@ -620,14 +620,39 @@ ${fieldsXml}\t<FullTextIndexes />
   ): string {
     const label = properties?.label || enumName;
     const useEnumValue = properties?.useEnumValue ? 'Yes' : 'No';
+    const isExtensible = properties?.isExtensible ? 'Yes' : 'No';
+
+    // Build <EnumValues> block from properties.enumValues array
+    // Each entry: { name: string; value?: number; label?: string; helpText?: string }
+    const enumValueSpecs: Array<{ name: string; value?: number; label?: string; helpText?: string }> =
+      Array.isArray(properties?.enumValues) ? properties.enumValues : [];
+
+    let enumValuesXml: string;
+    if (enumValueSpecs.length === 0) {
+      enumValuesXml = '\t<EnumValues />\n';
+    } else {
+      enumValuesXml = '\t<EnumValues>\n';
+      let autoValue = 0;
+      for (const v of enumValueSpecs) {
+        const intValue = v.value ?? autoValue++;
+        enumValuesXml += `\t\t<AxEnumValue>\n`;
+        enumValuesXml += `\t\t\t<Name>${v.name}</Name>\n`;
+        enumValuesXml += `\t\t\t<EnumValue>${intValue}</EnumValue>\n`;
+        if (v.label) enumValuesXml += `\t\t\t<Label>${v.label}</Label>\n`;
+        if (v.helpText) enumValuesXml += `\t\t\t<HelpText>${v.helpText}</HelpText>\n`;
+        enumValuesXml += `\t\t</AxEnumValue>\n`;
+        if (v.value === undefined) {} else { autoValue = intValue + 1; }
+      }
+      enumValuesXml += '\t</EnumValues>\n';
+    }
 
     return `<?xml version="1.0" encoding="utf-8"?>
 <AxEnum xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
 \t<Name>${enumName}</Name>
 \t<Label>${label}</Label>
 \t<UseEnumValue>${useEnumValue}</UseEnumValue>
-\t<EnumValues />
-</AxEnum>
+\t<IsExtensible>${isExtensible}</IsExtensible>
+${enumValuesXml}</AxEnum>
 `;
   }
 
@@ -1311,7 +1336,7 @@ ${defaultParamGroupXml}
       case 'edt':
         return this.generateAxEdtXml(objectName, properties);
       case 'table-extension':
-        return this.generateAxTableExtensionXml(objectName);
+        return this.generateAxTableExtensionXml(objectName, properties);
       case 'form-extension':
         return this.generateAxFormExtensionXml(objectName);
       case 'edt-extension':
@@ -2158,16 +2183,37 @@ ${defaultParamGroupXml}
 
   /**
    * Generate AxTableExtension XML.
-   * Name convention: TableName.ExtensionName
+   * Name convention: TableName.PrefixExtension
+   * Supports properties.fields: Array<{ name, edt?, label?, mandatory? }>
    */
-  static generateAxTableExtensionXml(name: string): string {
+  static generateAxTableExtensionXml(name: string, properties?: Record<string, any>): string {
+    // Build <Fields> block — extension fields use <AxTableExtensionField> (no i:type needed)
+    const fieldSpecs: Array<{ name: string; edt?: string; label?: string; mandatory?: boolean }> =
+      Array.isArray(properties?.fields) ? properties.fields : [];
+
+    let fieldsXml: string;
+    if (fieldSpecs.length === 0) {
+      fieldsXml = '\t<Fields />';
+    } else {
+      fieldsXml = '\t<Fields>\n';
+      for (const f of fieldSpecs) {
+        fieldsXml += `\t\t<AxTableExtensionField>\n`;
+        fieldsXml += `\t\t\t<Name>${f.name}</Name>\n`;
+        if (f.edt)       fieldsXml += `\t\t\t<ExtendedDataType>${f.edt}</ExtendedDataType>\n`;
+        if (f.label)     fieldsXml += `\t\t\t<Label>${f.label}</Label>\n`;
+        if (f.mandatory) fieldsXml += `\t\t\t<Mandatory>Yes</Mandatory>\n`;
+        fieldsXml += `\t\t</AxTableExtensionField>\n`;
+      }
+      fieldsXml += '\t</Fields>';
+    }
+
     return `<?xml version="1.0" encoding="utf-8"?>
 <AxTableExtension xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
 \t<Name>${name}</Name>
 \t<FieldGroupExtensions />
 \t<FieldGroups />
 \t<FieldModifications />
-\t<Fields />
+${fieldsXml}
 \t<FullTextIndexes />
 \t<Indexes />
 \t<Mappings />
