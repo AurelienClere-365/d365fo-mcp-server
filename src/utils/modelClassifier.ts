@@ -104,9 +104,9 @@ export function applyObjectPrefix(objectName: string, prefix: string): string {
   const normalizedPrefix = prefix.charAt(0).toUpperCase() + prefix.slice(1);
   
   // SPECIAL CASE A: Dot-notation extension elements — BaseElement.PrefixExtension
-  // For table/form/EDT/enum/menu-item extensions: "CustTable.AslExtension", "HCMWorker.ContosoExtension"
+  // For table/form/EDT/enum/menu-item extensions: "CustTable.MyExtension", "HCMWorker.ContosoExtension"
   // The suffix after the dot is always {Prefix}Extension. Replace any stale prefix with the correct one.
-  // Example: "CustTable.MyModelExtension" + prefix "Asl" → "CustTable.AslExtension"
+  // Example: "CustTable.MyModelExtension" + prefix "My" → "CustTable.MyExtension"
   if (objectName.includes('.') && objectName.toLowerCase().endsWith('extension')) {
     const dotIdx = objectName.lastIndexOf('.');
     const basePart = objectName.slice(0, dotIdx);    // e.g., "CustTable"

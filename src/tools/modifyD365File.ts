@@ -90,7 +90,7 @@ const ModifyD365FileArgsSchema = z.object({
   // For add-control (form-extension only)
   controlName: z.string().optional().describe(
     'Name of the new form control to add inside the form extension. ' +
-    'e.g. "AslCustPriorityTier". Used as <Name> inside <FormControl>.'
+    'e.g. "MyCustPriorityTier". Used as <Name> inside <FormControl>.'
   ),
   parentControl: z.string().optional().describe(
     'Name of the existing parent control/tab/group in the base form to insert into. ' +
@@ -102,7 +102,7 @@ const ModifyD365FileArgsSchema = z.object({
     'Required when controlDataField is provided.'
   ),
   controlDataField: z.string().optional().describe(
-    'Data field name for the new control binding (e.g. "AslCustPriorityTier"). ' +
+    'Data field name for the new control binding (e.g. "MyCustPriorityTier"). ' +
     'The field must already exist in the table (extension) before adding the UI control.'
   ),
   controlType: z.string().optional().describe(

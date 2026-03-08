@@ -51,10 +51,16 @@ export async function validateObjectNamingTool(request: CallToolRequest, context
       warnings.push(`Name is ${name.length} characters — approaching the ${MAX_NAME_LENGTH}-char AOT limit. Consider a shorter name to leave room for extensions.`);
     }
 
-    // ── Auto-detect model prefix from existing symbols if not provided ─────
+    // ── Resolve model prefix: explicit arg → EXTENSION_PREFIX env → DB auto-detect ───
     let prefix = args.modelPrefix?.toUpperCase() || '';
     if (!prefix) {
-      prefix = detectModelPrefix(db, name);
+      // Mirror resolveObjectPrefix() priority: EXTENSION_PREFIX has absolute precedence
+      const envPrefix = process.env.EXTENSION_PREFIX?.trim().replace(/_+$/, '');
+      if (envPrefix) {
+        prefix = envPrefix.toUpperCase();
+      } else {
+        prefix = detectModelPrefix(db, name);
+      }
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -130,9 +136,22 @@ export async function validateObjectNamingTool(request: CallToolRequest, context
     // RULE SET 2: New object naming rules
     // ══════════════════════════════════════════════════════════════════
     if (!isExtension) {
-      // No underscores in base names (underscores reserved for extension pattern)
+      // Underscores are allowed ONLY as a prefix separator: {Prefix}_{Rest}
+      //   Valid:   MY_VendPaymTermsMaintain  (prefix="MY", separator "_", then name)
+      //   Invalid: MYVendPaymTerms_Helper    (underscore mid-name, not immediately after prefix)
       if (name.includes('_')) {
-        errors.push(`Non-extension objects must not contain underscores. Underscores are reserved for extension naming (e.g. MyClass_Extension).`);
+        const underscoreIdx = name.indexOf('_');
+        const beforeUnderscore = name.slice(0, underscoreIdx);
+        const hasPrefixSeparator = !!prefix &&
+          beforeUnderscore.toLowerCase() === prefix.toLowerCase();
+        if (!hasPrefixSeparator) {
+          errors.push(
+            `Non-extension objects must not contain underscores. ` +
+            `The only allowed underscore is as a prefix separator: ` +
+            `${prefix ? prefix + '_MyObject' : 'Prefix_MyObject'}. ` +
+            `For extension classes use: VendTable${prefix || 'Prefix'}_Extension.`
+          );
+        }
       }
 
       // Must start with a prefix (letter, avoid starting with Microsoft-reserved ones)

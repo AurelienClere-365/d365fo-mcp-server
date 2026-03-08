@@ -101,7 +101,7 @@ to CustTable in my MyPackage\MyModel model. Steps:
 9. `create_d365fo_file` — creates the `AxEnum` XML with value labels
 10. `create_d365fo_file` — creates the table extension `CustTable.MyModel_Extension` with the new field bound to the label
 11. `create_d365fo_file` — creates the empty form extension `CustTable.MyModel_Extension` (controls are added in the next step)
-12. `modify_d365fo_file` with `operation: add-control` — adds the `AslCustPriorityTier` field control inside the `TabGeneral` group in the form extension (no PowerShell needed)
+12. `modify_d365fo_file` with `operation: add-control` — adds the `MyCustPriorityTier` field control inside the `TabGeneral` group in the form extension (no PowerShell needed)
 13. `verify_d365fo_project` — confirms all objects (enum, table extension, form extension) are on disk and registered in the `.rnrproj`
 
 **Why this matters:** Calling `get_form_info` before touching the form extension — and using
@@ -124,23 +124,30 @@ Before I create security objects:
 1. Show me how the existing VendPaymTerms form is secured —
    which roles and duties already grant access
 2. Check if a privilege for VendPaymTerms maintenance already exists
-3. Validate that "MyModel_VendPaymTermsMaintain" is a valid privilege name
+3. Validate that "MY_VendPaymTermsMaintain" is a valid privilege name
    that won't clash with anything in the symbol index
 Then create the privilege, add it to the VendPaymentTermsMaintain duty,
 and verify the objects are in place.
 ```
 
 **Tools Copilot chains:**
-1. `get_security_coverage_for_object` — returns the full chain: form → menu items → privileges → duties → roles
-2. `search` with `objectType: SecurityPrivilege` — checks if a maintenance privilege already exists
-3. `validate_object_naming` — confirms `MyModel_VendPaymTermsMaintain` follows D365FO naming conventions and has no collision in 584K+ symbols
-4. `get_security_artifact_info` for the existing duty — reads its current privileges to understand what to add to
-5. `create_d365fo_file` — creates the privilege XML
-6. `modify_d365fo_file` — adds the privilege reference to the existing duty extension
-7. `verify_d365fo_project` — confirms both objects exist and are registered
+1. `get_workspace_info` ×2 — workspace config check (called twice: once at start, once after user fixed `.mcp.json` mid-session)
+2. `get_security_coverage_for_object` ×3 — full chain for `VendPaymTerms` form and `PaymTerm` menu item (form → menu items → privileges → duties → roles); repeated after each discovery round to confirm no `MY_` collision
+3. `search` + `batch_search` ×9 — parallel searches across name variants (`VendPaymTerms`, `VendPaymentTerms`, `PaymTerm*`, `MY_VendPaymTermsMaintain`) for privileges, duties, and menu items
+4. `get_menu_item_info` ×2 — `VendPaymTerms` menu item detail (target form, security chain); called again for display-type variant
+5. `get_security_artifact_info` ×8 — reads full entry lists for candidate duties: `VendPaymentTermsMaintain`, `VendPaymTermsMaintain`, `LedgerPaymTermsMaintain`, `PaymTermsMaintain`, `VendVendorMasterMaintain`, `VendInvoiceVendorMaintain`, and privileges `PaymTermMaintain`, `PaymTermView`
+6. `validate_object_naming` ×2 — confirms `MY_VendPaymTermsMaintain` follows D365FO conventions and has no collision in 584K+ symbols
+   (prefix separator `MY_` is valid — `{Prefix}_{Name}` is a supported D365FO naming pattern)  ✅
+7. `generate_code` — generates security-privilege XML skeleton for `VendPaymTerms`
+8. `search_labels` ×2 — label lookup for "vendor payment terms maintain" (with and without model filter)
+9. `create_d365fo_file` ×2 — creates `MY_VendPaymTermsMaintain` (`security-privilege`) and `MY_VendPaymentTermsMaintain` (`security-duty`)
+10. `verify_d365fo_project` — confirms both objects exist on disk and in `.rnrproj`  ✅
 
-**Why this matters:** Running `get_security_coverage_for_object` first often reveals that
-an existing privilege already grants exactly the right access — no new security object needed.
+**Why this matters:**
+- Running `get_security_coverage_for_object` first often reveals an existing privilege already grants the right access — no new security object needed.
+- The dense search phase (steps 3–6) reflects a real-world security audit: standard duties have overlapping names, and Copilot must exhaustively verify no collision exists before committing to a name.
+- `validate_object_naming` confirms the `{Prefix}_{Name}` underscore separator is valid and checks for symbol-index collisions.
+- `get_workspace_info` is called twice because the workspace `.mcp.json` had a placeholder model name that the user fixed mid-session.
 
 ---
 

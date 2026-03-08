@@ -302,7 +302,7 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
           `Effective prefix: ${effectivePrefix || '(none)'}`,
           extensionPrefixEnv
             ? `✅ EXTENSION_PREFIX is set — all new objects will use prefix "${effectivePrefix}".`
-            : `⚠️  EXTENSION_PREFIX is not set in the server environment. The model name "${modelName}" will be used as prefix. Add EXTENSION_PREFIX=Asl (or your prefix) to the .env file and restart the server.`,
+            : `⚠️  EXTENSION_PREFIX is not set in the server environment. The model name "${modelName}" will be used as prefix. Add EXTENSION_PREFIX=MY (or your ISV prefix) to the .env file and restart the server.`,
           ``,
         ];
 

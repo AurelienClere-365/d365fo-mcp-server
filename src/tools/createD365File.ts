@@ -2891,7 +2891,7 @@ export async function handleCreateD365File(
 
     // Case A: dot-notation extension elements (table/form/EDT/enum extensions)
     // e.g. "CustTable.MyModelExtension" with modelName="MyModel" → "CustTable.Extension"
-    // applyObjectPrefix then produces "CustTable.AslExtension"
+    // applyObjectPrefix then produces "CustTable.MyExtension"
     if (
       args.objectName.includes('.') &&
       args.objectName.toLowerCase().endsWith('extension') &&

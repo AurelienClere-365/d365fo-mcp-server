@@ -534,10 +534,18 @@ WHAT IT DOES:
 - Generates proper XML structure with UTF-8 BOM encoding
 
 REQUIRED PARAMETERS:
-- objectType: NEW objects → class, table, enum, form, query, view, data-entity, report
-             EXTENSIONS → table-extension, form-extension, enum-extension, edt-extension,
-                          data-entity-extension, menu-item-display-extension,
-                          menu-item-action-extension, menu-item-output-extension, menu-extension
+- objectType: NEW objects → class, table, enum, form, query, view, data-entity, report, edt
+             SECURITY    → security-privilege (AxSecurityPrivilege)
+                           security-duty      (AxSecurityDuty)       ← NOT the same as privilege!
+                           security-role      (AxSecurityRole)
+             MENU ITEMS  → menu-item-display, menu-item-action, menu-item-output, menu
+             EXTENSIONS  → table-extension, form-extension, enum-extension, edt-extension,
+                           data-entity-extension, menu-item-display-extension,
+                           menu-item-action-extension, menu-item-output-extension, menu-extension
+  ⚠️ SECURITY RULE: ALWAYS use the matching type — duty ≠ privilege ≠ role:
+     security-privilege → AxSecurityPrivilege folder
+     security-duty      → AxSecurityDuty folder
+     security-role      → AxSecurityRole folder
   ⚠️ EXTENSION RULE: Extending an EXISTING standard object? ALWAYS use the -extension variant:
      "table-extension" → AxTableExtension folder, objectName = "BaseTable.PrefixExtension"
      "form-extension"  → AxFormExtension folder,  objectName = "BaseForm.PrefixExtension"
@@ -588,16 +596,23 @@ EXAMPLES:
               objectType: {
                 type: 'string',
                 enum: [
-                  'class', 'table', 'enum', 'form', 'query', 'view', 'data-entity', 'report',
+                  'class', 'table', 'enum', 'form', 'query', 'view', 'data-entity', 'report', 'edt',
                   'table-extension', 'form-extension', 'enum-extension', 'edt-extension',
                   'data-entity-extension', 'menu-item-display-extension',
-                  'menu-item-action-extension', 'menu-item-output-extension', 'menu-extension'
+                  'menu-item-action-extension', 'menu-item-output-extension', 'menu-extension',
+                  'menu-item-display', 'menu-item-action', 'menu-item-output', 'menu',
+                  'security-privilege', 'security-duty', 'security-role',
                 ],
-                description: 'Type of D365FO object to create'
+                description:
+                  'Type of D365FO object to create. ' +
+                  'Security types: security-privilege → AxSecurityPrivilege, ' +
+                  'security-duty → AxSecurityDuty, security-role → AxSecurityRole. ' +
+                  'NEVER use security-privilege for a duty or role — each maps to its own AOT folder. ' +
+                  'Menu items: menu-item-display/action/output → AxMenuItemDisplay/Action/Output.'
               },
               objectName: {
                 type: 'string',
-                description: 'Base name WITHOUT model prefix (e.g., "InventoryByZones", "ProcessOrdersBatch"). The tool auto-prepends the prefix derived from EXTENSION_PREFIX env var (or modelName as fallback). Double-prefix prevention: if you already include the prefix, the tool detects it and uses name as-is. EXTENSION_PREFIX always has priority over modelName for prefix resolution. FOR EXTENSION CLASSES (ending with "_Extension"): pass only the BASE class name + "_Extension" without ANY prefix infix — e.g. "SalesFormLetter_Extension" (not "SalesFormLetterSomePrefix_Extension"). The tool injects the correct prefix infix automatically, e.g. "SalesFormLetterAsl_Extension". NEVER bypass this tool to work around prefix handling.'
+                description: 'Base name WITHOUT model prefix (e.g., "InventoryByZones", "ProcessOrdersBatch"). The tool auto-prepends the prefix derived from EXTENSION_PREFIX env var (or modelName as fallback). Double-prefix prevention: if you already include the prefix, the tool detects it and uses name as-is. EXTENSION_PREFIX always has priority over modelName for prefix resolution. FOR EXTENSION CLASSES (ending with "_Extension"): pass only the BASE class name + "_Extension" without ANY prefix infix — e.g. "SalesFormLetter_Extension" (not "SalesFormLetterSomePrefix_Extension"). The tool injects the correct prefix infix automatically, e.g. "SalesFormLetterMY_Extension". NEVER bypass this tool to work around prefix handling.'
               },
               modelName: {
                 type: 'string',
@@ -886,7 +901,7 @@ Examples:
                 type: 'string',
                 description:
                   '[add-control only] Name of the new form control. ' +
-                  'e.g. "AslCustPriorityTier". Becomes <Name> inside <FormControl>. ' +
+                  'e.g. "MyCustPriorityTier". Becomes <Name> inside <FormControl>. ' +
                   'MUST match the field name in the table extension so the binding works.'
               },
               parentControl: {
@@ -903,7 +918,7 @@ Examples:
               controlDataField: {
                 type: 'string',
                 description:
-                  '[add-control only] Data field name for the control binding (e.g. "AslCustPriorityTier"). ' +
+                  '[add-control only] Data field name for the control binding (e.g. "MyCustPriorityTier"). ' +
                   'The field must already exist in the table or table extension before binding it here.'
               },
               controlType: {
@@ -1889,16 +1904,20 @@ Examples:
 
 Checks:
 1. Extension naming rules: {Base}{Prefix}_Extension (class) or {Base}.{Prefix}Extension (AOT)
-2. Prefix requirements: custom objects must use ISV/model prefix
+2. Prefix requirements: custom objects must use ISV/model prefix — two valid patterns:
+   - Direct prefix:    MYVendPaymTermsMaintain    (prefix concatenated directly)
+   - Prefix separator: MY_VendPaymTermsMaintain   (prefix + underscore + name — also valid)
+   Underscore at any other position is an error.
 3. Type-specific rules: privilege → View/Maintain suffix, data entity → Entity suffix
 4. Conflict detection: exact match + similar names against the symbol index
 
-Use before creating any new D365FO object to ensure correct naming.
+Auto-detects the model prefix from EXTENSION_PREFIX env var (same as get_workspace_info).
+Pass modelPrefix explicitly to override.
 
 Examples:
-  { proposedName: "SalesTableExtension", objectType: "class-extension", baseObjectName: "SalesTable" }
-  { proposedName: "WHSSalesTable_Extension", objectType: "class-extension", baseObjectName: "SalesTable", modelPrefix: "WHS" }
-  { proposedName: "CustTableFullControl", objectType: "security-privilege" }`,
+  { proposedName: "VendTableMY_Extension", objectType: "class-extension", baseObjectName: "VendTable", modelPrefix: "MY" }
+  { proposedName: "CustTable.MyExtension", objectType: "table-extension", baseObjectName: "CustTable", modelPrefix: "My" }
+  { proposedName: "MY_VendPaymTermsMaintain", objectType: "security-privilege", modelPrefix: "MY" }`,
         inputSchema: {
           type: 'object',
           properties: {

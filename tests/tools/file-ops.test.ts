@@ -106,13 +106,42 @@ describe('validate_object_naming', () => {
     (ctx.symbolIndex.db as any).stmt.all.mockReturnValue([]);
   });
 
-  it('passes a valid class name with no collisions', async () => {
+  it('passes a name with prefix-separator underscore (Prefix_Name pattern)', async () => {
+    // MY_ auto-detected as prefix from first two chars → MY_InvoiceHelper is valid
     const result = await validateObjectNamingTool(
       req('validate_object_naming', { proposedName: 'MY_InvoiceHelper', objectType: 'class' }),
       ctx,
     );
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toMatch(/valid|pass|no error/i);
+  });
+
+  it('passes MY_VendPaymTermsMaintain as security-privilege with explicit modelPrefix', async () => {
+    const result = await validateObjectNamingTool(
+      req('validate_object_naming', {
+        proposedName: 'MY_VendPaymTermsMaintain',
+        objectType: 'security-privilege',
+        modelPrefix: 'MY',
+      }),
+      ctx,
+    );
+    expect(result.isError).toBeFalsy();
+    // Name must pass — no ERRORS block (underscore is allowed as prefix separator)
+    expect(result.content[0].text).not.toMatch(/ERRORS \(\d/i);
+    expect(result.content[0].text).toMatch(/valid|pass|no error/i);
+  });
+
+  it('rejects underscore at mid-name position (not a prefix separator)', async () => {
+    const result = await validateObjectNamingTool(
+      req('validate_object_naming', {
+        proposedName: 'MYVendPaymTerms_Helper',
+        objectType: 'class',
+        modelPrefix: 'MY',
+      }),
+      ctx,
+    );
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toMatch(/underscore/i);
   });
 
   it('fails a name that exceeds the 81-character AOT limit', async () => {

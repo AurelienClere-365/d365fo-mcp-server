@@ -141,12 +141,17 @@ For any D365FO request, **start with MCP tools — never** `code_search`, `grep_
 10. **NEVER** use `get_enum_info()` for EDTs — use `get_edt_info()` instead
 11. **NEVER** infer the target model from search results or object names — the `model` field in search/get_table_info results is the SOURCE model of that existing object, NOT where you should create new objects. The target model for ALL create/modify operations is ALWAYS from `.mcp.json` (projectPath/modelName). Example of WRONG reasoning: task involves a report → search returns objects from "ContosoReports" → ❌ DO NOT use "ContosoReports". Use the configured model.
 12. **NEVER** create AxReport XML with `create_file` or PowerShell — ALWAYS use `create_d365fo_file(objectType="report", xmlContent=<full XML>, addToProject=true)`. SSRS reports require UTF-8 BOM and correct AOT path which only `create_d365fo_file` guarantees.
-13. **ALWAYS** put class member variable declarations **inside** the class `{ }` body in `sourceCode` — they become `<Declaration>` in the AxClass XML. Variables placed **outside** the `{}` are NOT part of the declaration and will be lost.
-14. **NEVER** use `today()` — it is deprecated (BPUpgradeCodeToday). Use `DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone())` instead, everywhere: default parameter values, date comparisons, queries.
-15. **NEVER** use hardcoded text strings in `Info()`, `warning()`, `error()`, dialog captions, or field labels — always use label references `@ModelName:LabelId`. Call `search_labels()` first, then `create_label()` if needed. (BPErrorLabelIsText)
-16. **NEVER** nest `while select` inside another `while select` — use `join` in a single select, or pre-load into `Map`/temp table. Nested data-access loops trigger BPCheckNestedLoopinCode.
-17. **ALWAYS** call `create_label()` for every new label ID before referencing it in code — uncreated labels cause BPErrorUnknownLabel at build time.
-18. **ALWAYS** write meaningful `/// <summary>` doc comments on every public/protected class and method — the text must describe what the code does, not just echo the name. `/// MyClass class.` or `/// run.` is NEVER acceptable (BPXmlDocNoDocumentationComments).
+13. **NEVER** use `objectType="security-privilege"` for duties or roles — each security type maps to a DIFFERENT AOT folder:
+    - `security-privilege` → `AxSecurityPrivilege`
+    - `security-duty`      → `AxSecurityDuty`      ← using privilege here = WRONG FOLDER
+    - `security-role`      → `AxSecurityRole`
+    All three are supported by `create_d365fo_file`. Never use PowerShell to move a file to the correct folder.
+14. **ALWAYS** put class member variable declarations **inside** the class `{ }` body in `sourceCode` — they become `<Declaration>` in the AxClass XML. Variables placed **outside** the `{}` are NOT part of the declaration and will be lost.
+15. **NEVER** use `today()` — it is deprecated (BPUpgradeCodeToday). Use `DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone())` instead, everywhere: default parameter values, date comparisons, queries.
+16. **NEVER** use hardcoded text strings in `Info()`, `warning()`, `error()`, dialog captions, or field labels — always use label references `@ModelName:LabelId`. Call `search_labels()` first, then `create_label()` if needed. (BPErrorLabelIsText)
+17. **NEVER** nest `while select` inside another `while select` — use `join` in a single select, or pre-load into `Map`/temp table. Nested data-access loops trigger BPCheckNestedLoopinCode.
+18. **ALWAYS** call `create_label()` for every new label ID before referencing it in code — uncreated labels cause BPErrorUnknownLabel at build time.
+19. **ALWAYS** write meaningful `/// <summary>` doc comments on every public/protected class and method — the text must describe what the code does, not just echo the name. `/// MyClass class.` or `/// run.` is NEVER acceptable (BPXmlDocNoDocumentationComments).
 
 ### AxClass sourceCode Format — Member Variables in Declaration
 
@@ -256,16 +261,16 @@ The `create_d365fo_file` tool derives the object name prefix from the `modelName
                                ❌ NEVER use PowerShell Get-Content or grep on form XML
 
 2. Create extension file:      create_d365fo_file(objectType="form-extension",
-                                 objectName="TargetForm.AslExtension", addToProject=true)
+                                 objectName="TargetForm.MyExtension", addToProject=true)
                                → creates the AxFormExtension XML (empty — controls/overrides added next)
 
 3. Add field control to tab:   modify_d365fo_file(objectType="form-extension",
-                                 objectName="TargetForm.AslExtension",
+                                 objectName="TargetForm.MyExtension",
                                  operation="add-control",
-                                 controlName="AslCustPriorityTier",
+                                 controlName="MyCustPriorityTier",
                                  parentControl="TabGeneral",
                                  controlDataSource="CustTable",
-                                 controlDataField="AslCustPriorityTier",
+                                 controlDataField="MyCustPriorityTier",
                                  controlType="String")
                                ❌ NEVER use PowerShell to edit form extension XML to add controls
 
@@ -274,7 +279,7 @@ The `create_d365fo_file` tool derives the object name prefix from the `modelName
                                 ComboBox (enum), Date, DateTime, Int64, Group, Button
 
 4. Add display/override method: modify_d365fo_file(objectType="form-extension",
-                                 objectName="TargetForm.AslExtension",
+                                 objectName="TargetForm.MyExtension",
                                  operation="add-method", sourceCode="...")
 ```
 
@@ -288,13 +293,13 @@ The `create_d365fo_file` tool derives the object name prefix from the `modelName
                                → use returned CoC skeleton
 
 6. Apply:                      modify_d365fo_file(objectType="class",
-                                 objectName="TargetFormAsl_Extension",
+                                 objectName="TargetFormMy_Extension",
                                  operation="add-method", sourceCode="<CoC skeleton>")
 ```
 
 **Key rules for form extensions:**
-- The form extension XML file (`TargetForm.AslExtension`) holds metadata modifications (tab/control moves, visibility overrides, new controls)
-- The form extension CLASS (`TargetFormAsl_Extension`) holds logic CoC (`[ExtensionOf(formStr(TargetForm))]`)
+- The form extension XML file (`TargetForm.MyExtension`) holds metadata modifications (tab/control moves, visibility overrides, new controls)
+- The form extension CLASS (`TargetFormMy_Extension`) holds logic CoC (`[ExtensionOf(formStr(TargetForm))]`)
 - ALWAYS look up the exact control name with `get_form_info(searchControl="...")` BEFORE writing the extension
 - ❌ NEVER modify the original form — ALWAYS create/modify the extension file
 
