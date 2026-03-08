@@ -2797,12 +2797,34 @@ export async function handleCreateD365File(
     // Apply extension prefix to object name
     const objectPrefix = resolveObjectPrefix(actualModelName);
 
-    // For extension classes (objectName ends with "_Extension"):
-    // If EXTENSION_PREFIX differs from modelName, the AI may have already embedded the
-    // modelName as infix (e.g. "SalesFormLetterFmMcp_Extension" with modelName="FmMcp").
-    // Strip the modelName infix so applyObjectPrefix can inject the correct EXTENSION_PREFIX
-    // instead of stacking both → "SalesFormLetterFmMcpContoso_Extension" (wrong).
+    // If EXTENSION_PREFIX differs from modelName, the AI may have embedded the modelName
+    // in the extension name. Strip it so applyObjectPrefix injects the correct prefix only.
     let effectiveObjectName = args.objectName;
+
+    // Case A: dot-notation extension elements (table/form/EDT/enum extensions)
+    // e.g. "CustTable.MyModelExtension" with modelName="MyModel" → "CustTable.Extension"
+    // applyObjectPrefix then produces "CustTable.AslExtension"
+    if (
+      args.objectName.includes('.') &&
+      args.objectName.toLowerCase().endsWith('extension') &&
+      actualModelName &&
+      objectPrefix.toLowerCase() !== actualModelName.toLowerCase()
+    ) {
+      const dotIdx = args.objectName.lastIndexOf('.');
+      const basePart = args.objectName.slice(0, dotIdx);
+      const suffixPart = args.objectName.slice(dotIdx + 1);
+      if (suffixPart.toLowerCase().startsWith(actualModelName.toLowerCase())) {
+        effectiveObjectName = `${basePart}.${suffixPart.slice(actualModelName.length)}`;
+        console.error(
+          `[create_d365fo_file] Stripped model name from dot-notation extension: ` +
+          `${args.objectName} → ${effectiveObjectName}`
+        );
+      }
+    }
+
+    // Case B: extension classes (objectName ends with "_Extension")
+    // e.g. "SalesFormLetterFmMcp_Extension" with modelName="FmMcp" → "SalesFormLetter_Extension"
+    // applyObjectPrefix then produces "SalesFormLetterAsl_Extension"
     if (
       args.objectName.endsWith('_Extension') &&
       actualModelName &&
