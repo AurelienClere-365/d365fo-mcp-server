@@ -314,7 +314,11 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
     newXml = rewrapXmlTagAsCdata('Declaration', newXml);
     newXml = rewrapXmlTagAsCdata('Source', newXml);
 
-    await fs.writeFile(actualFilePath, newXml, 'utf-8');
+    // Write file with UTF-8 BOM — required by D365FO metadata deserializer
+    // (same as create_d365fo_file; omitting BOM causes "cannot open/deserialize" in VS)
+    const utf8BOM = Buffer.from([0xEF, 0xBB, 0xBF]);
+    const xmlBuffer = Buffer.concat([utf8BOM, Buffer.from(newXml, 'utf-8')]);
+    await fs.writeFile(actualFilePath, xmlBuffer);
 
     // 6. Return success
     return {
@@ -1144,6 +1148,22 @@ async function removeField(xmlObj: any, objectType: string, args: any): Promise<
   }
 
   fields.splice(index, 1);
+
+  // Also remove any FieldGroup references that point to the deleted field.
+  // Without this, D365FO shows build errors: "Field referenced in FieldGroup not found."
+  const fgGroups = root.FieldGroups?.[0]?.AxTableFieldGroup;
+  if (Array.isArray(fgGroups)) {
+    for (const group of fgGroups) {
+      const fgFields = group.Fields?.[0]?.AxTableFieldGroupField;
+      if (Array.isArray(fgFields)) {
+        group.Fields[0].AxTableFieldGroupField = fgFields.filter((entry: any) => {
+          const df = Array.isArray(entry.DataField) ? entry.DataField[0] : entry.DataField;
+          return df !== fieldName;
+        });
+      }
+    }
+  }
+
   return true;
 }
 

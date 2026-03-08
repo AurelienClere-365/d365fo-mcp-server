@@ -44,6 +44,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Remove a SQLite temp file together with its companion WAL files.
+ * When validateDatabase() opens a file SQLite creates <file>-shm and <file>-wal
+ * alongside it.  If the main file is later deleted (e.g. on validation failure)
+ * those WAL files become orphaned.  On the next download attempt SQLite finds the
+ * orphaned WAL for the NEW temp file and tries to replay it — causing
+ * "unable to open database" / deserialization errors.
+ */
+async function cleanupTempFiles(tmpPath: string): Promise<void> {
+  for (const suffix of ['', '-shm', '-wal']) {
+    try {
+      await fs.unlink(`${tmpPath}${suffix}`);
+    } catch {
+      // Ignore if file does not exist
+    }
+  }
+}
+
 export async function downloadDatabaseFromBlob(options?: DownloadOptions): Promise<string> {
   const connectionString = options?.connectionString || process.env.AZURE_STORAGE_CONNECTION_STRING;
   const containerName = options?.containerName || process.env.BLOB_CONTAINER_NAME || 'xpp-metadata';
@@ -75,12 +93,8 @@ export async function downloadDatabaseFromBlob(options?: DownloadOptions): Promi
     try {
       console.log(`   Attempt ${attempt}/${maxRetries}...`);
       
-      // Clean up temp file if exists
-      try {
-        await fs.unlink(tmpPath);
-      } catch {
-        // Ignore if doesn't exist
-      }
+      // Clean up temp file + companion SQLite WAL files if they exist
+      await cleanupTempFiles(tmpPath);
 
       // Create blob service client
       const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
@@ -181,8 +195,8 @@ export async function downloadDatabaseFromBlob(options?: DownloadOptions): Promi
       } catch (labelsError: any) {
         console.warn(`   ⚠️  Failed to download labels database: ${labelsError.message}`);
         console.warn(`   Continuing with symbols database only (labels will not be available)`);
-        // Clean up temp file if exists
-        try { await fs.unlink(labelsTmpPath); } catch { }
+        // Clean up labels temp file + companion SQLite WAL files
+        await cleanupTempFiles(labelsTmpPath);
       }
       
       console.log(`✅ Database download complete`);
@@ -191,12 +205,8 @@ export async function downloadDatabaseFromBlob(options?: DownloadOptions): Promi
     } catch (error) {
       console.error(`   ❌ Attempt ${attempt} failed:`, error);
       
-      // Clean up temp file
-      try {
-        await fs.unlink(tmpPath);
-      } catch {
-        // Ignore cleanup errors
-      }
+      // Clean up temp file + companion SQLite WAL files
+      await cleanupTempFiles(tmpPath);
       
       // If this was the last attempt, also clean up potentially corrupted final file
       if (attempt === maxRetries) {

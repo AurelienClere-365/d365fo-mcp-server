@@ -7,8 +7,9 @@ to complete complex D365FO tasks in a single conversation.
 
 ## Scenario 1 — Implement a Safe Chain of Command Extension
 
-**Goal:** Safely extend an existing D365FO method without breaking other ISV extensions
-or producing a duplicate wrapper.
+**Goal:** Safely extend `SalesFormLetter.run()` to write an audit record after every sales
+posting — without breaking other ISV extensions or producing a duplicate wrapper.
+Includes creating a dedicated audit table with correct EDTs and the CoC extension class.
 
 **Prompt:**
 ```
@@ -17,22 +18,30 @@ Before writing anything:
 1. Check if CoC extensions already exist for this method
 2. Show me what other extension points SalesFormLetter has
 3. Get the exact method signature I need to match
-Then generate the CoC extension class that logs a custom audit record
-after the base call completes, and create the file in my project.
+Then create an audit table MySalesFormLetterAuditLog
+(fields: SalesId, PostingType, PostedAt, PostedBy, Success)
+with correct labels and EDTs, and generate the CoC extension class that inserts
+an audit record after the base call completes.
 ```
 
 **Tools Copilot chains:**
-1. `find_coc_extensions` — lists all existing wrappers for `SalesFormLetter.run()`
-2. `analyze_extension_points` — shows CoC-eligible methods, `final` blocks, and delegate hooks on `SalesFormLetter`
-3. `get_method_signature` — returns the exact return type and parameters to match
-4. `generate_code` with `pattern: coc-extension` — produces the complete extension class
-5. `search_labels` — checks whether labels needed for audit record fields already exist in the model's label file
-6. `validate_object_naming` — confirms the generated class name (e.g. `SalesFormLetterContoso_Extension`) follows D365FO naming conventions and has no collision in the symbol index
-7. `create_d365fo_file` — writes the XML to the model's `AxClass\` folder and adds it to the `.rnrproj`
-8. `verify_d365fo_project` — confirms the file is on disk and in the project
+1. `get_workspace_info` — workspace config check (model name, prefix, paths); mandatory first call
+2. `find_coc_extensions` + `analyze_extension_points` — parallel: checks whether `run()` is already CoC-wrapped; lists all eligible methods, delegates, and blocked members on `SalesFormLetter`
+3. `get_method_signature` ×2 — first call returns the exact signature (return type, parameters, modifiers); second call with `includeCocTemplate: true` returned only the signature (CoC template not supported in this server version) — skeleton written manually from the first call's output
+4. `analyze_code_patterns` + `search_extensions` ×2 + `search` — parallel research: audit log insert patterns in existing code; all custom `SalesFormLetter` extensions (prefix/model context); existence check for an audit table in the symbol index
+5. `get_label_info` + `search_labels` — parallel pre-label checks: resolves the correct `labelFileId`; confirms none of the planned label IDs already exist
+6. `create_label` ×6 — creates `SalesFormLetterAuditLog`, `PostingType`, `SalesId`, `PostedAt`, `PostedBy`, `Success` in en-US, cs, and de
+7. `generate_smart_table` + `get_table_info` — generates and writes `MySalesFormLetterAuditLog` to disk; immediately reads it back to verify what fields and EDTs were actually written
+8. `batch_search` + `search` + `get_enum_info` ×2 — parallel: resolves EDT `SalesId`, `TransDateTime`, `UserId`, enum `NoYes`; checks `SalesUpdate` (too narrow — missing Confirmation/Invoice); confirms `DocumentStatus` covers all posting types
+9. `modify_d365fo_file` ×2 + `create_d365fo_file` — `replace-all-fields` rewrites all fields with correct EDTs (`SalesId`, `DocumentStatus`, `TransDateTime`, `UserId`, `NoYes`); `modify-property` sets `TitleField1 = SalesId`; creates CoC extension class `SalesFormLetterMy_Extension` with `run()` and registers it in the `.rnrproj`
+10. `verify_d365fo_project` — confirms both objects (`MySalesFormLetterAuditLog` table and `SalesFormLetterMy_Extension` class) are on disk and in the project  ✅
 
-**Why this matters:** Calling `find_coc_extensions` first prevents creating a duplicate wrapper
-that would shadow an existing ISV extension and cause a build conflict.
+**Why this matters:**
+- `find_coc_extensions` and `analyze_extension_points` (step 2) run in parallel — they answer different questions but neither depends on the other's output, so there is no reason to sequence them.
+- `get_method_signature` ×2 (step 3): the second call with `includeCocTemplate: true` is worth trying even if support is uncertain — if it fails, the first call's output is already sufficient to write the skeleton manually.
+- `get_table_info` immediately after `generate_smart_table` (step 7) is a critical verification step: the generator may write different EDTs than requested; reading back the actual table before searching for correct types saves a redundant fix-up round.
+- `replace-all-fields` (step 9) is more reliable than individual `remove-field` + `add-field` calls when multiple fields are wrong — it rewrites the entire `<Fields>` block atomically, avoiding FieldGroup reference errors from partial intermediate states.
+- The enum investigation in step 8 shows why `search` + `get_enum_info` is needed before committing — `SalesUpdate` looked correct by name but lacked `Confirmation` and `Invoice` values, making `DocumentStatus` the right choice.
 
 ---
 
@@ -180,16 +189,16 @@ for inventory revaluation. I've never worked with ledger journals before.
 3. `get_api_usage_patterns` ×3 — typical call sequences for `LedgerJournalCheckPost`, `LedgerJournalEngine`, `DimensionAttributeValueSetStorage`; `DimensionDefaultingService` returned no results
 4. `analyze_code_patterns` ×2 — journal creation patterns in the codebase; dimension defaulting patterns from `InventTable.DefaultDimension` to `LedgerJournalTrans`
 5. `get_class_info` ×3 — full method overview for `LedgerJournalCheckPost`, `JournalTableData`, `JournalTransData`
-6. `get_method_signature` ×6 — exact signatures for: `LedgerJournalCheckPost.newLedgerJournalTable`, `.parmJournalNum`, `.processOperation`; `LedgerDimensionFacade.serviceCreateLedgerDimension`, `.createLedgerDimension`; `JournalTransData.create`; `JournalTableData.construct`; `AslBankSett_LedgerJournalTransAutoSettleService.run` (as a pattern reference)
+6. `get_method_signature` ×6 — exact signatures for: `LedgerJournalCheckPost.newLedgerJournalTable`, `.parmJournalNum`, `.processOperation`; `LedgerDimensionFacade.serviceCreateLedgerDimension`, `.createLedgerDimension`; `JournalTransData.create`; `JournalTableData.construct`; `MyBankSett_LedgerJournalTransAutoSettleService.run` (as a pattern reference)
 7. `get_class_info("LedgerDimensionFacade")` — dimension facade methods for merging ledger dimensions
-8. `search_extensions` ×4 — existing custom journal extensions and `Asl*` service class patterns; `AslBankSett_LedgerJournalTransAutoSettleService` found and studied as a structural template
+8. `search_extensions` ×4 — existing custom journal extensions and `My*` service class patterns; `MyBankSett_LedgerJournalTransAutoSettleService` found and studied as a structural template
 9. `search_labels` ×4 + `get_label_info` — label lookup for journal/adjustment/error strings; confirmed 4 existing labels in the model and available languages (en-US, cs, de)
 10. `batch_search` ×1 (3 parallel) — `JournalTableData`, `JournalTransData`, `InventItemSalesSetup DefaultDimension`
-11. `create_label` ×3 — `AslInventAdjItemNotFound`, `AslInventAdjMainAccountMissing`, `AslInventAdjPostFailed`
-12. `create_d365fo_file` — creates `AslLedgerInventAdjustmentService` class and registers it in the project
+11. `create_label` ×3 — `MyInventAdjItemNotFound`, `MyInventAdjMainAccountMissing`, `MyInventAdjPostFailed`
+12. `create_d365fo_file` — creates `MyLedgerInventAdjustmentService` class and registers it in the project
 13. `verify_d365fo_project` — confirms the file exists on disk and in `.rnrproj`  ✅
 
 **Why this matters:**
 - `get_method_signature` is called 7× (steps 6–7) because Copilot must know the exact parameter order for `JournalTransData.create(doInsert, initVoucherList)` and `LedgerDimensionFacade.createLedgerDimension` before writing a single line of service code — guessing these produces uncompilable X++.
-- Studying an existing `Asl*` service class (`AslBankSett_LedgerJournalTransAutoSettleService`) via `get_class_info` + `get_method_signature` gives a proven structural template in the same model, avoiding the need to invent a pattern from scratch.
+- Studying an existing `My*` service class (`MyBankSett_LedgerJournalTransAutoSettleService`) via `get_class_info` + `get_method_signature` gives a proven structural template in the same model, avoiding the need to invent a pattern from scratch.
 - `search_labels` before `create_label` ensures no duplicate label IDs are created — the 4 found labels guided the naming of the 3 new ones.
