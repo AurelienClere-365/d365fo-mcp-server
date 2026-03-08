@@ -106,7 +106,7 @@ For any D365FO request, **start with MCP tools — never** `code_search`, `grep_
 8. **ALWAYS** pass `methods=["find","exist"]` to `generate_smart_table()` when user requests those methods — never add them via `modify_d365fo_file` afterwards
 9. **NEVER** include model prefix in `name` param of `generate_smart_table`/`generate_smart_form` — prefix is applied automatically (causes double-prefix)
 10. **NEVER** use `get_enum_info()` for EDTs — use `get_edt_info()` instead
-11. **NEVER** infer the target model from search results or object names — the `model` field in search/get_table_info results is the SOURCE model of that existing object, NOT where you should create new objects. The target model for ALL create/modify operations is ALWAYS from `.mcp.json` (projectPath/modelName). Example of WRONG reasoning: task involves a report → search returns objects from "AslReports" → ❌ DO NOT use "AslReports". Use the configured model.
+11. **NEVER** infer the target model from search results or object names — the `model` field in search/get_table_info results is the SOURCE model of that existing object, NOT where you should create new objects. The target model for ALL create/modify operations is ALWAYS from `.mcp.json` (projectPath/modelName). Example of WRONG reasoning: task involves a report → search returns objects from "ContosoReports" → ❌ DO NOT use "ContosoReports". Use the configured model.
 12. **NEVER** create AxReport XML with `create_file` or PowerShell — ALWAYS use `create_d365fo_file(objectType="report", xmlContent=<full XML>, addToProject=true)`. SSRS reports require UTF-8 BOM and correct AOT path which only `create_d365fo_file` guarantees.
 13. **ALWAYS** put class member variable declarations **inside** the class `{ }` body in `sourceCode` — they become `<Declaration>` in the AxClass XML. Variables placed **outside** the `{}` are NOT part of the declaration and will be lost.
 14. **NEVER** use `today()` — it is deprecated (BPUpgradeCodeToday). Use `DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone())` instead, everywhere: default parameter values, date comparisons, queries.
@@ -167,9 +167,9 @@ public void myMethod() { ... }
 
 ### ⚠️ NEVER bypass create_d365fo_file to "work around" prefix handling
 
-The `create_d365fo_file` tool derives the object name prefix from the `modelName` parameter — it is NOT hardcoded to any value (not "Asl", not anything else). If modelName is "MyModel", the prefix is "MyModel".
-- Pass the base name WITHOUT prefix: `objectName="InventoryByZones"`, `modelName="MyModel"` → tool creates `MyModelInventoryByZones`
-- Double-prefix is prevented automatically: `objectName="MyModelInventoryByZones"` + `modelName="MyModel"` → tool detects prefix already present → uses name as-is
+The `create_d365fo_file` tool derives the object name prefix from the `modelName` parameter — it is NOT hardcoded to any value (not "Contoso", not anything else). If modelName is "ContosoExt", the prefix is "ContosoExt".
+- Pass the base name WITHOUT prefix: `objectName="InventoryByZones"`, `modelName="ContosoExt"` → tool creates `ContosoExtInventoryByZones`
+- Double-prefix is prevented automatically: `objectName="ContosoExtInventoryByZones"` + `modelName="ContosoExt"` → tool detects prefix already present → uses name as-is
 - ❌ NEVER write XML files directly with `create_file` or PowerShell because you think the prefix logic is wrong
 - ❌ NEVER edit .rnrproj manually — `create_d365fo_file` with `addToProject=true` handles it
 

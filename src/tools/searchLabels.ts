@@ -27,11 +27,11 @@ const SearchLabelsArgsSchema = z.object({
   model: z
     .string()
     .optional()
-    .describe('Restrict results to a specific model (e.g. MyModel, ApplicationPlatform)'),
+    .describe('Restrict results to a specific model (e.g. ContosoExt, ApplicationPlatform)'),
   labelFileId: z
     .string()
     .optional()
-    .describe('Restrict results to a specific label file ID (e.g. MyModel, SYS)'),
+    .describe('Restrict results to a specific label file ID (e.g. ContosoExt, SYS)'),
   limit: z.number().optional().default(30).describe('Maximum number of results (default 30)'),
 });
 
@@ -124,11 +124,11 @@ export const searchLabelsToolDefinition = {
       },
       model: {
         type: 'string',
-        description: 'Restrict to a specific model (e.g. MyModel)',
+        description: 'Restrict to a specific model (e.g. ContosoExt)',
       },
       labelFileId: {
         type: 'string',
-        description: 'Restrict to a specific label file ID (e.g. MyModel, SYS)',
+        description: 'Restrict to a specific label file ID (e.g. ContosoExt, SYS)',
       },
       limit: {
         type: 'number',

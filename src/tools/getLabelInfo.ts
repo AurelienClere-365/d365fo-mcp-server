@@ -19,8 +19,8 @@ const GetLabelInfoArgsSchema = z.object({
   labelFileId: z
     .string()
     .optional()
-    .describe('Label file ID (e.g. MyModel, SYS, ApplicationPlatform)'),
-  model: z.string().optional().describe('Model to filter by (e.g. MyModel)'),
+    .describe('Label file ID (e.g. ContosoExt, SYS, ApplicationPlatform)'),
+  model: z.string().optional().describe('Model to filter by (e.g. ContosoExt)'),
 });
 
 export async function getLabelInfoTool(request: CallToolRequest, context: XppServerContext) {
@@ -141,11 +141,11 @@ export const getLabelInfoToolDefinition = {
       },
       labelFileId: {
         type: 'string',
-        description: 'Label file ID (e.g. MyModel, SYS)',
+        description: 'Label file ID (e.g. ContosoExt, SYS)',
       },
       model: {
         type: 'string',
-        description: 'Model to filter by (e.g. MyModel)',
+        description: 'Model to filter by (e.g. ContosoExt)',
       },
     },
     required: [],

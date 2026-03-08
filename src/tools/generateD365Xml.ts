@@ -502,7 +502,7 @@ ${titleField1Xml}${titleField2Xml}\t<DeleteActions />
    *   contractParams - Array of { name, dataType?, label?, defaultValue? } → contract class parameters (DataMember)
    *   rdlContent    - Full RDL XML string to embed (auto-generated from fields when omitted)
    *
-   * AOT structure generated (mirrors real D365FO reports like AslReports_CashOrder_CZ):
+   * AOT structure generated (mirrors real D365FO reports like ContosoReports_CashOrder_CZ):
    *   <AxReport xmlns="Microsoft.Dynamics.AX.Metadata.V2">
    *     <DataMethods />
    *     <DataSets>

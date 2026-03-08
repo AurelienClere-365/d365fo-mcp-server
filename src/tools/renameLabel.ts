@@ -35,10 +35,10 @@ const RenameLabelArgsSchema = z.object({
     .describe('New label ID, e.g. MyRenamedField'),
   labelFileId: z
     .string()
-    .describe('Label file ID that owns the label (e.g. MyModel, AslCore)'),
+    .describe('Label file ID that owns the label (e.g. ContosoExt, ContosoCore)'),
   model: z
     .string()
-    .describe('Model name that owns the label file (e.g. MyModel)'),
+    .describe('Model name that owns the label file (e.g. ContosoExt)'),
   packageName: z
     .string()
     .optional()

@@ -26,8 +26,9 @@ after the base call completes, and create the file in my project.
 2. `analyze_extension_points` — shows CoC-eligible methods, `final` blocks, and delegate hooks on `SalesFormLetter`
 3. `get_method_signature` — returns the exact return type and parameters to match
 4. `generate_code` with `pattern: coc-extension` — produces the complete extension class
-5. `create_d365fo_file` — writes the XML to `MyPackage\MyModel\AxClass\` and adds it to the `.rnrproj`
-6. `verify_d365fo_project` — confirms the file is on disk and in the project
+5. `validate_object_naming` — confirms the generated class name (e.g. `SalesFormLetterContoso_Extension`) follows D365FO naming conventions and has no collision in the symbol index
+6. `create_d365fo_file` — writes the XML to the model's `AxClass\` folder and adds it to the `.rnrproj`
+7. `verify_d365fo_project` — confirms the file is on disk and in the project
 
 **Why this matters:** Calling `find_coc_extensions` first prevents creating a duplicate wrapper
 that would shadow an existing ISV extension and cause a build conflict.
@@ -36,7 +37,7 @@ that would shadow an existing ISV extension and cause a build conflict.
 
 ## Scenario 2 — Design and Build a Complete SysOperation Batch Job
 
-**Goal:** Create a full batch job from scratch, following the exact patterns already used in the codebase.
+**Goal:** Create a full batch job from scratch, following the exact patterns already used in the codebase — including correct labels and EDT types.
 
 **Prompt:**
 ```
@@ -44,23 +45,28 @@ I need to create a SysOperation batch job that recalculates vendor payment terms
 for all active vendors. The job should:
 - Run nightly as a recurring batch
 - Report progress and write errors to the infolog
-- Follow the same patterns as existing batch jobs in my MyPackage model
+- Use labelled parameters in the DataContract dialog
+- Follow the same patterns as existing batch jobs in the codebase
 
-Analyse the existing patterns first, then generate the DataContract,
-Controller, and Service classes, and create all three files in my project.
+Analyse the existing patterns first, look up the right EDT types for the
+parameters, resolve labels, then generate the DataContract, Controller,
+and Service classes, and create all three files in my project.
 ```
 
 **Tools Copilot chains:**
-1. `search` — finds existing batch jobs in `MyPackage` to analyse patterns
-2. `get_class_info` — reads the DataContract, Controller, and Service signatures of a representative existing job
-3. `batch_search` — fetches `SysOperationServiceController`, `SysOperationDataContractBase`, and `LedgerParameters` in parallel
-4. `generate_code` with `pattern: sysoperation` — generates all three classes following the discovered patterns
-5. `create_d365fo_file` × 3 — writes each class file and registers it in the project
-6. `verify_d365fo_project` — confirms all three objects are correctly placed
+1. `analyze_code_patterns` — finds existing SysOperation batch jobs in the codebase and extracts the common structure (DataContract, Controller, Service pattern)
+2. `get_method_signature` + `batch_search` — retrieves signatures of `SysOperationServiceController`, `SysOperationDataContractBase`, and `BatchHeader` in parallel
+3. `search_labels` + `get_label_info` — checks whether labels for dialog captions (e.g. "Vendor", "Payment terms") already exist in the model's label file
+4. `get_class_info` — reads the full class definition of a representative existing batch job to confirm the exact method signatures and attribute usage
+5. `generate_code` with `pattern: sysoperation` — produces all three classes (DataContract, Controller, Service) following the discovered patterns
+6. `create_label` — creates any missing labels for the DataContract parameter captions in all supported languages
+7. `get_edt_info` — looks up the correct base EDT for each DataContract parameter (e.g. `VendAccount`, `PaymTermId`) to ensure proper validation and lookup behaviour
+8. `create_d365fo_file` × 3 — writes the DataContract, Controller, and Service XML files and registers each in the project
+9. `verify_d365fo_project` — confirms all three objects are on disk and correctly included in the `.rnrproj`
 
-**Why this matters:** Analysing real patterns before generating ensures the new job uses
-the same error-handling, progress-reporting, and ttsbegin/ttscommit structure
-as everything else in the codebase — not a generic template.
+**Why this matters:** Fetching EDT types before generating ensures each DataContract
+parameter has the correct base type, so the dialog renders the right lookup and
+the compiler validates assignments — not just a plain `str` or `int`.
 
 ---
 

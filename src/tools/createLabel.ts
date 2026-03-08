@@ -41,10 +41,10 @@ const CreateLabelArgsSchema = z.object({
     ),
   labelFileId: z
     .string()
-    .describe('Label file ID to add the label to (e.g. MyModel). Must exist in the model.'),
+    .describe('Label file ID to add the label to (e.g. ContosoExt). Must exist in the model.'),
   model: z
     .string()
-    .describe('Model name that owns the label file (e.g. MyModel, MyExtensions)'),
+    .describe('Model name that owns the label file (e.g. ContosoExt, ApplicationSuite)'),
   packageName: z
     .string()
     .optional()
@@ -383,11 +383,11 @@ export const createLabelToolDefinition = {
       },
       labelFileId: {
         type: 'string',
-        description: 'Label file ID that the label belongs to (e.g. MyModel)',
+        description: 'Label file ID that the label belongs to (e.g. ContosoExt)',
       },
       model: {
         type: 'string',
-        description: 'Model name (e.g. MyModel, MyExtensions)',
+        description: 'Model name (e.g. ContosoExt, ApplicationSuite)',
       },
       translations: {
         type: 'array',

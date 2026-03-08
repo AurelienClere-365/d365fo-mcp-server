@@ -56,19 +56,29 @@ export function getExtensionPrefix(): string {
  * Microsoft naming guidelines (https://learn.microsoft.com/en-us/dynamics365/fin-ops-core/dev-itpro/extensibility/naming-guidelines-extensions):
  *  - New model elements  → prefix concatenated directly: {Prefix}{ObjectName}  (e.g. WHSMyTable)
  *  - Extension elements  → {BaseElement}.{Prefix}Extension                     (e.g. HCMWorker.WHSExtension)
- *  - Extension classes   → {BaseElement}{Prefix}_Extension                     (e.g. ContactPersonWHS_Extension)
+ *  - Extension classes   → {BaseElement}{Prefix}_Extension                     (e.g. SalesFormLetterContoso_Extension)
  *  - Fields in extensions→ {Prefix}{FieldName}                                 (e.g. WHSApprovingWorker)
  *
- * Priority:
+ * Priority (EXTENSION_PREFIX has higher priority than modelName):
  * 1. EXTENSION_PREFIX env var (trailing '_' stripped — the underscore is NOT part of the prefix)
- * 2. modelName as fallback
+ * 2. modelName as fallback (only if EXTENSION_PREFIX is not set)
  *
  * Returns empty string when both are empty.
  */
 export function resolveObjectPrefix(modelName: string): string {
   const envPrefix = process.env.EXTENSION_PREFIX?.trim();
-  const raw = (envPrefix || modelName).replace(/_+$/, ''); // strip trailing underscores
-  return raw;
+  
+  // EXTENSION_PREFIX has absolute priority — even if modelName is provided
+  if (envPrefix) {
+    return envPrefix.replace(/_+$/, ''); // strip trailing underscores
+  }
+  
+  // Fallback to modelName only if EXTENSION_PREFIX is not set
+  if (modelName) {
+    return modelName.replace(/_+$/, '');
+  }
+  
+  return '';
 }
 
 /**
@@ -76,13 +86,48 @@ export function resolveObjectPrefix(modelName: string): string {
  * Per MS guidelines, the prefix is concatenated directly (no separator):
  *   WHSMyTable, MyPrefixMyClass, ContosoMyForm
  *
+ * SPECIAL CASE: For extension classes ending with "_Extension",
+ * the prefix goes BEFORE "_Extension" as a suffix:
+ *   SalesFormLetterContoso_Extension (not ContosoSalesFormLetter_Extension)
+ *
+ * CRITICAL for extension classes: If EXTENSION_PREFIX is set in .env,
+ * it should be used EXCLUSIVELY - never combined with modelName prefix.
+ * The function receives the ALREADY RESOLVED prefix (from resolveObjectPrefix),
+ * so it strips any existing suffix-prefix and replaces it with the current one.
+ *
  * Case-insensitive check prevents double-prefixing.
  */
 export function applyObjectPrefix(objectName: string, prefix: string): string {
   if (!prefix) return objectName;
-  // Capitalize first letter of prefix (e.g. "whs" → "Whs", "WHS" stays "WHS")
+  
+  // Capitalize first letter of prefix (e.g. "whs" → "Whs", "WHS" stays "WHS", "contoso" → "Contoso")
   const normalizedPrefix = prefix.charAt(0).toUpperCase() + prefix.slice(1);
-  if (objectName.toLowerCase().startsWith(normalizedPrefix.toLowerCase())) return objectName;
+  
+  // SPECIAL CASE: Extension classes — prefix goes as SUFFIX before "_Extension"
+  // Example: SalesFormLetter + Contoso → SalesFormLetterContoso_Extension
+  //
+  // IMPORTANT: objectName MUST be the BASE class name + "_Extension" WITHOUT any prefix infix.
+  // E.g. "SalesFormLetter_Extension", NOT "SalesFormLetterFmMcp_Extension".
+  // Callers (e.g. createD365File) are responsible for stripping any stale model-name infix
+  // before calling this function when EXTENSION_PREFIX differs from modelName.
+  if (objectName.endsWith('_Extension')) {
+    const baseName = objectName.slice(0, -'_Extension'.length);
+    
+    // Check if the target prefix is already present at the end (case-insensitive)
+    if (baseName.toLowerCase().endsWith(normalizedPrefix.toLowerCase())) {
+      return objectName; // Already has the correct prefix, return as-is
+    }
+    
+    // Inject the correct prefix before "_Extension"
+    return `${baseName}${normalizedPrefix}_Extension`;
+  }
+  
+  // NORMAL CASE: Regular objects — prefix at the START
+  // Check if already prefixed (case-insensitive)
+  if (objectName.toLowerCase().startsWith(normalizedPrefix.toLowerCase())) {
+    return objectName;
+  }
+  
   // Capitalize first letter of objectName part so result is PascalCase
   const normalizedName = objectName.charAt(0).toUpperCase() + objectName.slice(1);
   return `${normalizedPrefix}${normalizedName}`;

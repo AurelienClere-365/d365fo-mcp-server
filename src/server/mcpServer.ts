@@ -374,7 +374,7 @@ EXAMPLES:
                 description: 'Code pattern to generate.',
               },
               name: { type: 'string', description: 'Name for the generated element. For extensions: base element name.' },
-              modelName: { type: 'string', description: 'Model/solution prefix (auto-detected from EXTENSION_PREFIX env var if omitted).' },
+              modelName: { type: 'string', description: 'Actual model name from .mcp.json (auto-detected from EXTENSION_PREFIX env var if omitted). NEVER use generic placeholders like "MyModel".' },
               menuItemType: {
                 type: 'string',
                 enum: ['display', 'action', 'output'],
@@ -580,11 +580,11 @@ EXAMPLES:
               },
               objectName: {
                 type: 'string',
-                description: 'Base name WITHOUT model prefix (e.g., "InventoryByZones", "ProcessOrdersBatch"). The tool auto-prepends the prefix derived from modelName: modelName="MyModel" → prefix="MyModel" → final="MyModelInventoryByZones". The prefix is NOT hardcoded — it always comes from modelName. Double-prefix prevention: if you already include the prefix ("MyModelMyTable" + modelName="MyModel"), tool detects it and uses name as-is. NEVER bypass this tool to work around prefix handling.'
+                description: 'Base name WITHOUT model prefix (e.g., "InventoryByZones", "ProcessOrdersBatch"). The tool auto-prepends the prefix derived from modelName or EXTENSION_PREFIX env var. Double-prefix prevention: if you already include the prefix, the tool detects it and uses name as-is. EXTENSION_PREFIX always has priority over modelName for prefix resolution. FOR EXTENSION CLASSES (ending with "_Extension"): pass only the BASE class name + "_Extension" without ANY prefix infix — e.g. "SalesFormLetter_Extension" NOT "SalesFormLetterFmMcp_Extension". The tool injects the correct prefix infix automatically: "SalesFormLetterContoso_Extension". NEVER bypass this tool to work around prefix handling.'
               },
               modelName: {
                 type: 'string',
-                description: 'Model name from .mcp.json — this also determines the object name prefix. Pass the exact model name configured in .mcp.json (e.g., "MyModel"). DO NOT use model names from search results — those are source models of existing objects, not your target model.'
+                description: 'Actual model name from .mcp.json (e.g., "FmMcp", "WHSExt", "ContosoExt") — determines the object naming prefix. ALWAYS read this from .mcp.json or workspace context. NEVER guess or use generic placeholders like "MyModel" or "MyPackage". DO NOT use model names from search results — those are source models of existing objects, not your target model.'
               },
               packageName: {
                 type: 'string',
@@ -664,8 +664,8 @@ EXAMPLES:
 - class/form/query/view: extends, implements, label
 - table: label, tableGroup, fields[]
 - report (ALL REQUIRED for correct XML):
-    dpClassName   {string}  Data Provider class name (e.g. "AslInventByZoneDP")
-    tmpTableName  {string}  TempDB table name        (e.g. "AslInventByZoneTmp")
+    dpClassName   {string}  Data Provider class name (e.g. "ContosoInventByZoneDP")
+    tmpTableName  {string}  TempDB table name        (e.g. "ContosoInventByZoneTmp")
     datasetName   {string}  Dataset name — defaults to tmpTableName if omitted
     designName    {string}  Design name              (default: "Report")
     caption       {string}  Design caption label ref (e.g. "@MyModel:MyLabel")
@@ -1137,14 +1137,14 @@ Use WHEN:
 
 Examples:
 - get_report_info("InventValue") → datasets, fields, design structure of InventValue report
-- get_report_info("AslInventByZone") → datasets + RDL summary
-- get_report_info("AslInventByZone", includeRdl=true) → full embedded RDL XML`,
+- get_report_info("ContosoInventByZone") → datasets + RDL summary
+- get_report_info("ContosoInventByZone", includeRdl=true) → full embedded RDL XML`,
           inputSchema: {
             type: 'object',
             properties: {
               reportName: {
                 type: 'string',
-                description: 'Name of the AxReport object (e.g. "InventValue", "AslInventByZone")',
+                description: 'Name of the AxReport object (e.g. "InventValue", "ContosoInventByZone")',
               },
               modelName: {
                 type: 'string',
@@ -1193,11 +1193,11 @@ Examples:
               },
               model: {
                 type: 'string',
-                description: 'Restrict to a specific model (e.g. MyModel, ApplicationPlatform)',
+                description: 'Restrict to a specific model (e.g. ContosoExt, ApplicationPlatform)',
               },
               labelFileId: {
                 type: 'string',
-                description: 'Restrict to a specific label file ID (e.g. MyModel, SYS)',
+                description: 'Restrict to a specific label file ID (e.g. ContosoExt, SYS)',
               },
               limit: {
                 type: 'number',
@@ -1235,11 +1235,11 @@ Examples:
               },
               labelFileId: {
                 type: 'string',
-                description: 'Label file ID (e.g. MyModel, SYS)',
+                description: 'Label file ID (e.g. ContosoExt, SYS)',
               },
               model: {
                 type: 'string',
-                description: 'Model to filter by (e.g. MyModel)',
+                description: 'Model to filter by (e.g. ContosoExt)',
               },
             },
             required: [],
@@ -1272,11 +1272,11 @@ Examples:
               },
               labelFileId: {
                 type: 'string',
-                description: 'Label file ID (e.g. MyModel)',
+                description: 'Label file ID (e.g. ContosoExt)',
               },
               model: {
                 type: 'string',
-                description: 'Model name that owns the label file (e.g. MyModel)',
+                description: 'Model name that owns the label file (e.g. ContosoExt)',
               },
               packageName: {
                 type: 'string',
@@ -1343,11 +1343,11 @@ Examples:
               },
               labelFileId: {
                 type: 'string',
-                description: 'Label file ID that owns the label (e.g. MyModel, MyPackage)',
+                description: 'Label file ID that owns the label (e.g. ContosoExt, SYS)',
               },
               model: {
                 type: 'string',
-                description: 'Model name that owns the label file (e.g. MyModel)',
+                description: 'Model name that owns the label file (e.g. ContosoExt)',
               },
               packageName: {
                 type: 'string',

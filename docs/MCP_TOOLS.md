@@ -283,7 +283,7 @@ with `search(query, type: 'report')`.
 **Examples:**
 ```
 Show me the dataset fields of the InventValue report
-What does the AslInventByZone report look like — datasets and design?
+What does the ContosoInventByZone report look like — datasets and design?
 Find reports related to fixed assets
 ```
 
@@ -382,7 +382,7 @@ from descriptor XML files. In traditional environments, it defaults to the model
 Create a class MyHelper and add it to my project
 Create a table extension for InventTable in my model
 Create a class in the CustomExtensions package, Contoso Utilities model
-Create the SSRS report XML for AslMyReport in my model
+Create the SSRS report XML for ContosoMyReport in my model
 ```
 
 ---
@@ -708,9 +708,9 @@ Verifies that D365FO objects exist on disk at the correct AOT path and are refer
 ```json
 {
   "objects": [
-    { "objectType": "table",            "objectName": "AslInventByZoneTmp" },
-    { "objectType": "report",           "objectName": "AslInventByZone" },
-    { "objectType": "menu-item-action", "objectName": "AslInventByZone" }
+    { "objectType": "table",            "objectName": "ContosoInventByZoneTmp" },
+    { "objectType": "report",           "objectName": "ContosoInventByZone" },
+    { "objectType": "menu-item-action", "objectName": "ContosoInventByZone" }
   ],
   "projectPath": "K:\\AosService\\PackagesLocalDirectory\\fm-mcp\\fm-mcp\\fm-mcp.rnrproj"
 }
@@ -722,9 +722,9 @@ Verifies that D365FO objects exist on disk at the correct AOT path and are refer
 
 | Object | Type | Disk | Project |
 |--------|------|------|---------|
-| AslInventByZoneTmp | table | ✅ `K:\...\AxTable\AslInventByZoneTmp.xml` | ✅ |
-| AslInventByZone | report | ✅ ... | ✅ |
-| AslInventByZone | menu-item-action | ❌ Missing — expected: `K:\...\AxMenuItemAction\AslInventByZone.xml` | ✅ |
+| ContosoInventByZoneTmp | table | ✅ `K:\...\AxTable\ContosoInventByZoneTmp.xml` | ✅ |
+| ContosoInventByZone | report | ✅ ... | ✅ |
+| ContosoInventByZone | menu-item-action | ❌ Missing — expected: `K:\...\AxMenuItemAction\ContosoInventByZone.xml` | ✅ |
 
 ### Summary
 - Checked: 3   On disk ✅: 2   Missing from disk ❌: 1

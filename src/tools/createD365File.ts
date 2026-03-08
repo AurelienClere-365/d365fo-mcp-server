@@ -789,7 +789,7 @@ public class ${queryName} extends QueryRun
    *   contractParams - Array of { name, dataType?, label?, defaultValue? } → contract class parameters (DataMember)
    *   rdlContent    - Full RDL XML string to embed (auto-generated from fields when omitted)
    *
-   * AOT structure generated (mirrors real D365FO reports like AslReports_CashOrder_CZ):
+   * AOT structure generated (mirrors real D365FO reports like ContosoReports_CashOrder_CZ):
    *   <AxReport xmlns="Microsoft.Dynamics.AX.Metadata.V2">
    *     <DataMethods />
    *     <DataSets>
@@ -2796,7 +2796,29 @@ export async function handleCreateD365File(
 
     // Apply extension prefix to object name
     const objectPrefix = resolveObjectPrefix(actualModelName);
-    const finalObjectName = applyObjectPrefix(args.objectName, objectPrefix);
+
+    // For extension classes (objectName ends with "_Extension"):
+    // If EXTENSION_PREFIX differs from modelName, the AI may have already embedded the
+    // modelName as infix (e.g. "SalesFormLetterFmMcp_Extension" with modelName="FmMcp").
+    // Strip the modelName infix so applyObjectPrefix can inject the correct EXTENSION_PREFIX
+    // instead of stacking both → "SalesFormLetterFmMcpContoso_Extension" (wrong).
+    let effectiveObjectName = args.objectName;
+    if (
+      args.objectName.endsWith('_Extension') &&
+      actualModelName &&
+      objectPrefix.toLowerCase() !== actualModelName.toLowerCase()
+    ) {
+      const baseName = args.objectName.slice(0, -'_Extension'.length);
+      if (baseName.toLowerCase().endsWith(actualModelName.toLowerCase())) {
+        effectiveObjectName = baseName.slice(0, -actualModelName.length) + '_Extension';
+        console.error(
+          `[create_d365fo_file] Stripped model name infix "${actualModelName}" from extension class: ` +
+          `${args.objectName} → ${effectiveObjectName}`
+        );
+      }
+    }
+
+    const finalObjectName = applyObjectPrefix(effectiveObjectName, objectPrefix);
     if (finalObjectName !== args.objectName) {
       console.error(`[create_d365fo_file] Applied prefix "${objectPrefix}": ${args.objectName} → ${finalObjectName}`);
     }

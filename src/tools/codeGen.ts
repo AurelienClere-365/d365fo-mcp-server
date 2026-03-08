@@ -19,8 +19,9 @@ const CodeGenArgsSchema = z.object({
     'For XML patterns (security-privilege, menu-item): the name for the generated XML object.'
   ),
   modelName: z.string().optional().describe(
-    'Model/solution prefix used to derive the naming infix when EXTENSION_PREFIX is not set (e.g. "MyModel"). ' +
-    'Required for extension patterns when EXTENSION_PREFIX is not configured.'
+    'Actual model name from .mcp.json — used to derive the naming infix when EXTENSION_PREFIX env var is not set (e.g. "FmMcp", "WHSExt", "ContosoExt"). ' +
+    'Required for extension patterns when EXTENSION_PREFIX is not configured. ' +
+    'NEVER pass generic placeholders like "MyModel" — always use the real model name from .mcp.json.'
   ),
   menuItemType: z.enum(['display', 'action', 'output']).optional()
     .describe('For menu-item pattern: type of menu item (display=form, action=class, output=report)'),
