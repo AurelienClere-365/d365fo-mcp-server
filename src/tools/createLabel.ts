@@ -135,6 +135,7 @@ async function writeFileWithBom(filePath: string, content: string): Promise<void
 function buildAxLabelFileXml(
   labelFileId: string,
   language: string,
+  packageName: string,
   model: string,
 ): string {
   return (
@@ -143,7 +144,7 @@ function buildAxLabelFileXml(
     `\t<Name>${labelFileId}_${language}</Name>\n` +
     `\t<LabelContentFileName>${labelFileId}.${language}.label.txt</LabelContentFileName>\n` +
     `\t<LabelFileId>${labelFileId}</LabelFileId>\n` +
-    `\t<RelativeUriInModelStore>${model}\\${model}\\AxLabelFile\\LabelResources\\${language}\\${labelFileId}.${language}.label.txt</RelativeUriInModelStore>\n` +
+    `\t<RelativeUriInModelStore>${packageName}\\${model}\\AxLabelFile\\LabelResources\\${language}\\${labelFileId}.${language}.label.txt</RelativeUriInModelStore>\n` +
     `</AxLabelFile>\n`
   );
 }
@@ -219,6 +220,22 @@ export async function createLabelTool(request: CallToolRequest, context: XppServ
       // LabelResources dir does not exist yet
     }
 
+    // Helper: create directory structure + XML descriptor for a single new language
+    const createLangDirectory = async (lang: string): Promise<void> => {
+      const langDir = path.join(labelResourcesDir, lang);
+      await fs.mkdir(langDir, { recursive: true });
+
+      // Create the empty .label.txt with UTF-8 BOM (will be populated in step 4)
+      const txtPath = path.join(langDir, `${labelFileId}.${lang}.label.txt`);
+      try { await fs.access(txtPath); } catch { await writeFileWithBom(txtPath, ''); }
+
+      // Create XML descriptor
+      const xmlPath = path.join(axLabelDir, `${labelFileId}_${lang}.xml`);
+      try { await fs.access(xmlPath); } catch {
+        await fs.writeFile(xmlPath, buildAxLabelFileXml(labelFileId, lang, resolvedPackageName, model), 'utf-8');
+      }
+    };
+
     // 3. If no existing languages, decide whether to create
     if (existingLanguages.length === 0) {
       if (!createLabelFileIfMissing) {
@@ -239,18 +256,16 @@ export async function createLabelTool(request: CallToolRequest, context: XppServ
 
       // Create the LabelResources directory structure
       for (const [lang] of translationMap) {
+        await createLangDirectory(lang);
         existingLanguages.push(lang);
-        const langDir = path.join(labelResourcesDir, lang);
-        await fs.mkdir(langDir, { recursive: true });
-
-        // Create the empty .label.txt with UTF-8 BOM (will be written below)
-        const txtPath = path.join(langDir, `${labelFileId}.${lang}.label.txt`);
-        try { await fs.access(txtPath); } catch { await writeFileWithBom(txtPath, ''); }
-
-        // Create XML descriptor
-        const xmlPath = path.join(axLabelDir, `${labelFileId}_${lang}.xml`);
-        try { await fs.access(xmlPath); } catch {
-          await fs.writeFile(xmlPath, buildAxLabelFileXml(labelFileId, lang, model), 'utf-8');
+      }
+    } else if (createLabelFileIfMissing) {
+      // Label file already has some languages — create directories for new languages from translationMap
+      const existingSet = new Set(existingLanguages.map(l => l.toLowerCase()));
+      for (const [lang] of translationMap) {
+        if (!existingSet.has(lang.toLowerCase())) {
+          await createLangDirectory(lang);
+          existingLanguages.push(lang);
         }
       }
     }
@@ -311,7 +326,7 @@ export async function createLabelTool(request: CallToolRequest, context: XppServ
       try {
         await fs.access(xmlPath);
       } catch {
-        await fs.writeFile(xmlPath, buildAxLabelFileXml(labelFileId, lang, model), 'utf-8');
+        await fs.writeFile(xmlPath, buildAxLabelFileXml(labelFileId, lang, resolvedPackageName, model), 'utf-8');
       }
     }
 

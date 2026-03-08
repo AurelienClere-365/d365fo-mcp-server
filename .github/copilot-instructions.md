@@ -348,6 +348,8 @@ c) Save to disk:                     create_d365fo_file(objectType="report", obj
 | `create_label(labelId, labelFileId, model, translations[])` | Create new label |
 | `rename_label(oldLabelId, newLabelId, labelFileId, model)` | Rename label ID in .label.txt, X++ source, and XML metadata |
 
+> **Label file creation:** When calling `create_label` for the first time in a model (label file does not exist yet), **always** pass `createLabelFileIfMissing: true`. Without it the tool returns an error. Pass translations for all required languages (e.g. `en-US`, `cs`, `de`) — the tool creates the directory structure and XML descriptors for each language automatically. If you provide a translation for a language that does not yet have a folder (e.g. cs), set `createLabelFileIfMissing: true` so the folder and descriptor are created.
+
 ## File Paths & Model Name
 
 AOT path: `C:\AOSService\PackagesLocalDirectory\{Model}\{Model}\Ax{Type}\{Name}.xml`
