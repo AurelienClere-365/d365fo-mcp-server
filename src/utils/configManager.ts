@@ -96,8 +96,19 @@ class ConfigManager {
         const all = await scanAllD365Projects(solutionsRoot);
         if (all.length > 0) {
           this.allDetectedProjects = all;
-          console.error(`[ConfigManager] 🔍 Eager scan complete: ${all.length} project(s) found`);
-          all.forEach(p => console.error(`   - ${p.modelName}: ${p.projectPath}`));
+          // Compact summary: group by model, then list counts + first project path per model
+          const byModel = new Map<string, string[]>();
+          for (const p of all) {
+            const list = byModel.get(p.modelName) ?? [];
+            if (p.projectPath) list.push(p.projectPath);
+            byModel.set(p.modelName, list);
+          }
+          console.error(
+            `[ConfigManager] 🔍 Eager scan complete: ${all.length} project(s) across ${byModel.size} model(s)`
+          );
+          for (const [model, paths] of byModel) {
+            console.error(`   ${model}: ${paths.length} project(s)  (first: ${paths[0]})`);
+          }
         } else {
           console.error(`[ConfigManager] 🔍 Eager scan: no projects found under ${solutionsRoot}`);
         }
@@ -194,19 +205,27 @@ class ConfigManager {
     // matchProjectForWorkspace() which is called from setRuntimeContextFromRoots().
     const solutionsRoot = process.env.D365FO_SOLUTIONS_PATH;
     if (solutionsRoot) {
-      const all = await scanAllD365Projects(solutionsRoot);
-      if (all.length > 0) {
-        this.allDetectedProjects = all;
-        console.error(`[ConfigManager] Found ${all.length} project(s) under D365FO_SOLUTIONS_PATH:`);
-        all.forEach(p => console.error(`   - ${p.modelName}: ${p.projectPath}`));
-        // Re-check staleness: time has passed since the initial check above.
-        const isNowStale = generation !== undefined && generation < this.detectionGeneration;
-        // Use first found as primary if workspace detection yielded nothing and scan is current.
-        if (!this.autoDetectedProject && !isNowStale) {
-          this.autoDetectedProject = all[0];
-          registerCustomModel(all[0].modelName);
-          console.error(`[ConfigManager] ✅ Using first found project as primary: ${all[0].modelName}`);
+      // Skip re-scan if initEagerScan() already populated the list (avoids duplicate log output).
+      const needsScan = this.allDetectedProjects.length === 0;
+      if (needsScan) {
+        const all = await scanAllD365Projects(solutionsRoot);
+        if (all.length > 0) {
+          this.allDetectedProjects = all;
+          const byModel = new Map<string, number>();
+          for (const p of all) byModel.set(p.modelName, (byModel.get(p.modelName) ?? 0) + 1);
+          console.error(
+            `[ConfigManager] Found ${all.length} project(s) across ${byModel.size} model(s) under D365FO_SOLUTIONS_PATH`
+          );
         }
+      }
+      const all = this.allDetectedProjects;
+      // Re-check staleness: time has passed since the initial check above.
+      const isNowStale = generation !== undefined && generation < this.detectionGeneration;
+      // Use first found as primary if workspace detection yielded nothing and scan is current.
+      if (all.length > 0 && !this.autoDetectedProject && !isNowStale) {
+        this.autoDetectedProject = all[0];
+        registerCustomModel(all[0].modelName);
+        console.error(`[ConfigManager] ✅ Using first found project as primary: ${all[0].modelName}`);
       }
     }
   }
@@ -288,8 +307,12 @@ class ConfigManager {
 
     // Await the eager D365FO_SOLUTIONS_PATH scan so allDetectedProjects is populated
     // before we try matchProjectForWorkspace (otherwise it always returns null).
+    // Cap at 5 s — consistent with the timeout used in getAutoDetectedProject().
     if (this.allDetectedProjectsReady) {
-      await this.allDetectedProjectsReady;
+      await Promise.race([
+        this.allDetectedProjectsReady,
+        new Promise<void>(resolve => setTimeout(resolve, 5_000)),
+      ]);
     }
 
     // Priority 1: exact / unambiguous path match
@@ -431,6 +454,20 @@ class ConfigManager {
     }
 
     if (children.length > 1) {
+      // Priority C: D365FO convention — the "primary" project in a solution folder
+      // usually has the SAME NAME as the solution folder itself.
+      // e.g. VS 2022 sends root "AslCore - FeatureManagement/" which contains
+      // AslAuditReports - FeatureManagement/, AslCore - FeatureManagement/, …
+      // → prefer the project whose own folder name matches the workspace base name.
+      const wpBase = path.basename(workspacePath).toLowerCase();
+      const nameMatch = children.find(p => {
+        const projectFolderName = path.basename(path.dirname(p.projectPath!)).toLowerCase();
+        return projectFolderName === wpBase;
+      });
+      if (nameMatch) {
+        console.error(`[ConfigManager] ⚡ Solution-name match (${children.length} candidates): ${nameMatch.modelName}`);
+        return nameMatch;
+      }
       console.error(`[ConfigManager] Workspace is ancestor of ${children.length} projects — ambiguous, not switching`);
     }
 
@@ -606,7 +643,10 @@ class ConfigManager {
       ];
       for (const candidate of wellKnownCandidates) {
         if (existsSync(candidate)) {
-          console.error(`[ConfigManager] ✅ Auto-probed packagePath: ${candidate}`);
+          if (!(this as any)._packagePathLoggedOnce) {
+            console.error(`[ConfigManager] ✅ Auto-probed packagePath: ${candidate}`);
+            (this as any)._packagePathLoggedOnce = true;
+          }
           return candidate;
         }
       }
@@ -735,17 +775,26 @@ class ConfigManager {
   }> {
     // Ensure config is loaded and auto-detection has had a chance to run
     await this.ensureLoaded();
+
+    // If the D365FO_SOLUTIONS_PATH eager scan is still running, wait for it
+    // first — that scan populates allDetectedProjects which setRuntimeContextFromRoots
+    // needs to do a path-match.  Cap at 5 s so we never block Copilot past its timeout.
+    if (this.allDetectedProjectsReady) {
+      await Promise.race([
+        this.allDetectedProjectsReady,
+        new Promise<void>(resolve => setTimeout(resolve, 5_000)),
+      ]);
+    }
+
     if (!this.autoDetectionAttempted) {
       const ctx = this.config?.servers.context;
       await this.autoDetectProject(this.runtimeContext.workspacePath || ctx?.workspacePath);
     } else if (!this.autoDetectedProject && this.detectionInProgress) {
       // autoDetectionAttempted was set immediately when background scan started,
-      // but the scan hasn't finished yet — wait up to 12 s for the result.
-      // This fixes "null on first call" when VS 2022 makes a tool call before
-      // the D365FO_SOLUTIONS_PATH scan or BFS completes.
+      // but the scan hasn't finished yet — wait up to 5 s for the result.
       await Promise.race([
         this.detectionInProgress,
-        new Promise<void>(resolve => setTimeout(resolve, 12_000)),
+        new Promise<void>(resolve => setTimeout(resolve, 5_000)),
       ]);
       this.detectionInProgress = null;
     }
@@ -886,6 +935,32 @@ class ConfigManager {
     }
 
     return this.autoDetectedProject?.solutionPath || null;
+  }
+
+  /**
+   * Returns a snapshot of the currently detected project for diagnostic logging.
+   * All fields are resolved synchronously from the in-memory state — no async I/O.
+   */
+  getDetectionSummary(): {
+    modelName: string | null;
+    source: string;
+    projectPath: string | null;
+    solutionPath: string | null;
+    workspacePath: string | null;
+  } {
+    const { modelName, source } = this.getModelNameWithSource();
+    return {
+      modelName,
+      source,
+      projectPath:  this.runtimeContext.projectPath  ??
+                    this.autoDetectedProject?.projectPath  ??
+                    this.config?.servers.context?.projectPath  ?? null,
+      solutionPath: this.runtimeContext.solutionPath ??
+                    this.autoDetectedProject?.solutionPath ??
+                    this.config?.servers.context?.solutionPath ?? null,
+      workspacePath: this.runtimeContext.workspacePath ??
+                     this.config?.servers.context?.workspacePath ?? null,
+    };
   }
 
   /**

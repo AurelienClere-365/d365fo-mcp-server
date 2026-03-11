@@ -2545,20 +2545,11 @@ export class ProjectFileManager {
     projectPath: string,
     objectType: string,
     objectName: string,
-    absoluteXmlPath: string
+    _absoluteXmlPath: string  // kept for API compatibility
   ): Promise<boolean> {
-    console.error(
-      `[ProjectFileManager] Adding to project: ${projectPath}, type: ${objectType}, name: ${objectName}`
-    );
-    console.error(`[ProjectFileManager] Absolute XML path: ${absoluteXmlPath}`);
-
     // Read project file
     const projectXml = await fs.readFile(projectPath, 'utf-8');
     const project = await this.parser.parseStringPromise(projectXml);
-
-    console.error(
-      `[ProjectFileManager] Parsed project, ItemGroup count: ${Array.isArray(project.Project.ItemGroup) ? project.Project.ItemGroup.length : 'single'}`
-    );
 
     // Ensure project structure exists
     if (!project.Project) {
@@ -3067,10 +3058,7 @@ export async function handleCreateD365File(
 
     // Ensure directory exists (create if needed)
     const directory = path.dirname(normalizedFullPath);
-    console.error(
-      `[create_d365fo_file] Ensuring directory exists: ${directory}`
-    );
-    
+
     // Check if this looks like a Windows path on non-Windows system
     if (process.platform !== 'win32' && /^[A-Z]:\\/.test(normalizedFullPath)) {
       throw new Error(
@@ -3112,7 +3100,6 @@ export async function handleCreateD365File(
 
     try {
       await fs.mkdir(directory, { recursive: true });
-      console.error(`[create_d365fo_file] Directory ready: ${directory}`);
     } catch (mkdirError) {
       console.error(
         `[create_d365fo_file] Failed to create directory:`,
@@ -3238,9 +3225,6 @@ export async function handleCreateD365File(
       const utf8BOM = Buffer.from([0xEF, 0xBB, 0xBF]);
       const xmlBuffer = Buffer.concat([utf8BOM, Buffer.from(xmlContent, 'utf-8')]);
       await fs.writeFile(normalizedFullPath, xmlBuffer);
-      console.error(
-        `[create_d365fo_file] File written successfully with UTF-8 BOM: ${normalizedFullPath}`
-      );
     } catch (writeError) {
       console.error(`[create_d365fo_file] Failed to write file:`, writeError);
       
@@ -3261,17 +3245,14 @@ export async function handleCreateD365File(
 
     // Verify file was written
     const stats = await fs.stat(normalizedFullPath);
+    const fileSizeKb = (stats.size / 1024).toFixed(1);
     console.error(
-      `[create_d365fo_file] File written: ${normalizedFullPath}, size: ${stats.size} bytes`
+      `[create_d365fo_file] ✅ Written: ${normalizedFullPath}  (${fileSizeKb} KB)`
     );
 
     // Add to Visual Studio project if requested
     let projectMessage = '';
     if (args.addToProject) {
-      console.error(
-        `[create_d365fo_file] addToProject requested, solutionPath: ${solutionPathToUse}, projectPath: ${projectPathToUse}`
-      );
-
       // Try to find project file if not explicitly specified
       // Use projectPathToUse which includes values from .mcp.json config
       let projectPath = projectPathToUse;
@@ -3308,9 +3289,6 @@ export async function handleCreateD365File(
 
       if (projectPath) {
         try {
-          console.error(
-            `[create_d365fo_file] Adding to project: ${projectPath}`
-          );
           // Validate project file exists
           await fs.access(projectPath);
 
@@ -3318,10 +3296,6 @@ export async function handleCreateD365File(
           // The full path must point to the exact XML location in PackagesLocalDirectory
           // Ensure Windows path format with backslashes
           const absoluteXmlPath = normalizedFullPath;
-
-          console.error(
-            `[create_d365fo_file] Absolute XML path: ${absoluteXmlPath}`
-          );
 
           // Add to project
           const projectManager = new ProjectFileManager();

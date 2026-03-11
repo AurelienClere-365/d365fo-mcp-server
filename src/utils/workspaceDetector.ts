@@ -109,8 +109,22 @@ export async function detectD365Project(workspacePath: string, maxDepth: number 
     console.error(`[WorkspaceDetector] Found ${projectFiles.length} .rnrproj file(s):`);
     projectFiles.forEach(p => console.error(`   - ${p}`));
 
-    // Use the first project found (most common case: single project in workspace)
-    const primaryProject = projectFiles[0];
+    // D365FO convention: in a multi-project solution folder the "primary" project
+    // usually has the SAME NAME as the solution folder (workspace base name).
+    // e.g. workspace "AslCore - FeatureManagement/" → prefer the .rnrproj whose
+    // own folder is also named "AslCore - FeatureManagement".
+    // Falls back to the first file found (alphabetically) when no name match.
+    let primaryProject = projectFiles[0];
+    if (projectFiles.length > 1) {
+      const wpBase = path.basename(workspacePath).toLowerCase();
+      const nameMatch = projectFiles.find(
+        p => path.basename(path.dirname(p)).toLowerCase() === wpBase,
+      );
+      if (nameMatch) {
+        primaryProject = nameMatch;
+        console.error(`[WorkspaceDetector] Solution-name match → ${path.basename(nameMatch)}`);
+      }
+    }
     const modelName = await extractModelNameFromProject(primaryProject);
 
     if (!modelName) {

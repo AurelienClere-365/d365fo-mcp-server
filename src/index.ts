@@ -31,14 +31,45 @@ import { WorkspaceScanner } from './workspace/workspaceScanner.js';
 import { HybridSearch } from './workspace/hybridSearch.js';
 import { initializeDatabase } from './database/download.js';
 import { initializeConfig, getConfigManager } from './utils/configManager.js';
-import { SERVER_MODE, WRITE_TOOLS } from './server/serverMode.js';
+import { SERVER_MODE, LOCAL_TOOLS } from './server/serverMode.js';
+import { setInitializeParams } from './utils/stdioSessionInfo.js';
 import * as fs from 'fs/promises';
+import * as fsSync from 'node:fs';
+import { Transform } from 'node:stream';
 
 // Filter verbose debug progress messages unless DEBUG_LOGGING is enabled.
 // Only suppress messages that are KNOWN debug output (tool-handler progress)
 // and do NOT contain any error/warning indicators.
 const originalConsoleError = console.error;
 const DEBUG_LOGGING = process.env.DEBUG_LOGGING === 'true';
+
+// ─── Optional file-based logging ──────────────────────────────────────────────
+// Set LOG_FILE env var to an absolute path to get a copy of all stderr output
+// written to a file. Useful when the IDE doesn't expose MCP subprocess stderr
+// (e.g. VS 2022 Output window only shows Copilot extension logs, not ours).
+//
+// In .mcp.json:  "LOG_FILE": "C:\\Temp\\d365fo-mcp.log"
+// Tail in PS:    Get-Content C:\Temp\d365fo-mcp.log -Wait -Tail 50
+// ─────────────────────────────────────────────────────────────────────────────
+const LOG_FILE = process.env.LOG_FILE;
+let _logStream: fsSync.WriteStream | undefined;
+if (LOG_FILE) {
+  try {
+    _logStream = fsSync.createWriteStream(LOG_FILE, { flags: 'a', encoding: 'utf8' });
+    const banner = `\n${'─'.repeat(72)}\n[d365fo-mcp] Started at ${new Date().toISOString()}  pid=${process.pid}\n${'─'.repeat(72)}\n`;
+    _logStream.write(banner);
+    // Tee: intercept process.stderr so every write also goes to the log file
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    (process.stderr as any).write = function (chunk: any, ...rest: any[]) {
+      _logStream!.write(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+      return origStderrWrite(chunk, ...rest);
+    };
+  } catch (e) {
+    // Don't crash if log file can't be opened — just disable file logging
+    process.stderr.write(`[d365fo-mcp] ⚠️ Cannot open LOG_FILE=${LOG_FILE}: ${e}\n`);
+    _logStream = undefined;
+  }
+}
 console.error = (...args: any[]) => {
   if (DEBUG_LOGGING) {
     originalConsoleError(...args);
@@ -106,9 +137,10 @@ async function initializeServices() {
   console.log(`🔧 Server mode: ${SERVER_MODE} (from env: ${process.env.MCP_SERVER_MODE || 'not set, defaulting to full'})`);
 
   // -----------------------------------------------------------------------
-  // write-only mode: skip all database/symbol work — file-operation tools
-  // (create_d365fo_file, modify_d365fo_file, create_label) only need the
-  // config manager for path resolution, not the 1.5 GB symbol database.
+  // write-only mode: skip all database/symbol work — LOCAL_TOOLS
+  // (create_d365fo_file, modify_d365fo_file, create_label, verify_d365fo_project,
+  //  get_workspace_info etc.) only need the config manager for path resolution,
+  //  not the 1.5 GB symbol database.
   // -----------------------------------------------------------------------
   if (SERVER_MODE === 'write-only') {
     console.log('✏️  Mode: write-only (local file-operations companion)');
@@ -117,12 +149,14 @@ async function initializeServices() {
     console.log('⚙️  Loading .mcp.json configuration...');
     const config = await initializeConfig();
     if (config?.servers.context) {
-      console.log('✅ Configuration loaded from .mcp.json');
+      console.log('✅ Configuration loaded from .mcp.json (servers.context)');
       if (config.servers.context.workspacePath) {
         console.log(`   Workspace path: ${config.servers.context.workspacePath}`);
       }
+    } else if (config) {
+      console.log('ℹ️  .mcp.json found (VS/Copilot registry format) — paths from process.env');
     } else {
-      console.log('ℹ️  No .mcp.json configuration found, using defaults');
+      console.log('ℹ️  No .mcp.json found — using environment variables / defaults');
     }
 
     const cache = new RedisCacheService();
@@ -152,16 +186,20 @@ async function initializeServices() {
     // Load .mcp.json configuration
     console.log('⚙️  Loading .mcp.json configuration...');
     const config = await initializeConfig();
-    if (config && config.servers.context) {
-      console.log('✅ Configuration loaded from .mcp.json');
+    if (config?.servers.context) {
+      console.log('✅ Configuration loaded from .mcp.json (servers.context)');
       if (config.servers.context.workspacePath) {
         console.log(`   Workspace path: ${config.servers.context.workspacePath}`);
       }
       if (config.servers.context.packagePath) {
         console.log(`   Package path: ${config.servers.context.packagePath}`);
       }
+    } else if (config) {
+      // Home .mcp.json found but uses VS/Copilot server-registry format (servers.<name>).
+      // D365FO paths are supplied via process.env (D365FO_SOLUTIONS_PATH, DB_PATH, …).
+      console.log('ℹ️  .mcp.json found (VS/Copilot registry format) — paths from process.env');
     } else {
-      console.log('ℹ️  No .mcp.json configuration found, using defaults');
+      console.log('ℹ️  No .mcp.json found — using environment variables / defaults');
     }
 
     // Initialize cache service
@@ -324,6 +362,85 @@ async function initializeServices() {
 }
 
 async function main() {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Phase-1 diagnostic interceptors (stdio-only helpers)
+  // Defined here so _phase1Start and diagTs are never allocated in HTTP mode.
+  // Each incoming/outgoing newline-delimited JSON-RPC message is logged to
+  // stderr so you can see exactly what VS 2022 sends.
+  // ─────────────────────────────────────────────────────────────────────────────
+  const _phase1Start = Date.now();
+  function diagTs(): string {
+    return `+${Date.now() - _phase1Start}ms`;
+  }
+
+  /** Wraps process.stdin — logs every incoming JSON-RPC message, passes data through unchanged. */
+  function createDiagnosticStdin(): Transform {
+    let buf = Buffer.alloc(0);
+    const t = new Transform({
+      transform(chunk: Buffer, _enc, cb) {
+        buf = Buffer.concat([buf, chunk]);
+        // MCP stdio transport uses newline-delimited JSON: each message is one
+        // JSON object terminated by \n (with optional \r before \n).
+        let newlineIdx: number;
+        while ((newlineIdx = buf.indexOf(0x0a)) !== -1) {
+          const line = buf.slice(0, newlineIdx).toString('utf8').replace(/\r$/, '');
+          buf = buf.slice(newlineIdx + 1);
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+            // Always capture initialize params regardless of DEBUG_LOGGING flag
+            // so get_workspace_info can show them even in production stdio mode.
+            if (msg.method === 'initialize' && msg.params) {
+              setInitializeParams(msg.params);
+            }
+            if (DEBUG_LOGGING) {
+              const kind = msg.method != null ? `📨 ${msg.method}` : `✅ reply#${msg.id}`;
+              const payload = msg.params ?? msg.result ?? msg.error ?? {};
+              process.stderr.write(
+                `[VS→MCP ${diagTs()}] ${kind}  ${JSON.stringify(payload).slice(0, 900)}\n`
+              );
+            }
+          } catch { /* non-JSON line, skip */ }
+        }
+        cb(null, chunk); // pass data through unchanged
+      },
+    });
+    process.stdin.pipe(t);
+    return t;
+  }
+
+  /** Wraps process.stdout — logs every outgoing JSON-RPC message, passes data through unchanged. */
+  function createDiagnosticStdout(): Transform {
+    let buf = Buffer.alloc(0);
+    const t = new Transform({
+      transform(chunk: Buffer, _enc, cb) {
+        buf = Buffer.concat([buf, chunk]);
+        // MCP stdio transport uses newline-delimited JSON.
+        let newlineIdx: number;
+        while ((newlineIdx = buf.indexOf(0x0a)) !== -1) {
+          const line = buf.slice(0, newlineIdx).toString('utf8').replace(/\r$/, '');
+          buf = buf.slice(newlineIdx + 1);
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+            const kind = msg.method != null ? `🔔 ${msg.method}` : `📤 reply#${msg.id}`;
+            let payload: unknown = msg.result ?? msg.params ?? msg.error ?? {};
+            // Avoid flooding log with the full tools/list payload
+            if (msg.id != null && Array.isArray((payload as any)?.tools)) {
+              payload = { tools_count: (payload as any).tools.length, first: (payload as any).tools[0]?.name };
+            }
+            process.stderr.write(
+              `[MCP→VS ${diagTs()}] ${kind}  ${JSON.stringify(payload).slice(0, 500)}\n`
+            );
+          } catch { /* non-JSON line, skip */ }
+        }
+        cb(null, chunk); // pass data through unchanged
+      },
+    });
+    t.pipe(process.stdout);
+    return t;
+  }
+
   // CRITICAL: In STDIO mode, redirect all console.log to stderr
   // GitHub Copilot reads stdout for MCP protocol only!
   if (isStdioMode) {
@@ -349,7 +466,16 @@ async function main() {
     // Eagerly scan D365FO_SOLUTIONS_PATH so allDetectedProjects is populated before
     // VS 2022 sends roots/list (usually within 1–2 s of startup).
     getConfigManager().initEagerScan();
-    process.stderr.write(`[stdio] Seeding workspace: ${initialWorkspace}\n`);
+    process.stderr.write(`[stdio ${diagTs()}] Seeding workspace: ${initialWorkspace}\n`);
+    if (DEBUG_LOGGING) {
+      process.stderr.write(
+        `[phase1 diag] ────────────────────────────────────────────────────────\n` +
+        `[phase1 diag] DEBUG_LOGGING=true → raw JSON-RPC trace ENABLED\n` +
+        `[phase1 diag]  [VS→MCP ...] = messages FROM Visual Studio TO this server\n` +
+        `[phase1 diag]  [MCP→VS ...] = messages FROM this server TO Visual Studio\n` +
+        `[phase1 diag] ────────────────────────────────────────────────────────\n`
+      );
+    }
     getConfigManager().setRuntimeContext({ workspacePath: initialWorkspace });
 
     // STDIO mode: connect transport BEFORE the heavy database open so the MCP
@@ -397,15 +523,26 @@ async function main() {
     const mcpServer = createXppMcpServer(stubContext);
 
     // Step 2: connect transport — handshake completes here
-    const transport = new StdioServerTransport();
+    // Always wrap stdin with the session-sniffer Transform so we can capture
+    // the `initialize` request params (clientInfo, capabilities) for
+    // get_workspace_info diagnostics — even when DEBUG_LOGGING is false.
+    // stdout is only intercepted when DEBUG_LOGGING=true (it's noisy).
+    const diagStdin  = createDiagnosticStdin();
+    const diagStdout = DEBUG_LOGGING ? createDiagnosticStdout() : process.stdout;
+    const transport = new StdioServerTransport(
+      diagStdin  as unknown as typeof process.stdin,
+      diagStdout as unknown as typeof process.stdout,
+    );
     await mcpServer.connect(transport);
-    console.log('✅ Stdio transport connected (DB loading in background)');
+    console.log(`✅ Stdio transport connected ${diagTs()} (DB loading in background)`);
 
     // Step 3: yield the event loop so `initialized` + roots/list can be processed
     // BEFORE the synchronous new Database() call blocks the event loop.
     await new Promise<void>(resolve => setImmediate(resolve));
+    process.stderr.write(`[stdio ${diagTs()}] setImmediate fired — roots/list exchange should be done\n`);
 
     // Step 4: load real database in the background
+    const dbLoadStart = Date.now();
     initializeServices().then(({ symbolIndex, parser, cache, workspaceScanner, hybridSearch, termRelationshipGraph }) => {
       // Step 5: patch the context references used by tool handlers
       stubContext.symbolIndex       = symbolIndex;
@@ -420,7 +557,7 @@ async function main() {
       serverState.statusMessage = 'Ready';
       // Resolve dbReady AFTER context is patched — tools can now run with real index.
       resolveDbReady();
-      console.log('✅ Database loaded — all tools fully operational');
+      console.log(`✅ Database loaded in ${Date.now() - dbLoadStart} ms (${diagTs()} from process start) — all tools fully operational`);
     }).catch(err => {
       rejectDbReady(err);
       console.error('❌ Background initialization failed:', err);
@@ -428,12 +565,12 @@ async function main() {
 
     // Log tool count immediately (transport is already connected)
     const totalTools = 42;
-    const writeToolCount = WRITE_TOOLS.size;
-    const toolCount = SERVER_MODE === 'write-only' ? writeToolCount :
-                     SERVER_MODE === 'read-only' ? totalTools - writeToolCount : totalTools;
-    const toolDesc = SERVER_MODE === 'write-only' ? `(${Array.from(WRITE_TOOLS).join(', ')})` :
-                    SERVER_MODE === 'read-only' ? '(all except write tools)' :
-                    '(8 discovery + 4 labels + 6 object-info + 4 intelligent + 3 smart-generation + 5 file-ops + 3 pattern-analysis + 9 security-extensions)';
+    const localToolCount = LOCAL_TOOLS.size;
+    const toolCount = SERVER_MODE === 'write-only' ? localToolCount :
+                     SERVER_MODE === 'read-only' ? totalTools - localToolCount : totalTools;
+    const toolDesc = SERVER_MODE === 'write-only' ? `(${Array.from(LOCAL_TOOLS).join(', ')})` :
+                    SERVER_MODE === 'read-only' ? '(all except local tools)' :
+                    '(1 workspace-config + 8 discovery + 4 labels + 6 object-info + 4 intelligent + 3 smart-generation + 4 file-ops + 3 pattern-analysis + 9 security-extensions)';
     console.log(`🎯 Registered ${toolCount} X++ MCP tools ${toolDesc}`);
     serverState.isReady = true;
     serverState.isHealthy = true;
@@ -548,8 +685,8 @@ async function main() {
         .map(cat => ({
           ...cat,
           tools: cat.tools.filter(t => {
-            if (SERVER_MODE === 'read-only') return !WRITE_TOOLS.has(t.name);
-            if (SERVER_MODE === 'write-only') return WRITE_TOOLS.has(t.name);
+            if (SERVER_MODE === 'read-only') return !LOCAL_TOOLS.has(t.name);
+            if (SERVER_MODE === 'write-only') return LOCAL_TOOLS.has(t.name);
             return true;
           }),
         }))

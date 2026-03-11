@@ -15,11 +15,12 @@ import { registerClassResource } from '../resources/classResource.js';
 import { registerWorkspaceResources } from '../resources/workspaceResource.js';
 import { registerCodeReviewPrompt } from '../prompts/codeReview.js';
 import type { XppServerContext } from '../types/context.js';
-import { SERVER_MODE, WRITE_TOOLS } from './serverMode.js';
+import { SERVER_MODE, LOCAL_TOOLS } from './serverMode.js';
 import { getConfigManager } from '../utils/configManager.js';
+import { setLastRoots, recordRootsListChanged } from '../utils/stdioSessionInfo.js';
 
 export type { XppServerContext };
-export { SERVER_MODE, WRITE_TOOLS } from './serverMode.js';
+export { SERVER_MODE, LOCAL_TOOLS, WRITE_TOOLS } from './serverMode.js';
 export type { ServerMode } from './serverMode.js';
 
 /**
@@ -46,11 +47,21 @@ function fileUriToPath(uri: string): string | null {
  * even when VS 2022 sends multiple roots (open project folders).
  */
 function applyRootsToConfig(roots: Array<{ uri: string }>): void {
-  if (!roots?.length) return;
+  if (!roots?.length) {
+    // VS 2022 sends empty roots/list when closing a solution (transition state).
+    // Log this so it's visible in diagnostics, but keep the current detection
+    // result — the next roots/list_changed will bring the new solution path.
+    process.stderr.write('[mcpServer] roots/list received (0 root(s)) — solution closing or no workspace open\n');
+    setLastRoots([]);
+    return;
+  }
 
   // Log all received roots for diagnostics
   process.stderr.write(`[mcpServer] roots/list received (${roots.length} root(s)):\n`);
   roots.forEach((r, i) => process.stderr.write(`  [${i}] ${r.uri}\n`));
+
+  // Persist URIs in the stdio session singleton so get_workspace_info can display them.
+  setLastRoots(roots.map(r => r.uri));
 
   // Convert all URIs to local paths
   const paths = roots
@@ -60,7 +71,19 @@ function applyRootsToConfig(roots: Array<{ uri: string }>): void {
   if (paths.length === 0) return;
 
   // Pass all paths; configManager will pick the most specific unambiguous one.
-  getConfigManager().setRuntimeContextFromRoots(paths).catch(err => {
+  // After detection completes, log what solution/project was resolved so it's
+  // easy to verify in the log that the correct project was picked.
+  getConfigManager().setRuntimeContextFromRoots(paths).then(() => {
+    const { modelName, source, projectPath, solutionPath, workspacePath } =
+      getConfigManager().getDetectionSummary();
+    process.stderr.write(
+      `[mcpServer] ✅ Project detection result:\n` +
+      `   Model name  : ${modelName ?? '(unknown)'} (source: ${source})\n` +
+      `   Project path: ${projectPath  ?? '(not set)'}\n` +
+      `   Solution    : ${solutionPath ?? '(not set)'}\n` +
+      `   Workspace   : ${workspacePath ?? '(not set)'}\n`
+    );
+  }).catch(err => {
     process.stderr.write(`[mcpServer] setRuntimeContextFromRoots error: ${err}\n`);
   });
 }
@@ -87,19 +110,27 @@ export function createXppMcpServer(context: XppServerContext): Server {
   // up-to-date on `notifications/roots/list_changed`.
   // -----------------------------------------------------------------------
   server.setNotificationHandler(InitializedNotificationSchema, async () => {
+    process.stderr.write(
+      `[mcpServer ${new Date().toISOString().slice(11, 23)}] ⚡ 'initialized' notification received — requesting roots/list\n`
+    );
     try {
       const result = await server.request(
         { method: 'roots/list', params: {} },
         ListRootsResultSchema
       );
       applyRootsToConfig(result.roots ?? []);
-    } catch {
+    } catch (e) {
       // Client doesn't support roots/list — workspace already seeded from
       // process.cwd() or env vars in index.ts stdio startup.
+      process.stderr.write(`[mcpServer] ⚠️  roots/list not supported by client: ${e}\n`);
     }
   });
 
   server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
+    recordRootsListChanged();
+    process.stderr.write(
+      `[mcpServer ${new Date().toISOString().slice(11, 23)}] 🔄 'roots/list_changed' notification — re-requesting roots/list\n`
+    );
     try {
       const result = await server.request(
         { method: 'roots/list', params: {} },
@@ -2104,11 +2135,11 @@ Examples:
 
     // Apply server mode filter
     if (SERVER_MODE === 'read-only') {
-      allTools.tools = allTools.tools.filter(t => !WRITE_TOOLS.has(t.name));
-      console.error(`[MCP Server] Tool list filtered for read-only mode: ${allTools.tools.length} tools (write tools excluded)`);
+      allTools.tools = allTools.tools.filter(t => !LOCAL_TOOLS.has(t.name));
+      console.error(`[MCP Server] Tool list filtered for read-only mode: ${allTools.tools.length} tools (local tools excluded)`);
     } else if (SERVER_MODE === 'write-only') {
-      allTools.tools = allTools.tools.filter(t => WRITE_TOOLS.has(t.name));
-      console.error(`[MCP Server] Tool list filtered for write-only mode: ${allTools.tools.length} tools (${Array.from(WRITE_TOOLS).join(', ')})`);
+      allTools.tools = allTools.tools.filter(t => LOCAL_TOOLS.has(t.name));
+      console.error(`[MCP Server] Tool list filtered for write-only mode: ${allTools.tools.length} tools (${Array.from(LOCAL_TOOLS).join(', ')})`);
     } else {
       console.error(`[MCP Server] Tool list in full mode: ${allTools.tools.length} tools (no filtering)`);
     }

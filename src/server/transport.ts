@@ -157,23 +157,6 @@ export class CustomHttpTransport implements Transport {
           getConfigManager().setRuntimeContext({ workspacePath });
         }
 
-        // DEBUG: dump workspace-related headers + _meta when DEBUG_LOGGING=true
-        // Run once per request so VS 2022 / Copilot exact header keys can be identified.
-        if (process.env.DEBUG_LOGGING === 'true') {
-          const debugPayload = {
-            headers: Object.fromEntries(
-              Object.entries(req.headers).filter(([k]) =>
-                k.includes('workspace') || k.includes('copilot') ||
-                k.includes('vscode') || k.includes('root') ||
-                k.includes('origin') || k.includes('referer')
-              )
-            ),
-            resolvedWorkspacePath: workspacePath,
-            meta: (request as any).params?._meta,
-          };
-          process.stderr.write(`[VS22-Headers] ${JSON.stringify(debugPayload, null, 2)}\n`);
-        }
-
         if (!request.jsonrpc || !request.method) {
           res.status(400).json({
             jsonrpc: '2.0',

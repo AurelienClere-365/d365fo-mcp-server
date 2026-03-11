@@ -10,6 +10,11 @@ just ask in plain English.
 
 ### Workspace Configuration (1 tool)
 
+> ⚠️ **Local-only** — excluded from `read-only` (Azure) mode; available in `full` and `write-only` modes.
+> Reports server config loaded from `.mcp.json`, detected D365FO projects from `D365FO_SOLUTIONS_PATH`,
+> and stdio session info (MCP client name, roots). On Azure this would return irrelevant cloud-server
+> state rather than your developer workspace — use the local companion for this tool.
+
 | Tool | What it does | Example prompt |
 |------|-------------|---------------|
 | **get_workspace_info** | Verify model name, package path, project path — ⚠️ call this FIRST | "Check my workspace configuration" |
@@ -63,15 +68,21 @@ just ask in plain English.
 | **get_form_patterns** | Analyze datasource/control patterns for forms | "Find forms using CustTable" |
 | **generate_code** | Generate X++ boilerplate (class, batch job, CoC, etc.) | "Generate a batch job class for order processing" |
 
-### File Operations (3 tools)
+### File Operations — LOCAL_TOOLS (4 tools)
+
+> The following tools access the **local Windows VM filesystem** (K:\ drive paths in
+> `PackagesLocalDirectory` or `.rnrproj` project files) and are therefore excluded from
+> the Azure `read-only` deployment. In the hybrid setup they run on the local companion
+> (`MCP_SERVER_MODE=write-only`). They also skip the DB loading wait — no symbol database needed.
 
 | Tool | Works where | What it does |
 |------|------------|-------------|
 | **generate_d365fo_xml** | Anywhere (cloud + local) | Returns XML content — Copilot then creates the file |
 | **create_d365fo_file** | Local Windows VM only | Creates the physical file and adds it to the VS project |
 | **modify_d365fo_file** | Local Windows VM only | Safely edits an existing file with automatic backup |
+| **verify_d365fo_project** | Local Windows VM only | Reads `.rnrproj` on K:\ to verify objects exist on disk and are referenced in the project file |
 
-### Security & Extensions (10 tools)
+### Security & Extensions (9 tools)
 
 | Tool | What it does | Example prompt |
 |------|-------------|---------------|
@@ -84,7 +95,6 @@ just ask in plain English.
 | **get_data_entity_info** | Data entity category, OData name, data sources, keys | "Show me CustCustomerV3Entity details" |
 | **analyze_extension_points** | CoC-eligible methods, delegates, events — what can be extended | "What can I extend on SalesLine?" |
 | **validate_object_naming** | Validate proposed extension/object names against D365FO conventions | "Is SalesTableExtension a valid extension class name?" |
-| **verify_d365fo_project** | Verify objects exist on disk and are referenced in the .rnrproj file | "Check that all created files are in place" |
 
 ### Label Management (4 tools)
 

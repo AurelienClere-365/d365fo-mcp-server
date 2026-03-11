@@ -2,7 +2,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { XppServerContext } from '../types/context.js';
 import { getConfigManager } from '../utils/configManager.js';
-import { SERVER_MODE, WRITE_TOOLS } from '../server/serverMode.js';
+import { SERVER_MODE, LOCAL_TOOLS } from '../server/serverMode.js';
 import { searchTool } from './search.js';
 import { batchSearchTool } from './batchSearch.js';
 import { classInfoTool } from './classInfo.js';
@@ -45,6 +45,7 @@ import { analyzeExtensionPointsTool } from './analyzeExtensionPoints.js';
 import { validateObjectNamingTool } from './validateObjectNaming.js';
 import { verifyD365ProjectTool } from './verifyD365Project.js';
 import { resolveObjectPrefix } from '../utils/modelClassifier.js';
+import { getStdioSessionInfo } from '../utils/stdioSessionInfo.js';
 
 /**
  * Extract workspace path from GitHub Copilot _meta and apply it to ConfigManager.
@@ -149,9 +150,10 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
     // patched into the context. Awaiting it here ensures every tool call uses
     // the real index — tools that arrive during DB loading will block (showing
     // a spinner in the IDE) rather than silently returning empty results.
-    // Write-only tools (create_d365fo_file etc.) don't need the DB, so they
-    // skip the wait and execute immediately.
-    if (context.dbReady && !WRITE_TOOLS.has(toolName)) {
+    // LOCAL_TOOLS (create_d365fo_file, verify_d365fo_project, get_workspace_info
+    // etc.) access the local filesystem or in-memory config — no DB needed,
+    // so they skip the wait and execute immediately.
+    if (context.dbReady && !LOCAL_TOOLS.has(toolName)) {
       const t0 = Date.now();
       await context.dbReady;
       const elapsed = Date.now() - t0;
@@ -160,14 +162,14 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
       }
     }
 
-    // Enforce server mode: block write tools in read-only mode, block read tools in write-only mode
-    if (SERVER_MODE === 'read-only' && WRITE_TOOLS.has(toolName)) {
+    // Enforce server mode: block local tools in read-only (Azure) mode, block search/analysis tools in write-only mode
+    if (SERVER_MODE === 'read-only' && LOCAL_TOOLS.has(toolName)) {
       return {
-        content: [{ type: 'text', text: `⚠️ Tool '${toolName}' requires local Windows VM file system access and is not available in read-only mode.\n\nThis MCP server is running in read-only mode (Azure deployment).\nTo use file operations, configure a local MCP server with MCP_SERVER_MODE=write-only in your .mcp.json.\n\nSee: https://github.com/dynamics365ninja/d365fo-mcp-server/blob/main/docs/MCP_CONFIG.md` }],
+        content: [{ type: 'text', text: `⚠️ Tool '${toolName}' requires local Windows VM filesystem access and is not available in read-only mode.\n\nThis MCP server is running in read-only mode (Azure deployment).\nTo use file operations and workspace diagnostics, configure a local MCP server with MCP_SERVER_MODE=write-only in your .mcp.json.\n\nSee: https://github.com/dynamics365ninja/d365fo-mcp-server/blob/main/docs/MCP_CONFIG.md` }],
         isError: true,
       };
     }
-    if (SERVER_MODE === 'write-only' && !WRITE_TOOLS.has(toolName)) {
+    if (SERVER_MODE === 'write-only' && !LOCAL_TOOLS.has(toolName)) {
       return {
         content: [{ type: 'text', text: `⚠️ Tool '${toolName}' is not available in write-only mode.\n\nThis local MCP server only handles file operations. Search and analysis tools are provided by the Azure MCP server.` }],
         isError: true,
@@ -388,6 +390,46 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
           }
           lines.push(``);
           lines.push(`To switch project: call get_workspace_info with projectName = "<ModelName>"`);
+        }
+
+        // -----------------------------------------------------------------------
+        // Stdio session info — what VS 2022 sent during the MCP handshake
+        // Populated by the stdin sniffer in index.ts (always active in stdio mode).
+        // -----------------------------------------------------------------------
+        const sio = getStdioSessionInfo();
+        lines.push(``);
+        lines.push(`## Stdio Session Info`);
+        lines.push(``);
+        if (!sio.initializedAt) {
+          lines.push(`_Not in stdio mode (or initialize not yet received)._`);
+        } else {
+          lines.push(`Client name     : ${sio.clientName    ?? '(not sent)'}`);
+          lines.push(`Client version  : ${sio.clientVersion ?? '(not sent)'}`);
+          lines.push(`MCP protocol    : ${sio.protocolVersion ?? '(not sent)'}`);
+          lines.push(`Roots listChanged cap: ${sio.supportsRootsListChanged ? 'yes ✅' : 'no ❌'}`);
+          lines.push(`Initialize at   : ${sio.initializedAt}`);
+          lines.push(``);
+          if (sio.lastRoots.length === 0) {
+            lines.push(`Roots (last roots/list): _none received yet_`);
+          } else {
+            lines.push(`Roots (last roots/list) @ ${sio.rootsLastAt}:`);
+            sio.lastRoots.forEach((u, i) => lines.push(`  [${i}] ${u}`));
+          }
+          lines.push(``);
+          if (sio.rootsListChangedCount === 0) {
+            lines.push(`roots/list_changed events: 0 (VS 2022 has NOT changed solution since startup)`);
+            if (sio.supportsRootsListChanged) {
+              lines.push(`  ℹ️  Client declared roots.listChanged=true — it WILL send this notification`);
+              lines.push(`     when you open/switch a solution. Switch now and call get_workspace_info again.`);
+            } else {
+              lines.push(`  ⚠️  Client did NOT declare roots.listChanged capability — automatic`);
+              lines.push(`     solution-switch detection may not be available.`);
+            }
+          } else {
+            lines.push(`roots/list_changed events: ${sio.rootsListChangedCount} ✅`);
+            lines.push(`Last change at  : ${sio.rootsListChangedLastAt}`);
+            lines.push(`✅ VS 2022 IS sending roots/list_changed — solution switching IS detectable.`);
+          }
         }
 
         return { content: [{ type: 'text', text: lines.join('\n') }] };

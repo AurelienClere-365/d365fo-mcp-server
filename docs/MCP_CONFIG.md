@@ -67,6 +67,27 @@ Key points:
 - No `context` block needed — model name is resolved from `.rnrproj` automatically.
 - `MCP_SERVER_MODE` defaults to `full` — omit it unless you need `read-only` or `write-only`.
 
+#### Enabling diagnostics
+
+Add `DEBUG_LOGGING` and `LOG_FILE` to the `env` block to capture a full session trace:
+
+```json
+"env": {
+  "DB_PATH": "C:\\path\\to\\data\\xpp-metadata.db",
+  "LABELS_DB_PATH": "C:\\path\\to\\data\\xpp-metadata-labels.db",
+  "D365FO_SOLUTIONS_PATH": "K:\\repos\\MySolution\\projects",
+  "DEBUG_LOGGING": "true",
+  "LOG_FILE": "C:\\Temp\\d365fo-mcp.log"
+}
+```
+
+The log file collects all output including JSON-RPC messages and is useful when the VS 2022
+Output window is too noisy or truncated. Open it with any text editor or watch live with:
+
+```powershell
+Get-Content "C:\Temp\d365fo-mcp.log" -Encoding UTF8 -Wait
+```
+
 ### HTTP (Azure-hosted or `npm run dev`)
 
 The server listens on a TCP port. Used for Azure deployments and for local `npm run dev` sessions.
@@ -153,7 +174,8 @@ files from `%LOCALAPPDATA%\Microsoft\Dynamics365\XPPConfig\` and detects the pat
 | `D365FO_SOLUTIONS_PATH` | Recommended | Folder containing D365FO `.rnrproj` files. Server scans it at startup for model auto-detection and lists all found projects in `get_workspace_info`. Required for project switching by name (`projectName` parameter). |
 | `MCP_SERVER_MODE` | No | `full` (default), `read-only`, or `write-only`. Only needed in hybrid setups. |
 | `MCP_FORCE_HTTP` | No | Set to `true` to prevent stdio mode even when stdin is piped (rare). |
-| `DEBUG_LOGGING` | No | Set to `true` to dump workspace-related HTTP headers to stderr (HTTP transport only). |
+| `DEBUG_LOGGING` | No | Set to `true` to enable verbose raw JSON-RPC trace on stderr. Every message VS 2022 sends to the server (`[VS→MCP]`) and every reply the server sends back (`[MCP→VS]`) is printed with a relative timestamp. Useful for diagnosing handshake failures or unexpected tool responses. Works in both stdio and HTTP mode. |
+| `LOG_FILE` | No | Absolute path to a log file (e.g. `C:\\Temp\\d365fo-mcp.log`). All stderr output — including JSON-RPC trace when `DEBUG_LOGGING=true` — is **tee'd** to this file in addition to the normal stderr stream. The file is opened in append mode at process startup, so multiple sessions accumulate in one file. A banner line with the timestamp and PID is written at the start of each session. Useful on Windows where the VS 2022 Output window truncates long lines and does not persist across sessions. |
 
 ### When do you need the optional properties?
 
@@ -237,8 +259,8 @@ this by running two servers simultaneously:
 
 | Instance | Runs on | `MCP_SERVER_MODE` | Tools |
 |----------|---------|-------------------|-------|
-| `d365fo-azure` | Azure App Service | `read-only` | 38 search & analysis tools |
-| `d365fo-local` | Windows VM (stdio) | `write-only` | `create_d365fo_file`, `modify_d365fo_file`, `create_label`, `rename_label` |
+| `d365fo-azure` | Azure App Service | `read-only` | 36 search & analysis tools |
+| `d365fo-local` | Windows VM (stdio) | `write-only` | `create_d365fo_file`, `modify_d365fo_file`, `create_label`, `rename_label`, `verify_d365fo_project`, `get_workspace_info` |
 
 GitHub Copilot connects to both servers at the same time and selects the right one automatically.
 
@@ -283,26 +305,28 @@ When the server starts, it logs the detected mode and tool count:
 **Write-only mode (local companion):**
 ```
 🔧 Server mode: write-only (from env: write-only)
-🎯 Registered 4 X++ MCP tools (create_d365fo_file, modify_d365fo_file, create_label, rename_label)
-[MCP Server] Tool list filtered for write-only mode: 4 tools (create_d365fo_file, modify_d365fo_file, create_label, rename_label)
+🎯 Registered 6 X++ MCP tools (create_d365fo_file, modify_d365fo_file, create_label, rename_label, verify_d365fo_project, get_workspace_info)
+[MCP Server] Tool list filtered for write-only mode: 6 tools (create_d365fo_file, modify_d365fo_file, create_label, rename_label, verify_d365fo_project, get_workspace_info)
 ```
 
 **Read-only mode (Azure server):**
 ```
 🔧 Server mode: read-only (from env: read-only)
-🎯 Registered 38 X++ MCP tools (all except write tools)
-[MCP Server] Tool list filtered for read-only mode: 38 tools (write tools excluded)
+🎯 Registered 36 X++ MCP tools (all except local tools)
+[MCP Server] Tool list filtered for read-only mode: 36 tools (local tools excluded)
 ```
 
 **Full mode (local development):**
 ```
 🔧 Server mode: full (from env: not set, defaulting to full)
-🎯 Registered 42 X++ MCP tools (8 discovery + 4 labels + 6 object-info + 4 intelligent + 3 smart-generation + 5 file-ops + 3 pattern-analysis + 9 security-extensions)
+🎯 Registered 42 X++ MCP tools (1 workspace-config + 8 discovery + 4 labels + 6 object-info + 4 intelligent + 3 smart-generation + 4 file-ops + 3 pattern-analysis + 9 security-extensions)
 [MCP Server] Tool list in full mode: 42 tools (no filtering)
 ```
 
-> **Note:** The local server in `write-only` mode still needs access to the metadata database
-> (for path resolution and model detection), but it doesn't need Redis or Azure Blob Storage.
+> **Note:** The local server in `write-only` mode skips database download and the symbol
+> index entirely — it only needs `.mcp.json` for path resolution. Redis and Azure Blob Storage
+> are not required. `get_workspace_info` and `verify_d365fo_project` are included in
+> `write-only` mode because they read local K:\ filesystem paths not accessible from Azure.
 
 ### Azure App Service settings for read-only mode
 
