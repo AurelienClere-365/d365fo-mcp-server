@@ -1,16 +1,20 @@
 name: Deploy Azure Infrastructure
 
 on:
+  # Automatic trigger: runs when main.bicep changes on main branch.
+  # Resource group is resolved from the AZURE_RESOURCE_GROUP secret.
   push:
     branches:
       - main
     paths:
       - 'infrastructure/main.bicep'
+  # Manual trigger: allows overriding resource group and parameters.
+  # If resourceGroup is left blank, falls back to AZURE_RESOURCE_GROUP secret.
   workflow_dispatch:
     inputs:
       resourceGroup:
-        description: 'Resource group name (d365fo-mcp-server-<customer>)'
-        required: true
+        description: 'Resource group name — leave blank to use AZURE_RESOURCE_GROUP secret'
+        required: false
       appServiceSku:
         description: 'App Service SKU'
         required: false
@@ -22,17 +26,31 @@ on:
         required: false
         default: 'en-US,cs,sk,de'
 
+# Opt into Node.js 24 for all JavaScript actions (required after June 2, 2026)
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   deploy-infrastructure:
     name: Deploy Bicep to Azure
     runs-on: ubuntu-latest
 
     env:
-      RESOURCE_GROUP: ${{ github.event.inputs.resourceGroup || vars.AZURE_RESOURCE_GROUP }}
+      # Prefer manual input; fall back to repository secret for automated runs.
+      # Set AZURE_RESOURCE_GROUP secret under: Settings → Secrets and variables → Actions → Secrets
+      RESOURCE_GROUP: ${{ github.event.inputs.resourceGroup || secrets.AZURE_RESOURCE_GROUP }}
       APP_SERVICE_SKU: ${{ github.event.inputs.appServiceSku || 'B3' }}
       LABEL_LANGUAGES: ${{ github.event.inputs.labelLanguages || 'en-US,cs,sk,de' }}
 
     steps:
+      - name: Validate resource group
+        run: |
+          if [ -z "$RESOURCE_GROUP" ]; then
+            echo "::error::Resource group not set. Either pass resourceGroup input when dispatching manually, or set the AZURE_RESOURCE_GROUP repository secret."
+            exit 1
+          fi
+          echo "Deploying to resource group: $RESOURCE_GROUP"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
