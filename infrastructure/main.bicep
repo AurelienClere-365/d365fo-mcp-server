@@ -32,9 +32,9 @@ param storageSku string = 'Standard_LRS'
 @description('Comma-separated label languages to index. Each language adds ~125 MB. Examples: en-US,cs,de  or  en-US')
 param labelLanguages string = 'en-US,cs,sk,de'
 
-var appServicePlanName = 'asp-${appName}'
-var appServiceName = 'app-${appName}-${uniqueString(resourceGroup().id)}'
-var storageAccountName = 'st${replace(appName, '-', '')}${uniqueString(resourceGroup().id)}'
+var appServicePlanName = '${appName}-plan'
+var appServiceName = appName
+var storageAccountName = replace(appName, '-', '')
 // B-tier uses 'Basic', P-tier uses 'PremiumV3'
 var appServiceTier = startsWith(appServiceSku, 'B') ? 'Basic' : 'PremiumV3'
 
@@ -92,17 +92,6 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-01-01' = {
   }
 }
 
-// Application Insights
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
-  name: 'appi-${appName}'
-  location: location
-  kind: 'web'
-  properties: {
-    Application_Type: 'web'
-    Request_Source: 'rest'
-  }
-}
-
 // App Service (Web App)
 resource appService 'Microsoft.Web/sites@2023-01-01' = {
   name: appServiceName
@@ -156,7 +145,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         }
         {
           name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
-          value: 'true'
+          value: 'false'
         }
         {
           name: 'WEBSITE_NODE_DEFAULT_VERSION'
@@ -184,4 +173,3 @@ output mcpEndpoint string = 'https://${appService.properties.defaultHostName}/mc
 output storageAccountName string = storageAccount.name
 output metadataContainerName string = metadataContainer.name
 output packagesContainerName string = packagesContainer.name
-output appInsightsInstrumentationKey string = appInsights.properties.InstrumentationKey

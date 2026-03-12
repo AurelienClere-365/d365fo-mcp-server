@@ -17,13 +17,6 @@ trigger:
       - 'tsconfig.json'
       - '.azure-pipelines/d365fo-mcp-app-deploy.yml'
 
-# Allow manual run from Azure DevOps UI (Queue build button)
-parameters:
-  - name: forceRedeploy
-    displayName: 'Force redeploy (even without code changes)'
-    type: boolean
-    default: false
-
 pool:
   vmImage: 'ubuntu-latest'
 
@@ -81,24 +74,6 @@ stages:
               archiveType: zip
               archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
               replaceExistingArchive: true
-              exclude: |
-                .git/**
-                .azure-pipelines/**
-                scripts/**
-                tests/**
-                test-data/**
-                coverage/**
-                src/**
-                docs/**
-                infrastructure/**
-                data/**
-                metadata/**
-                database/**
-                *.md
-                tsconfig.json
-                vitest.config.ts
-                .env*
-                .mcp.json*
 
           - task: PublishBuildArtifacts@1
             displayName: 'Publish artifact'
@@ -145,3 +120,26 @@ stages:
                     deployToSlotOrASE: false
                     enableCustomDeployment: true
                     DeploymentType: zipDeploy
+
+                # Poll /health until the app responds 200 or timeout (10 min).
+                # In read-only mode the app downloads the SQLite metadata DB from
+                # Azure Blob Storage (300–600 MB) before opening the HTTP port —
+                # this typically takes 2–5 minutes on a cold start.
+                - script: |
+                    HEALTH_URL="https://$(AZURE_APP_SERVICE_NAME).azurewebsites.net/health"
+                    echo "Waiting 30 s for App Service restart before polling..."
+                    sleep 30
+                    echo "Polling $HEALTH_URL (max 10 min, every 15 s)..."
+                    for i in $(seq 1 40); do
+                      STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL")
+                      echo "Attempt $i/40: HTTP $STATUS"
+                      if [ "$STATUS" = "200" ]; then
+                        echo "✅ Health check passed."
+                        exit 0
+                      fi
+                      sleep 15
+                    done
+                    echo "❌ Health check FAILED — app did not respond with HTTP 200 within 10 minutes."
+                    echo "   Check App Service logs: az webapp log tail --name $(AZURE_APP_SERVICE_NAME) --resource-group <rg>"
+                    exit 1
+                  displayName: 'Health check — verify /health returns 200 (10 min timeout)'
