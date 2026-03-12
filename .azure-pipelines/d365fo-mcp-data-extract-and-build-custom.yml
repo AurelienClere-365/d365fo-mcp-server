@@ -40,7 +40,7 @@ variables:
   - name: LABELS_DB_PATH
     value: './database/xpp-metadata-labels.db'
   - name: PACKAGES_PATH
-    value: '$(Build.SourcesDirectory)/Metadata'
+    value: '$(Build.SourcesDirectory)/your/path/to/metadata' // Path to the metadata files from the Git repository
   - name: MCP_SERVER_PATH
     value: '$(Pipeline.Workspace)/mcp-server'
 
