@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**42 AI tools that know every X++ class, table, method, and EDT in your D365FO codebase**
+**43 AI tools that know every X++ class, table, method, and EDT in your D365FO codebase**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24.0.0-brightgreen.svg)](https://nodejs.org/)
@@ -91,7 +91,7 @@ Copy-Item -Path ".github" -Destination "C:\source\repos\" -Recurse
 
 ---
 
-## What Copilot can do — 42 X++ tools
+## What Copilot can do — 43 X++ tools
 
 ### Workspace & Diagnostics
 | Ask Copilot | Tool used |
@@ -162,7 +162,7 @@ Host on Azure App Service so the whole team shares one instance — nobody needs
 | Resource | Configuration | Monthly cost |
 |----------|---------------|-------------|
 | App Service Basic B3 | 4 vCPU, 7 GB RAM | ~$52 |
-| Blob Storage | ~3.5 GB (symbols + labels) | ~$3 |
+| Blob Storage | ~2.5–3.5 GB (symbols + labels, without/with UnitTest models) | ~$3 |
 | Azure Managed Redis (optional) Basic B0 | 2 vCPU, 0.5 GB Cache | ~$27 |
 | **Total without Redis** | | **~$55 / month** |
 

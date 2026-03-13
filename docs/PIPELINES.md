@@ -59,7 +59,7 @@ xpp-metadata/
 │       ├── YourModel2/
 │       └── ...
 └── database/
-    ├── xpp-metadata.db     # Compiled symbols database (~3 GB)
+    ├── xpp-metadata.db     # Compiled symbols database (~2 GB without UnitTest models, ~3 GB with)
     └── xpp-metadata-labels.db  # Compiled labels database (~500 MB for 4 languages)
 ```
 
@@ -440,7 +440,7 @@ env:
 
 **Storage Costs:**
 - Metadata: ~2-3 GB → ~$0.05/month
-- Database: ~3 GB → ~$0.06/month
+- Database: ~2–3 GB (without/with UnitTest models) → ~$0.04–0.06/month
 - PackagesLocalDirectory.zip: ~5-10 GB → ~$0.15/month
 - Total: ~$0.23/month
 
@@ -460,7 +460,7 @@ env:
 - ✅ Review execution times for anomalies
 
 #### Monthly
-- ✅ Verify database size (~3.5 GB total expected: ~3 GB symbols + ~500 MB labels)
+- ✅ Verify database size (~2.5–3.5 GB total: ~2–3 GB symbols (without/with UnitTest models) + ~500 MB labels)
 - ✅ Check blob storage usage
 - ✅ Review App Service metrics
 
@@ -516,7 +516,7 @@ env:
 1. Review CUSTOM_MODELS variable
 2. Remove unnecessary models
 3. Re-run extraction
-4. Expected size: ~3.5 GB total (~3 GB symbols + ~500 MB labels)
+4. Expected size: ~2.5–3.5 GB total (~2–3 GB symbols depending on whether UnitTest models are included + ~500 MB labels)
 ```
 
 ---
