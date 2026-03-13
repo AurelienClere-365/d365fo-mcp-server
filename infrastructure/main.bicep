@@ -129,7 +129,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         }
         {
           name: 'BLOB_DATABASE_NAME'
-          value: 'databases/xpp-metadata-latest.db'
+          value: 'database/xpp-metadata.db'
         }
         {
           name: 'DB_PATH'
