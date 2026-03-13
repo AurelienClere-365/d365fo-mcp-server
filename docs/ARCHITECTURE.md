@@ -377,7 +377,7 @@ graph TB
 ## Database Schema
 
 **Dual-Database Architecture** for performance optimization:
-- **Symbols Database** (`xpp-metadata.db`, ~1-1.5 GB) — Fast symbol searches
+- **Symbols Database** (`xpp-metadata.db`, ~3 GB) — Fast symbol searches
 - **Labels Database** (`xpp-metadata-labels.db`, ~500 MB for 4 languages, up to 8 GB for all 70 languages) — Isolated label storage
 
 ### Symbols Database
@@ -939,7 +939,7 @@ graph LR
 
 ### Current Capacity
 
-- **Storage:** ~1-1.5 GB symbols database + ~500 MB labels database (4 languages) = ~2 GB total
+- **Storage:** ~3 GB symbols database + ~500 MB labels database (4 languages) = ~3.5 GB total
 - **Memory:** 1.75GB (P0v3) - ~800MB used
 - **Throughput:** 100 req/15min per IP
 - **Latency:** 

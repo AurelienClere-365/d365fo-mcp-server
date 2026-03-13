@@ -18,7 +18,7 @@
 
 GitHub Copilot is great at C#, Python, and JavaScript. It struggles with X++ because it doesn't know your D365FO codebase: method signatures, field types, which CoC extensions already exist, or how your custom ISV code is structured.
 
-This MCP server pre-indexes your entire D365FO installation — 584,799+ symbols — and makes it available to Copilot as 42 specialized tools. Copilot stops guessing and starts generating code that compiles on the first try.
+This MCP server pre-indexes your entire D365FO installation — 584,799+ symbols — and makes it available to Copilot as 43 specialized tools. Copilot stops guessing and starts generating code that compiles on the first try.
 
 ```
 ┌─────────────────────────┐   MCP / HTTP    ┌────────────────────────────────────┐
@@ -162,7 +162,7 @@ Host on Azure App Service so the whole team shares one instance — nobody needs
 | Resource | Configuration | Monthly cost |
 |----------|---------------|-------------|
 | App Service Basic B3 | 4 vCPU, 7 GB RAM | ~$52 |
-| Blob Storage | ~2 GB (symbols + labels) | ~$3 |
+| Blob Storage | ~3.5 GB (symbols + labels) | ~$3 |
 | Azure Managed Redis (optional) Basic B0 | 2 vCPU, 0.5 GB Cache | ~$27 |
 | **Total without Redis** | | **~$55 / month** |
 

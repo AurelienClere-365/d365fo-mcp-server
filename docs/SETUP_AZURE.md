@@ -45,7 +45,7 @@ Developer's Windows VM
 
 | Resource | Purpose | Minimum SKU |
 |----------|---------|------------|
-| Azure Blob Storage | Stores `xpp-metadata.db` (~1–1.5 GB) and labels database (~500 MB) | Standard LRS |
+| Azure Blob Storage | Stores `xpp-metadata.db` (~3 GB) and labels database (~500 MB) | Standard LRS |
 | Azure App Service Plan | Hosts the Node.js server | B3 (dev/test), P0v3 (production) |
 | Azure App Service (Web App) | Runs the MCP server | Linux, Node 24 LTS |
 | Azure Managed Redis | Optional — speeds up repeated queries | B0 Basic or higher |
