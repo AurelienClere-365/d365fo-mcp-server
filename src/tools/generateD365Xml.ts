@@ -1100,51 +1100,155 @@ ${defaultParamGroupXml}
   }
 
   static generateAxTableExtensionXml(name: string, properties?: Record<string, any>): string {
-    // Build <Fields> block — extension fields use <AxTableField xmlns="" i:type="...">
-    // Field spec: { name, edt?, enumType?, label?, mandatory?, fieldType? }
-    // fieldType overrides auto-detection; enumType implies AxTableFieldEnum
+    // ── Fields ───────────────────────────────────────────────────────────────
     const fieldSpecs: Array<{
-      name: string;
-      edt?: string;
-      enumType?: string;
-      label?: string;
-      mandatory?: boolean;
-      fieldType?: string;
+      name: string; edt?: string; enumType?: string; label?: string; mandatory?: boolean; fieldType?: string;
     }> = Array.isArray(properties?.fields) ? properties.fields : [];
-
     let fieldsXml: string;
     if (fieldSpecs.length === 0) {
       fieldsXml = '\t<Fields />';
     } else {
       fieldsXml = '\t<Fields>\n';
       for (const f of fieldSpecs) {
-        // Determine i:type: explicit fieldType wins; enum implied by enumType; default String
         const iType = f.fieldType ?? (f.enumType ? 'AxTableFieldEnum' : 'AxTableFieldString');
         fieldsXml += `\t\t<AxTableField xmlns=""\n\t\t\ti:type="${iType}">\n`;
         fieldsXml += `\t\t\t<Name>${f.name}</Name>\n`;
-        if (f.edt)        fieldsXml += `\t\t\t<ExtendedDataType>${f.edt}</ExtendedDataType>\n`;
-        if (f.label)      fieldsXml += `\t\t\t<Label>${f.label}</Label>\n`;
-        if (f.mandatory)  fieldsXml += `\t\t\t<Mandatory>Yes</Mandatory>\n`;
-        if (f.enumType)   fieldsXml += `\t\t\t<EnumType>${f.enumType}</EnumType>\n`;
+        if (f.edt)       fieldsXml += `\t\t\t<ExtendedDataType>${f.edt}</ExtendedDataType>\n`;
+        if (f.label)     fieldsXml += `\t\t\t<Label>${f.label}</Label>\n`;
+        if (f.mandatory) fieldsXml += `\t\t\t<Mandatory>Yes</Mandatory>\n`;
+        if (f.enumType)  fieldsXml += `\t\t\t<EnumType>${f.enumType}</EnumType>\n`;
         fieldsXml += `\t\t</AxTableField>\n`;
       }
       fieldsXml += '\t</Fields>';
     }
 
+    // ── FieldGroups ──────────────────────────────────────────────────────────
+    const fgSpecs: Array<{ name: string; label?: string; fields?: string[] }> =
+      Array.isArray(properties?.fieldGroups) ? properties.fieldGroups : [];
+    let fieldGroupsXml: string;
+    if (fgSpecs.length === 0) {
+      fieldGroupsXml = '\t<FieldGroups />';
+    } else {
+      fieldGroupsXml = '\t<FieldGroups>\n';
+      for (const fg of fgSpecs) {
+        fieldGroupsXml += `\t\t<AxTableFieldGroup>\n\t\t\t<Name>${fg.name}</Name>\n`;
+        if (fg.label) fieldGroupsXml += `\t\t\t<Label>${fg.label}</Label>\n`;
+        const fgFields = Array.isArray(fg.fields) ? fg.fields : [];
+        if (fgFields.length === 0) {
+          fieldGroupsXml += `\t\t\t<Fields />\n`;
+        } else {
+          fieldGroupsXml += `\t\t\t<Fields>\n`;
+          for (const df of fgFields) fieldGroupsXml += `\t\t\t\t<AxTableFieldGroupField>\n\t\t\t\t\t<DataField>${df}</DataField>\n\t\t\t\t</AxTableFieldGroupField>\n`;
+          fieldGroupsXml += `\t\t\t</Fields>\n`;
+        }
+        fieldGroupsXml += `\t\t</AxTableFieldGroup>\n`;
+      }
+      fieldGroupsXml += '\t</FieldGroups>';
+    }
+
+    // ── FieldGroupExtensions ─────────────────────────────────────────────────
+    const fgeSpecs: Array<{ name: string; fields: string[] }> =
+      Array.isArray(properties?.fieldGroupExtensions) ? properties.fieldGroupExtensions : [];
+    let fieldGroupExtensionsXml: string;
+    if (fgeSpecs.length === 0) {
+      fieldGroupExtensionsXml = '\t<FieldGroupExtensions />';
+    } else {
+      fieldGroupExtensionsXml = '\t<FieldGroupExtensions>\n';
+      for (const fge of fgeSpecs) {
+        fieldGroupExtensionsXml += `\t\t<AxTableFieldGroupExtension>\n\t\t\t<Name>${fge.name}</Name>\n`;
+        const fgeFields = Array.isArray(fge.fields) ? fge.fields : [];
+        if (fgeFields.length === 0) {
+          fieldGroupExtensionsXml += `\t\t\t<Fields />\n`;
+        } else {
+          fieldGroupExtensionsXml += `\t\t\t<Fields>\n`;
+          for (const df of fgeFields) fieldGroupExtensionsXml += `\t\t\t\t<AxTableFieldGroupField>\n\t\t\t\t\t<DataField>${df}</DataField>\n\t\t\t\t</AxTableFieldGroupField>\n`;
+          fieldGroupExtensionsXml += `\t\t\t</Fields>\n`;
+        }
+        fieldGroupExtensionsXml += `\t\t</AxTableFieldGroupExtension>\n`;
+      }
+      fieldGroupExtensionsXml += '\t</FieldGroupExtensions>';
+    }
+
+    // ── Indexes ──────────────────────────────────────────────────────────────
+    const idxSpecs: Array<{
+      name: string; fields: Array<{ fieldName: string; direction?: string }>;
+      allowDuplicates?: boolean; alternateKey?: boolean;
+    }> = Array.isArray(properties?.indexes) ? properties.indexes : [];
+    let indexesXml: string;
+    if (idxSpecs.length === 0) {
+      indexesXml = '\t<Indexes />';
+    } else {
+      indexesXml = '\t<Indexes>\n';
+      for (const idx of idxSpecs) {
+        indexesXml += `\t\t<AxTableIndex>\n\t\t\t<Name>${idx.name}</Name>\n`;
+        if (idx.allowDuplicates !== undefined) indexesXml += `\t\t\t<AllowDuplicates>${idx.allowDuplicates ? 'Yes' : 'No'}</AllowDuplicates>\n`;
+        if (idx.alternateKey)                 indexesXml += `\t\t\t<AlternateKey>Yes</AlternateKey>\n`;
+        const idxFields = Array.isArray(idx.fields) ? idx.fields : [];
+        if (idxFields.length === 0) {
+          indexesXml += `\t\t\t<Fields />\n`;
+        } else {
+          indexesXml += `\t\t\t<Fields>\n`;
+          for (const f of idxFields) {
+            indexesXml += `\t\t\t\t<AxTableIndexField>\n\t\t\t\t\t<DataField>${f.fieldName}</DataField>\n`;
+            if (f.direction) indexesXml += `\t\t\t\t\t<Direction>${f.direction}</Direction>\n`;
+            indexesXml += `\t\t\t\t</AxTableIndexField>\n`;
+          }
+          indexesXml += `\t\t\t</Fields>\n`;
+        }
+        indexesXml += `\t\t</AxTableIndex>\n`;
+      }
+      indexesXml += '\t</Indexes>';
+    }
+
+    // ── Relations ────────────────────────────────────────────────────────────
+    const relSpecs: Array<{
+      name: string; relatedTable: string; constraints: Array<{ fieldName: string; relatedFieldName: string }>;
+      cardinality?: string; relatedTableCardinality?: string; relationshipType?: string;
+    }> = Array.isArray(properties?.relations) ? properties.relations : [];
+    let relationsXml: string;
+    if (relSpecs.length === 0) {
+      relationsXml = '\t<Relations />';
+    } else {
+      relationsXml = '\t<Relations>\n';
+      for (const rel of relSpecs) {
+        relationsXml += `\t\t<AxTableRelation>\n\t\t\t<Name>${rel.name}</Name>\n`;
+        relationsXml += `\t\t\t<Cardinality>${rel.cardinality || 'ZeroMore'}</Cardinality>\n`;
+        relationsXml += `\t\t\t<RelatedTable>${rel.relatedTable}</RelatedTable>\n`;
+        relationsXml += `\t\t\t<RelatedTableCardinality>${rel.relatedTableCardinality || 'ExactlyOne'}</RelatedTableCardinality>\n`;
+        relationsXml += `\t\t\t<RelationshipType>${rel.relationshipType || 'Association'}</RelationshipType>\n`;
+        const constraints = Array.isArray(rel.constraints) ? rel.constraints : [];
+        if (constraints.length === 0) {
+          relationsXml += `\t\t\t<Constraints />\n`;
+        } else {
+          relationsXml += `\t\t\t<Constraints>\n`;
+          for (const c of constraints) {
+            relationsXml += `\t\t\t\t<AxTableRelationConstraint xmlns="" i:type="AxTableRelationConstraintField">\n`;
+            relationsXml += `\t\t\t\t\t<Name>${c.fieldName}</Name>\n`;
+            relationsXml += `\t\t\t\t\t<Field>${c.fieldName}</Field>\n`;
+            relationsXml += `\t\t\t\t\t<RelatedField>${c.relatedFieldName}</RelatedField>\n`;
+            relationsXml += `\t\t\t\t</AxTableRelationConstraint>\n`;
+          }
+          relationsXml += `\t\t\t</Constraints>\n`;
+        }
+        relationsXml += `\t\t</AxTableRelation>\n`;
+      }
+      relationsXml += '\t</Relations>';
+    }
+
     return `<?xml version="1.0" encoding="utf-8"?>
 <AxTableExtension xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
 \t<Name>${name}</Name>
-\t<FieldGroupExtensions />
-\t<FieldGroups />
+${fieldGroupExtensionsXml}
+${fieldGroupsXml}
 \t<FieldModifications />
 ${fieldsXml}
 \t<FullTextIndexes />
-\t<Indexes />
+${indexesXml}
 \t<Mappings />
 \t<PropertyModifications />
 \t<RelationExtensions />
 \t<RelationModifications />
-\t<Relations />
+${relationsXml}
 </AxTableExtension>`;
   }
 

@@ -85,7 +85,17 @@ const ModifyD365FileArgsSchema = z.object({
     'security-privilege', 'security-duty', 'security-role',
   ]).describe('Type of D365FO object'),
   objectName: z.string().describe('Name of the object to modify'),
-  operation: z.enum(['add-method', 'add-field', 'modify-field', 'rename-field', 'replace-all-fields', 'modify-property', 'remove-method', 'remove-field', 'add-control']).describe('Operation to perform'),
+  operation: z.enum([
+    'add-method', 'remove-method',
+    'add-field', 'modify-field', 'rename-field', 'replace-all-fields', 'remove-field',
+    'add-index', 'remove-index',
+    'add-relation', 'remove-relation',
+    'add-field-group', 'remove-field-group', 'add-field-to-field-group',
+    'add-field-modification',
+    'add-data-source',
+    'modify-property',
+    'add-control',
+  ]).describe('Operation to perform'),
 
   // For add-control (form-extension only)
   controlName: z.string().optional().describe(
@@ -149,7 +159,44 @@ const ModifyD365FileArgsSchema = z.object({
     'Example: { name: "TransQty", edt: "InventQty", type: "Real" }. ' +
     'All existing fields are replaced atomically.'
   ),
-  
+
+  // For add-index / remove-index (table, table-extension)
+  indexName: z.string().optional().describe('Index name for add-index / remove-index.'),
+  indexFields: z.array(z.object({
+    fieldName: z.string(),
+    direction: z.enum(['Asc', 'Desc']).optional(),
+  })).optional().describe('Fields that make up the index. Required for add-index.'),
+  indexAllowDuplicates: z.boolean().optional().describe('Whether index allows duplicates (default: false = unique).'),
+  indexAlternateKey: z.boolean().optional().describe('Whether index is an alternate key.'),
+  indexEnabled: z.boolean().optional().describe('Whether index is enabled (default: true).'),
+
+  // For add-relation / remove-relation (table, table-extension)
+  relationName: z.string().optional().describe('Relation name for add-relation / remove-relation.'),
+  relatedTable: z.string().optional().describe('Name of the related (foreign key) table.'),
+  relationConstraints: z.array(z.object({
+    fieldName: z.string().describe('Local field name.'),
+    relatedFieldName: z.string().describe('Field name in the related table.'),
+  })).optional().describe('Field constraints for the relation (field = relatedField pairs).'),
+  relationCardinality: z.string().optional().describe('Cardinality on local side: ZeroMore | ZeroOne | ExactlyOne (default: ZeroMore).'),
+  relatedTableCardinality: z.string().optional().describe('Cardinality on related side: ZeroMore | ZeroOne | ExactlyOne (default: ExactlyOne).'),
+  relationshipType: z.string().optional().describe('Relationship type: Association | Composition | Aggregation | Link | Specialization (default: Association).'),
+
+  // For add-field-group / remove-field-group / add-field-to-field-group (table, table-extension)
+  fieldGroupName: z.string().optional().describe('Field group name. For add-field-to-field-group in a table-extension: name of the group (new or existing base-table group).'),
+  fieldGroupFields: z.array(z.string()).optional().describe('Initial field names for add-field-group. Can be empty — add fields later with add-field-to-field-group.'),
+  fieldGroupLabel: z.string().optional().describe('Label for add-field-group (optional).'),
+  extendBaseFieldGroup: z.boolean().optional().describe(
+    'Only for table-extension add-field-to-field-group: when true, adds the field to <FieldGroupExtensions> ' +
+    '(extending an existing base-table field group). When false/omitted, adds to <FieldGroups> (a new group defined in the extension).'
+  ),
+
+  // For add-field-modification (table-extension only)
+  // uses fieldName, fieldLabel, fieldMandatory (already defined above)
+
+  // For add-data-source (form-extension)
+  dataSourceName: z.string().optional().describe('Data source reference name for add-data-source (e.g. "MyTable_1").'),
+  dataSourceTable: z.string().optional().describe('Base table name for add-data-source (e.g. "MyTable").'),
+
   // For modify-property
   propertyPath: z.string().optional().describe(
     'Top-level property name to set. For tables: TableGroup, TitleField1, TitleField2, TableType (TempDB/RegularTable/InMemory), ' +
@@ -284,7 +331,52 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
         modified = await addControl(xmlObj, objectType, args);
         message = `Added control "${args.controlName}" to ${objectType} "${objectName}" (parent: "${args.parentControl}")`;
         break;
-      
+
+      case 'add-index':
+        modified = await addIndex(xmlObj, objectType, args);
+        message = `Added index "${args.indexName}" to ${objectType} "${objectName}"`;
+        break;
+
+      case 'remove-index':
+        modified = await removeIndex(xmlObj, objectType, args);
+        message = `Removed index "${args.indexName}" from ${objectType} "${objectName}"`;
+        break;
+
+      case 'add-relation':
+        modified = await addRelation(xmlObj, objectType, args);
+        message = `Added relation "${args.relationName}" to ${objectType} "${objectName}"`;
+        break;
+
+      case 'remove-relation':
+        modified = await removeRelation(xmlObj, objectType, args);
+        message = `Removed relation "${args.relationName}" from ${objectType} "${objectName}"`;
+        break;
+
+      case 'add-field-group':
+        modified = await addFieldGroup(xmlObj, objectType, args);
+        message = `Added field group "${args.fieldGroupName}" to ${objectType} "${objectName}"`;
+        break;
+
+      case 'remove-field-group':
+        modified = await removeFieldGroup(xmlObj, objectType, args);
+        message = `Removed field group "${args.fieldGroupName}" from ${objectType} "${objectName}"`;
+        break;
+
+      case 'add-field-to-field-group':
+        modified = await addFieldToFieldGroup(xmlObj, objectType, args);
+        message = `Added field "${args.fieldName}" to field group "${args.fieldGroupName}" in ${objectType} "${objectName}"`;
+        break;
+
+      case 'add-field-modification':
+        modified = await addFieldModification(xmlObj, objectType, args);
+        message = `Applied field modification for "${args.fieldName}" in ${objectType} "${objectName}"`;
+        break;
+
+      case 'add-data-source':
+        modified = await addDataSource(xmlObj, objectType, args);
+        message = `Added data source reference "${args.dataSourceName}" to ${objectType} "${objectName}"`;
+        break;
+
       default:
         throw new Error(`Unsupported operation: ${operation}`);
     }
@@ -793,8 +885,8 @@ async function addField(xmlObj: any, objectType: string, args: any): Promise<boo
     throw new Error('fieldType is required for add-field operation');
   }
 
-  if (objectType !== 'table') {
-    throw new Error('add-field operation is only supported for tables');
+  if (objectType !== 'table' && objectType !== 'table-extension') {
+    throw new Error('add-field operation is only supported for table and table-extension');
   }
 
   const rootKey = getRootKey(objectType);
@@ -861,8 +953,8 @@ async function modifyField(xmlObj: any, objectType: string, args: any): Promise<
     throw new Error('At least one of fieldType, fieldMandatory or fieldLabel is required for modify-field');
   }
 
-  if (objectType !== 'table') {
-    throw new Error('modify-field operation is only supported for tables');
+  if (objectType !== 'table' && objectType !== 'table-extension') {
+    throw new Error('modify-field operation is only supported for table and table-extension');
   }
 
   const rootKey = getRootKey(objectType);
@@ -922,7 +1014,7 @@ async function renameField(xmlObj: any, objectType: string, args: any): Promise<
 
   if (!fieldName) throw new Error('fieldName is required for rename-field operation');
   if (!fieldNewName) throw new Error('fieldNewName is required for rename-field operation');
-  if (objectType !== 'table') throw new Error('rename-field operation is only supported for tables');
+  if (objectType !== 'table' && objectType !== 'table-extension') throw new Error('rename-field operation is only supported for table and table-extension');
 
   const rootKey = getRootKey(objectType);
   const root = xmlObj[rootKey];
@@ -989,6 +1081,22 @@ async function renameField(xmlObj: any, objectType: string, args: any): Promise<
   };
   fixFieldGroupRefs(fieldName, fieldNewName, root.FieldGroups?.[0]?.AxTableFieldGroup);
 
+  // --- Fix FieldGroupExtensions DataField references (table-extension only) ---
+  if (objectType === 'table-extension') {
+    const fgExts = root.FieldGroupExtensions?.[0]?.AxTableFieldGroupExtension;
+    if (fgExts) {
+      const extList = Array.isArray(fgExts) ? fgExts : [fgExts];
+      for (const ext of extList) {
+        const fgFields = ext.Fields?.[0]?.AxTableFieldGroupField;
+        if (!Array.isArray(fgFields)) continue;
+        for (const fgField of fgFields) {
+          const cur = Array.isArray(fgField.DataField) ? fgField.DataField[0] : fgField.DataField;
+          if (cur === fieldName) fgField.DataField = [fieldNewName];
+        }
+      }
+    }
+  }
+
   // --- Fix TitleField1/TitleField2 ---
   const tf1 = Array.isArray(root.TitleField1) ? root.TitleField1[0] : root.TitleField1;
   if (tf1 === fieldName) root.TitleField1 = [fieldNewName];
@@ -1008,7 +1116,7 @@ async function replaceAllFields(xmlObj: any, objectType: string, args: any): Pro
   if (!fields || fields.length === 0) {
     throw new Error('fields array is required and must not be empty for replace-all-fields operation');
   }
-  if (objectType !== 'table') throw new Error('replace-all-fields operation is only supported for tables');
+  if (objectType !== 'table' && objectType !== 'table-extension') throw new Error('replace-all-fields operation is only supported for table and table-extension');
 
   const rootKey = getRootKey(objectType);
   const root = xmlObj[rootKey];
@@ -1092,8 +1200,23 @@ async function replaceAllFields(xmlObj: any, objectType: string, args: any): Pro
         for (const fgField of fgFields) {
           const cur = Array.isArray(fgField.DataField) ? fgField.DataField[0] : fgField.DataField;
           const mapped = cur ? oldToNew.get(cur) : undefined;
-          if (mapped) {
-            fgField.DataField = [mapped];
+          if (mapped) fgField.DataField = [mapped];
+        }
+      }
+    }
+
+    // Repair FieldGroupExtensions DataField references (table-extension only)
+    if (objectType === 'table-extension') {
+      const fgExts = root.FieldGroupExtensions?.[0]?.AxTableFieldGroupExtension;
+      if (fgExts) {
+        const extList = Array.isArray(fgExts) ? fgExts : [fgExts];
+        for (const ext of extList) {
+          const fgFields = ext.Fields?.[0]?.AxTableFieldGroupField;
+          if (!Array.isArray(fgFields)) continue;
+          for (const fgField of fgFields) {
+            const cur = Array.isArray(fgField.DataField) ? fgField.DataField[0] : fgField.DataField;
+            const mapped = cur ? oldToNew.get(cur) : undefined;
+            if (mapped) fgField.DataField = [mapped];
           }
         }
       }
@@ -1113,8 +1236,8 @@ async function removeField(xmlObj: any, objectType: string, args: any): Promise<
     throw new Error('fieldName is required for remove-field operation');
   }
 
-  if (objectType !== 'table') {
-    throw new Error('remove-field operation is only supported for tables');
+  if (objectType !== 'table' && objectType !== 'table-extension') {
+    throw new Error('remove-field operation is only supported for table and table-extension');
   }
 
   const rootKey = getRootKey(objectType);
@@ -1160,6 +1283,22 @@ async function removeField(xmlObj: any, objectType: string, args: any): Promise<
           const df = Array.isArray(entry.DataField) ? entry.DataField[0] : entry.DataField;
           return df !== fieldName;
         });
+      }
+    }
+  }
+
+  // Also remove from FieldGroupExtensions (table-extension only)
+  if (objectType === 'table-extension') {
+    const fgExts = root.FieldGroupExtensions?.[0]?.AxTableFieldGroupExtension;
+    if (Array.isArray(fgExts)) {
+      for (const ext of fgExts) {
+        const fgFields = ext.Fields?.[0]?.AxTableFieldGroupField;
+        if (Array.isArray(fgFields)) {
+          ext.Fields[0].AxTableFieldGroupField = fgFields.filter((entry: any) => {
+            const df = Array.isArray(entry.DataField) ? entry.DataField[0] : entry.DataField;
+            return df !== fieldName;
+          });
+        }
       }
     }
   }
@@ -1350,6 +1489,324 @@ async function addControl(xmlObj: any, objectType: string, args: any): Promise<b
   return true;
 }
 
+// ─── Helper: ensure array container ─────────────────────────────────────────
+function ensureArrayContainer(root: any, key: string, childKey: string): any {
+  const raw = root[key];
+  const isEmpty =
+    !raw || raw === '' ||
+    (Array.isArray(raw) && (raw.length === 0 || raw[0] === '' || raw[0] == null));
+  if (isEmpty) {
+    root[key] = [{ [childKey]: [] }];
+  }
+  const container = Array.isArray(root[key]) ? root[key][0] : root[key];
+  if (!container[childKey]) {
+    container[childKey] = [];
+  } else if (!Array.isArray(container[childKey])) {
+    container[childKey] = [container[childKey]];
+  }
+  return container;
+}
+
+/**
+ * Add an index to a table or table-extension.
+ */
+async function addIndex(xmlObj: any, objectType: string, args: any): Promise<boolean> {
+  if (objectType !== 'table' && objectType !== 'table-extension') {
+    throw new Error('add-index is only supported for table and table-extension');
+  }
+  const { indexName, indexFields, indexAllowDuplicates, indexAlternateKey, indexEnabled } = args;
+  if (!indexName) throw new Error('indexName is required for add-index');
+  if (!indexFields || (indexFields as any[]).length === 0) throw new Error('indexFields is required for add-index');
+
+  const root = xmlObj[getRootKey(objectType)];
+  if (!root) throw new Error(`Invalid XML structure: root element <${getRootKey(objectType)}> not found`);
+
+  const container = ensureArrayContainer(root, 'Indexes', 'AxTableIndex');
+
+  const indexFieldNodes = (indexFields as Array<{ fieldName: string; direction?: string }>).map(f => {
+    const node: any = { DataField: [f.fieldName] };
+    if (f.direction) node.Direction = [f.direction];
+    return node;
+  });
+
+  const newIndex: any = {
+    Name: [indexName],
+    Fields: [{ AxTableIndexField: indexFieldNodes }],
+  };
+  if (indexAllowDuplicates !== undefined) newIndex.AllowDuplicates = [indexAllowDuplicates ? 'Yes' : 'No'];
+  if (indexAlternateKey !== undefined) newIndex.AlternateKey = [indexAlternateKey ? 'Yes' : 'No'];
+  if (indexEnabled === false) newIndex.Enabled = ['No'];
+
+  container.AxTableIndex.push(newIndex);
+  return true;
+}
+
+/**
+ * Remove an index from a table or table-extension.
+ */
+async function removeIndex(xmlObj: any, objectType: string, args: any): Promise<boolean> {
+  if (objectType !== 'table' && objectType !== 'table-extension') {
+    throw new Error('remove-index is only supported for table and table-extension');
+  }
+  const { indexName } = args;
+  if (!indexName) throw new Error('indexName is required for remove-index');
+
+  const root = xmlObj[getRootKey(objectType)];
+  if (!root) throw new Error(`Invalid XML structure: root element <${getRootKey(objectType)}> not found`);
+
+  const raw = root.Indexes;
+  const isEmpty = !raw || raw === '' || (Array.isArray(raw) && (raw.length === 0 || raw[0] === '' || raw[0] == null));
+  if (isEmpty) throw new Error('No indexes found');
+
+  const container = Array.isArray(root.Indexes) ? root.Indexes[0] : root.Indexes;
+  if (!Array.isArray(container.AxTableIndex)) {
+    container.AxTableIndex = container.AxTableIndex ? [container.AxTableIndex] : [];
+  }
+  const idx = container.AxTableIndex.findIndex((i: any) => (Array.isArray(i.Name) ? i.Name[0] : i.Name) === indexName);
+  if (idx === -1) throw new Error(`Index "${indexName}" not found`);
+  container.AxTableIndex.splice(idx, 1);
+  return true;
+}
+
+/**
+ * Add a relation to a table or table-extension.
+ */
+async function addRelation(xmlObj: any, objectType: string, args: any): Promise<boolean> {
+  if (objectType !== 'table' && objectType !== 'table-extension') {
+    throw new Error('add-relation is only supported for table and table-extension');
+  }
+  const {
+    relationName, relatedTable, relationConstraints,
+    relationCardinality, relatedTableCardinality, relationshipType,
+  } = args;
+  if (!relationName) throw new Error('relationName is required for add-relation');
+  if (!relatedTable) throw new Error('relatedTable is required for add-relation');
+
+  const root = xmlObj[getRootKey(objectType)];
+  if (!root) throw new Error(`Invalid XML structure: root element <${getRootKey(objectType)}> not found`);
+
+  const container = ensureArrayContainer(root, 'Relations', 'AxTableRelation');
+
+  const constraintNodes = ((relationConstraints || []) as Array<{ fieldName: string; relatedFieldName: string }>).map(c => ({
+    '$': { xmlns: '', 'i:type': 'AxTableRelationConstraintField' },
+    Name: [c.fieldName],
+    Field: [c.fieldName],
+    RelatedField: [c.relatedFieldName],
+  }));
+
+  const newRelation: any = {
+    Name: [relationName],
+    Cardinality: [relationCardinality || 'ZeroMore'],
+    RelatedTable: [relatedTable],
+    RelatedTableCardinality: [relatedTableCardinality || 'ExactlyOne'],
+    RelationshipType: [relationshipType || 'Association'],
+    Constraints: constraintNodes.length > 0 ? [{ AxTableRelationConstraint: constraintNodes }] : [''],
+  };
+
+  container.AxTableRelation.push(newRelation);
+  return true;
+}
+
+/**
+ * Remove a relation from a table or table-extension.
+ */
+async function removeRelation(xmlObj: any, objectType: string, args: any): Promise<boolean> {
+  if (objectType !== 'table' && objectType !== 'table-extension') {
+    throw new Error('remove-relation is only supported for table and table-extension');
+  }
+  const { relationName } = args;
+  if (!relationName) throw new Error('relationName is required for remove-relation');
+
+  const root = xmlObj[getRootKey(objectType)];
+  if (!root) throw new Error(`Invalid XML structure: root element <${getRootKey(objectType)}> not found`);
+
+  const raw = root.Relations;
+  const isEmpty = !raw || raw === '' || (Array.isArray(raw) && (raw.length === 0 || raw[0] === '' || raw[0] == null));
+  if (isEmpty) throw new Error('No relations found');
+
+  const container = Array.isArray(root.Relations) ? root.Relations[0] : root.Relations;
+  if (!Array.isArray(container.AxTableRelation)) {
+    container.AxTableRelation = container.AxTableRelation ? [container.AxTableRelation] : [];
+  }
+  const idx = container.AxTableRelation.findIndex((r: any) => (Array.isArray(r.Name) ? r.Name[0] : r.Name) === relationName);
+  if (idx === -1) throw new Error(`Relation "${relationName}" not found`);
+  container.AxTableRelation.splice(idx, 1);
+  return true;
+}
+
+/**
+ * Add a field group to a table or table-extension.
+ */
+async function addFieldGroup(xmlObj: any, objectType: string, args: any): Promise<boolean> {
+  if (objectType !== 'table' && objectType !== 'table-extension') {
+    throw new Error('add-field-group is only supported for table and table-extension');
+  }
+  const { fieldGroupName, fieldGroupFields, fieldGroupLabel } = args;
+  if (!fieldGroupName) throw new Error('fieldGroupName is required for add-field-group');
+
+  const root = xmlObj[getRootKey(objectType)];
+  if (!root) throw new Error(`Invalid XML structure: root element <${getRootKey(objectType)}> not found`);
+
+  const container = ensureArrayContainer(root, 'FieldGroups', 'AxTableFieldGroup');
+
+  const fgFieldNodes = ((fieldGroupFields || []) as string[]).map((f: string) => ({ DataField: [f] }));
+
+  const newFg: any = {
+    Name: [fieldGroupName],
+    Fields: fgFieldNodes.length > 0 ? [{ AxTableFieldGroupField: fgFieldNodes }] : [''],
+  };
+  if (fieldGroupLabel) newFg.Label = [fieldGroupLabel];
+
+  container.AxTableFieldGroup.push(newFg);
+  return true;
+}
+
+/**
+ * Remove a field group from a table or table-extension.
+ */
+async function removeFieldGroup(xmlObj: any, objectType: string, args: any): Promise<boolean> {
+  if (objectType !== 'table' && objectType !== 'table-extension') {
+    throw new Error('remove-field-group is only supported for table and table-extension');
+  }
+  const { fieldGroupName } = args;
+  if (!fieldGroupName) throw new Error('fieldGroupName is required for remove-field-group');
+
+  const root = xmlObj[getRootKey(objectType)];
+  if (!root) throw new Error(`Invalid XML structure: root element <${getRootKey(objectType)}> not found`);
+
+  const raw = root.FieldGroups;
+  const isEmpty = !raw || raw === '' || (Array.isArray(raw) && (raw.length === 0 || raw[0] === '' || raw[0] == null));
+  if (isEmpty) throw new Error('No field groups found');
+
+  const container = Array.isArray(root.FieldGroups) ? root.FieldGroups[0] : root.FieldGroups;
+  if (!Array.isArray(container.AxTableFieldGroup)) {
+    container.AxTableFieldGroup = container.AxTableFieldGroup ? [container.AxTableFieldGroup] : [];
+  }
+  const idx = container.AxTableFieldGroup.findIndex((fg: any) => (Array.isArray(fg.Name) ? fg.Name[0] : fg.Name) === fieldGroupName);
+  if (idx === -1) throw new Error(`Field group "${fieldGroupName}" not found`);
+  container.AxTableFieldGroup.splice(idx, 1);
+  return true;
+}
+
+/**
+ * Add a field to an existing field group (or extend a base-table field group via FieldGroupExtensions).
+ * For table-extension with extendBaseFieldGroup=true: targets <FieldGroupExtensions>.
+ * Otherwise: targets <FieldGroups> (both table and table-extension).
+ */
+async function addFieldToFieldGroup(xmlObj: any, objectType: string, args: any): Promise<boolean> {
+  if (objectType !== 'table' && objectType !== 'table-extension') {
+    throw new Error('add-field-to-field-group is only supported for table and table-extension');
+  }
+  const { fieldGroupName, fieldName, extendBaseFieldGroup } = args;
+  if (!fieldGroupName) throw new Error('fieldGroupName is required for add-field-to-field-group');
+  if (!fieldName) throw new Error('fieldName is required for add-field-to-field-group');
+
+  const root = xmlObj[getRootKey(objectType)];
+  if (!root) throw new Error(`Invalid XML structure: root element <${getRootKey(objectType)}> not found`);
+
+  if (objectType === 'table-extension' && extendBaseFieldGroup) {
+    // Target FieldGroupExtensions — adds a field to a base-table field group
+    const container = ensureArrayContainer(root, 'FieldGroupExtensions', 'AxTableFieldGroupExtension');
+    let ext = container.AxTableFieldGroupExtension.find(
+      (e: any) => (Array.isArray(e.Name) ? e.Name[0] : e.Name) === fieldGroupName
+    );
+    if (!ext) {
+      ext = { Name: [fieldGroupName], Fields: [{ AxTableFieldGroupField: [] }] };
+      container.AxTableFieldGroupExtension.push(ext);
+    }
+    // Ensure Fields container
+    const rawF = ext.Fields;
+    const fEmpty = !rawF || rawF === '' || (Array.isArray(rawF) && (rawF.length === 0 || rawF[0] === '' || rawF[0] == null));
+    if (fEmpty) ext.Fields = [{ AxTableFieldGroupField: [] }];
+    const fc = Array.isArray(ext.Fields) ? ext.Fields[0] : ext.Fields;
+    if (!fc.AxTableFieldGroupField) fc.AxTableFieldGroupField = [];
+    else if (!Array.isArray(fc.AxTableFieldGroupField)) fc.AxTableFieldGroupField = [fc.AxTableFieldGroupField];
+    fc.AxTableFieldGroupField.push({ DataField: [fieldName] });
+    return true;
+  }
+
+  // Target FieldGroups (new group defined in this object)
+  const raw = root.FieldGroups;
+  const isEmpty = !raw || raw === '' || (Array.isArray(raw) && (raw.length === 0 || raw[0] === '' || raw[0] == null));
+  if (isEmpty) throw new Error('No FieldGroups found. Create a group first with add-field-group.');
+
+  const container = Array.isArray(root.FieldGroups) ? root.FieldGroups[0] : root.FieldGroups;
+  if (!Array.isArray(container.AxTableFieldGroup)) {
+    container.AxTableFieldGroup = container.AxTableFieldGroup ? [container.AxTableFieldGroup] : [];
+  }
+  const fg = container.AxTableFieldGroup.find(
+    (g: any) => (Array.isArray(g.Name) ? g.Name[0] : g.Name) === fieldGroupName
+  );
+  if (!fg) throw new Error(`Field group "${fieldGroupName}" not found. Create it first with add-field-group.`);
+
+  const rawF = fg.Fields;
+  const fEmpty = !rawF || rawF === '' || (Array.isArray(rawF) && (rawF.length === 0 || rawF[0] === '' || rawF[0] == null));
+  if (fEmpty) fg.Fields = [{ AxTableFieldGroupField: [] }];
+  const fc = Array.isArray(fg.Fields) ? fg.Fields[0] : fg.Fields;
+  if (!fc.AxTableFieldGroupField) fc.AxTableFieldGroupField = [];
+  else if (!Array.isArray(fc.AxTableFieldGroupField)) fc.AxTableFieldGroupField = [fc.AxTableFieldGroupField];
+
+  fc.AxTableFieldGroupField.push({ DataField: [fieldName] });
+  return true;
+}
+
+/**
+ * Add or update a FieldModification entry in a table-extension.
+ * Use this to change properties (label, mandatory) of a field that exists in the base table.
+ */
+async function addFieldModification(xmlObj: any, objectType: string, args: any): Promise<boolean> {
+  if (objectType !== 'table-extension') {
+    throw new Error('add-field-modification is only supported for table-extension');
+  }
+  const { fieldName, fieldLabel, fieldMandatory } = args;
+  if (!fieldName) throw new Error('fieldName is required for add-field-modification');
+  if (fieldLabel === undefined && fieldMandatory === undefined) {
+    throw new Error('At least one of fieldLabel or fieldMandatory is required for add-field-modification');
+  }
+
+  const root = xmlObj['AxTableExtension'];
+  if (!root) throw new Error('Invalid XML structure: root element <AxTableExtension> not found');
+
+  const container = ensureArrayContainer(root, 'FieldModifications', 'AxTableFieldModification');
+
+  let fm = container.AxTableFieldModification.find(
+    (m: any) => (Array.isArray(m.Name) ? m.Name[0] : m.Name) === fieldName
+  );
+  if (!fm) {
+    fm = { Name: [fieldName] };
+    container.AxTableFieldModification.push(fm);
+  }
+  if (fieldLabel !== undefined) fm.Label = [fieldLabel];
+  if (fieldMandatory !== undefined) fm.Mandatory = [fieldMandatory ? 'Yes' : 'No'];
+
+  return true;
+}
+
+/**
+ * Add a data source reference to a form-extension.
+ * Creates an <AxFormDataSourceReference> entry in <DataSourceReferences>.
+ */
+async function addDataSource(xmlObj: any, objectType: string, args: any): Promise<boolean> {
+  if (objectType !== 'form-extension') {
+    throw new Error('add-data-source is only supported for form-extension');
+  }
+  const { dataSourceName, dataSourceTable } = args;
+  if (!dataSourceName) throw new Error('dataSourceName is required for add-data-source');
+  if (!dataSourceTable) throw new Error('dataSourceTable is required for add-data-source');
+
+  const root = xmlObj['AxFormExtension'];
+  if (!root) throw new Error('Invalid XML structure: root element <AxFormExtension> not found');
+
+  const container = ensureArrayContainer(root, 'DataSourceReferences', 'AxFormDataSourceReference');
+
+  container.AxFormDataSourceReference.push({
+    '$': { xmlns: '' },
+    Name: [dataSourceName],
+    DataSource: [dataSourceTable],
+  });
+  return true;
+}
+
 /**
  * Get root key for object type
  */
@@ -1430,6 +1887,17 @@ function getFieldNodeName(fieldType: string): string {
 
 export const modifyD365FileToolDefinition = {
   name: 'modify_d365fo_file',
-  description: '✏️ Edit existing D365FO XML files (AxClass, AxTable, AxForm, etc.). Supports atomic operations: add/remove methods, add/remove fields, modify properties. Use this instead of manual file editing to ensure correct XML structure.',
+  description:
+    '✏️ Edit existing D365FO XML files (AxClass, AxTable, AxTableExtension, AxForm, AxFormExtension, etc.). ' +
+    'Supports atomic operations:\n' +
+    '• Methods: add-method, remove-method (table, form, class, table-extension, class-extension)\n' +
+    '• Fields: add-field, modify-field, rename-field, replace-all-fields, remove-field (table, table-extension)\n' +
+    '• Indexes: add-index, remove-index (table, table-extension)\n' +
+    '• Relations: add-relation, remove-relation (table, table-extension)\n' +
+    '• Field groups: add-field-group, remove-field-group, add-field-to-field-group (table, table-extension)\n' +
+    '• Table-extension only: add-field-modification (modify base-table field label/mandatory)\n' +
+    '• Form-extension: add-control (UI control), add-data-source (DataSourceReference)\n' +
+    '• Any object: modify-property\n' +
+    'Always prefer this tool over replace_string_in_file for XML edits.',
   inputSchema: ModifyD365FileArgsSchema,
 };
