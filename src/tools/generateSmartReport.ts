@@ -76,6 +76,16 @@ interface GenerateSmartReportArgs {
   designStyle?: string;
   /** Copy structure from an existing report (reads fields from its DP's TmpTable) */
   copyFrom?: string;
+  /** AOT query name — when provided, DP uses query-based processReport() via this.parmQuery() */
+  aotQuery?: string;
+  /** Table name of the caller record (e.g. "CustTable") — generates parmArgs() pre-fill in Controller prePromptModifyContract() */
+  callerTableName?: string;
+  /** When true, DP extends SrsReportDataProviderPreProcess instead of SrsReportDataProviderBase */
+  preProcess?: boolean;
+  /** Controller variant: "simple" (SrsReportRunController) or "printMgmt" (SrsPrintMgmtController) */
+  controllerType?: 'simple' | 'printMgmt';
+  /** Additional datasets — each generates an extra TmpTable (TempDB) and a get<Table>() method in the DP */
+  additionalDatasets?: Array<{ name: string; fieldsHint?: string; fields?: ReportFieldSpec[] }>;
   /** Model name (auto-detected from projectPath) */
   modelName?: string;
   /** Path to .rnrproj file */
@@ -187,6 +197,38 @@ Examples:
         type: 'string',
         description: 'Base packages directory path',
       },
+      aotQuery: {
+        type: 'string',
+        description: 'AOT query name. When provided, the DP uses a query-based processReport() with this.parmQuery() instead of a manual while-select placeholder.',
+      },
+      callerTableName: {
+        type: 'string',
+        description: 'Table name of the caller record (e.g. "CustTable"). Generates parmArgs() pre-fill in prePromptModifyContract() that reads args.record() and maps matching fields to contract params.',
+      },
+      preProcess: {
+        type: 'boolean',
+        description: 'When true, DP extends SrsReportDataProviderPreProcess instead of SrsReportDataProviderBase. Generates a preProcess() stub and removes [SRSReportParameterAttribute] (contract passed via Controller).',
+      },
+      controllerType: {
+        type: 'string',
+        description: '"simple" (default — SrsReportRunController) or "printMgmt" (SrsPrintMgmtController with parmPrintMgmtDocType). Only relevant when generateController=true.',
+      },
+      additionalDatasets: {
+        type: 'array',
+        description: 'Extra datasets. Each entry generates an additional TmpTable (TempDB) and a corresponding get<Table>() method in the DP.',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Dataset name suffix (e.g. "Header" → MyReportHeaderTmp)' },
+            fieldsHint: { type: 'string', description: 'Comma-separated field names for this extra dataset' },
+            fields: {
+              type: 'array',
+              items: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+            },
+          },
+          required: ['name'],
+        },
+      },
     },
     required: ['name'],
   },
@@ -207,8 +249,13 @@ export async function handleGenerateSmartReport(
     fields: structuredFields,
     contractParams = [],
     generateController = true,
-    designStyle: _designStyle = 'SimpleList', // reserved for GroupedWithTotals in future
+    designStyle = 'SimpleList',
     copyFrom,
+    aotQuery,
+    callerTableName,
+    preProcess = false,
+    controllerType = 'simple',
+    additionalDatasets = [],
     modelName,
     projectPath,
     solutionPath,
@@ -374,7 +421,43 @@ export async function handleGenerateSmartReport(
     };
   }
 
-  // ── Generate all 5 objects ─────────────────────────────────────────────────
+  // ── Resolve additional datasets (Improvement 9) ───────────────────────────
+  type ResolvedExtraDataset = {
+    name: string;
+    tmpTableName: string;
+    fields: ReportFieldSpec[];
+    tableFields: TableFieldSpec[];
+  };
+  const resolvedExtraDatasets: ResolvedExtraDataset[] = additionalDatasets.map((ds: { name: string; fieldsHint?: string; fields?: ReportFieldSpec[] }) => {
+    const cap = ds.name.charAt(0).toUpperCase() + ds.name.slice(1);
+    const dsTmpName = `${finalName}${cap}Tmp`;
+    let dsFields: ReportFieldSpec[] = [];
+    if (ds.fields && ds.fields.length > 0) {
+      dsFields = ds.fields.map((f: ReportFieldSpec) => ({
+        ...f,
+        edt: f.edt || suggestEdtFromFieldName(f.name),
+        dataType: f.dataType || resolveRdlDataType(f.edt || suggestEdtFromFieldName(f.name), symbolIndex.db),
+      }));
+    } else if (ds.fieldsHint) {
+      const hints = ds.fieldsHint.split(',').map((s: string) => s.trim()).filter(Boolean);
+      dsFields = hints.map((h: string) => {
+        const edt = suggestEdtFromFieldName(h);
+        return { name: h, edt, dataType: resolveRdlDataType(edt, symbolIndex.db) };
+      });
+    }
+    return {
+      name: ds.name,
+      tmpTableName: dsTmpName,
+      fields: dsFields,
+      tableFields: dsFields.map((f: ReportFieldSpec) => ({
+        name: f.name,
+        edt: f.edt,
+        type: resolveFieldType(f.edt, symbolIndex.db),
+      })),
+    };
+  });
+
+  // ── Generate objects ────────────────────────────────────────────────────────
   const generatedObjects: Array<{
     objectType: string;
     objectName: string;
@@ -414,6 +497,28 @@ export async function handleGenerateSmartReport(
   });
   log(`Generated TmpTable: ${tmpTableName} (${tableFields.length} fields)`);
 
+  // Additional TmpTables for multi-dataset (Improvement 9)
+  for (const ds of resolvedExtraDatasets) {
+    if (ds.tableFields.length === 0) {
+      log(`⚠ Skipping extra dataset "${ds.name}" — no fields resolved`);
+      continue;
+    }
+    const dsTblXml = builder.buildTableXml({
+      name: ds.tmpTableName,
+      label: `${reportCaption} - ${ds.name} (temp)`,
+      tableGroup: 'Framework',
+      fields: ds.tableFields,
+      indexes: [builder.buildPrimaryKeyIndex(ds.tmpTableName, [ds.tableFields[0]?.name || 'RecId'])],
+    });
+    generatedObjects.push({
+      objectType: 'table',
+      objectName: ds.tmpTableName,
+      aotFolder: 'AxTable',
+      content: dsTblXml.replace('</AxTable>', '\t<TableType>TempDB</TableType>\n</AxTable>'),
+    });
+    log(`Generated extra TmpTable: ${ds.tmpTableName} (${ds.tableFields.length} fields)`);
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // 2. Contract class
   // ──────────────────────────────────────────────────────────────────────────
@@ -445,6 +550,46 @@ export async function handleGenerateSmartReport(
     ].join('\n');
   }).join('\n\n');
 
+  // ── Build validate() method when there are mandatory params or a date range ─
+  const mandatoryContractParams = contractParms.filter(p => p.mandatory);
+  const fromDateParam = contractParms.find(p => {
+    const n = p.name.toLowerCase();
+    return n === 'fromdate' || n === 'validfrom' || n === 'datefrom';
+  });
+  const toDateParam = contractParms.find(p => {
+    const n = p.name.toLowerCase();
+    return n === 'todate' || n === 'validto' || n === 'dateto';
+  });
+  const needsValidate = mandatoryContractParams.length > 0 || (fromDateParam && toDateParam);
+
+  const mandatoryChecks = mandatoryContractParams.map(p => [
+    `        if (!${p.name})`,
+    `        {`,
+    `            ret = checkFailed(strFmt("@SYS53419", fieldPName(${contractClassName}, ${p.name})));`,
+    `        }`,
+  ].join('\n')).join('\n');
+
+  const dateRangeCheck = (fromDateParam && toDateParam) ? [
+    `        if (${fromDateParam.name} && ${toDateParam.name} && ${fromDateParam.name} > ${toDateParam.name})`,
+    `        {`,
+    `            ret = checkFailed(strFmt("@SYS300396", fieldPName(${contractClassName}, ${fromDateParam.name})));`,
+    `        }`,
+  ].join('\n') : '';
+
+  const validateMethod = needsValidate ? [
+    `    /// <summary>`,
+    `    /// Validates the contract parameters before the report runs.`,
+    `    /// </summary>`,
+    `    /// <returns>true if all parameters are valid; otherwise false.</returns>`,
+    `    public boolean validate()`,
+    `    {`,
+    `        boolean ret = true;`,
+    ...(mandatoryChecks ? [mandatoryChecks] : []),
+    ...(dateRangeCheck ? [dateRangeCheck] : []),
+    `        return ret;`,
+    `    }`,
+  ].join('\n') : '';
+
   const contractSourceCode = [
     `/// <summary>`,
     `/// Data contract for the ${reportCaption} report.`,
@@ -457,6 +602,7 @@ export async function handleGenerateSmartReport(
     `}`,
     ``,
     ...(contractParmMethods ? [contractParmMethods] : []),
+    ...(validateMethod ? ['', validateMethod] : []),
   ].join('\n');
 
   const contractXml = XmlTemplateGenerator.generateAxClassXml(
@@ -478,12 +624,21 @@ export async function handleGenerateSmartReport(
   const tmpTableVarName = tmpTableName.charAt(0).toLowerCase() + tmpTableName.slice(1);
   const contractVarName = 'contract';
 
-  // Build the processReport body — populates TmpTable from contract parameters
-  const fieldAssignments = reportFields.map(f =>
-    `            ${tmpTableVarName}.${f.name} = ''; // TODO: populate from data source`
-  ).join('\n');
+  // Determine base class
+  const dpBaseClass = preProcess ? 'SrsReportDataProviderPreProcess' : 'SrsReportDataProviderBase';
 
-  const contractFetch = contractParms.length > 0
+  // Class-level attributes
+  // PreProcess: no [SRSReportParameterAttribute] — contract is passed via Controller
+  // aotQuery: add [SRSReportQueryAttribute]
+  let dpAttrLines: string[] = [];
+  if (!preProcess) dpAttrLines.push(`    SRSReportParameterAttribute(classStr(${contractClassName}))`);
+  if (aotQuery)   dpAttrLines.push(`    SRSReportQueryAttribute(queryStr(${aotQuery}))`);
+  const dpClassAttr = dpAttrLines.length > 0
+    ? `[\n${dpAttrLines.join(',\n')}\n]`
+    : '';
+
+  // Contract parameter fetch (skip for PreProcess — contract accessed differently)
+  const contractFetchLines = (contractParms.length > 0 && !preProcess)
     ? [
         `        ${contractClassName} ${contractVarName} = this.parmDataContract() as ${contractClassName};`,
         ...contractParms.map(p => {
@@ -491,20 +646,94 @@ export async function handleGenerateSmartReport(
           return `        ${p.type} ${p.name} = ${contractVarName}.${methodName}();`;
         }),
         ``,
-      ].join('\n')
-    : `        // No contract parameters`;
+      ]
+    : [`        // No contract parameters`];
+  const contractFetch = contractFetchLines.join('\n');
+
+  // processReport body — query-based vs manual skeleton
+  let processReportBody: string;
+  if (aotQuery) {
+    const queryAssignments = reportFields.map(f =>
+      `            ${tmpTableVarName}.${f.name} = sourceRecord.${f.name}; // TODO: map from query result`
+    ).join('\n');
+    processReportBody = [
+      contractFetch,
+      ``,
+      `        // Query-based data retrieval \u2014 driven by AOT query "${aotQuery}"`,
+      `        QueryRun queryRun = new QueryRun(this.parmQuery());`,
+      `        while (queryRun.next())`,
+      `        {`,
+      `            Common sourceRecord = queryRun.getNo(1); // TODO: cast to correct table type`,
+      `            ${tmpTableVarName}.clear();`,
+      queryAssignments,
+      `            ${tmpTableVarName}.insert();`,
+      `        }`,
+    ].join('\n');
+  } else {
+    const fieldComments = reportFields.map(f =>
+      `        //       ${tmpTableVarName}.${f.name} = ''; // TODO: populate from data source`
+    ).join('\n');
+    processReportBody = [
+      contractFetch,
+      ``,
+      `        // TODO: Replace with actual query / business logic`,
+      `        // Example pattern:`,
+      `        //   while select sourceTable`,
+      `        //       where sourceTable.Field == paramValue`,
+      `        //   {`,
+      `        //       ${tmpTableVarName}.clear();`,
+      fieldComments,
+      `        //       ${tmpTableVarName}.insert();`,
+      `        //   }`,
+    ].join('\n');
+  }
+
+  // preProcess() stub (Improvement 6)
+  const preProcessMethodLines = preProcess ? [
+    ``,
+    `    /// <summary>`,
+    `    /// Called before the report dialog is shown. Use for heavy pre-processing.`,
+    `    /// </summary>`,
+    `    public void preProcess()`,
+    `    {`,
+    `        // TODO: Implement pre-processing logic (called BEFORE the report dialog).`,
+    `        // Prepare data, validate prerequisites, or set session-scoped variables.`,
+    `    }`,
+  ] : [];
+
+  // Additional member variable declarations for extra datasets
+  const extraDpMembers = resolvedExtraDatasets
+    .map(ds => `    ${ds.tmpTableName} ${ds.tmpTableName.charAt(0).toLowerCase() + ds.tmpTableName.slice(1)};`)
+    .join('\n');
+
+  // Additional get<Table>() methods for extra datasets
+  const extraDpGetters = resolvedExtraDatasets.map(ds => {
+    const varN = ds.tmpTableName.charAt(0).toLowerCase() + ds.tmpTableName.slice(1);
+    return [
+      ``,
+      `    /// <summary>`,
+      `    /// Returns the <c>${ds.tmpTableName}</c> buffer for the "${ds.name}" dataset.`,
+      `    /// </summary>`,
+      `    /// <returns>The <c>${ds.tmpTableName}</c> table buffer.</returns>`,
+      `    [SRSReportDataSetAttribute(tableStr(${ds.tmpTableName}))]`,
+      `    public ${ds.tmpTableName} get${ds.tmpTableName}()`,
+      `    {`,
+      `        select ${varN};`,
+      `        return ${varN};`,
+      `    }`,
+    ].join('\n');
+  }).join('\n');
 
   const dpSourceCode = [
     `/// <summary>`,
     `/// Data provider for the ${reportCaption} report.`,
-    `/// Extends <c>SrsReportDataProviderBase</c> and populates the <c>${tmpTableName}</c> temporary table.`,
+    `/// Extends <c>${dpBaseClass}</c> and populates the <c>${tmpTableName}</c> temporary table.`,
     `/// </summary>`,
-    `[`,
-    `    SRSReportParameterAttribute(classStr(${contractClassName}))`,
-    `]`,
-    `public class ${dpClassName} extends SrsReportDataProviderBase`,
+    dpClassAttr,
+    `public class ${dpClassName} extends ${dpBaseClass}`,
     `{`,
     `    ${tmpTableName} ${tmpTableVarName};`,
+    ...(extraDpMembers ? [extraDpMembers] : []),
     `}`,
     ``,
     `    /// <summary>`,
@@ -517,6 +746,8 @@ export async function handleGenerateSmartReport(
     `        select ${tmpTableVarName};`,
     `        return ${tmpTableVarName};`,
     `    }`,
+    ...(extraDpGetters ? [extraDpGetters] : []),
+    ...preProcessMethodLines,
     ``,
     `    /// <summary>`,
     `    /// Main data processing method. Populates the <c>${tmpTableName}</c> temporary table`,
@@ -524,17 +755,7 @@ export async function handleGenerateSmartReport(
     `    /// </summary>`,
     `    public void processReport()`,
     `    {`,
-    contractFetch,
-    ``,
-    `        // TODO: Replace with actual query / business logic`,
-    `        // Example pattern:`,
-    `        //   while select sourceTable`,
-    `        //       where sourceTable.Field == paramValue`,
-    `        //   {`,
-    `        //       ${tmpTableVarName}.clear();`,
-    fieldAssignments,
-    `        //       ${tmpTableVarName}.insert();`,
-    `        //   }`,
+    processReportBody,
     `    }`,
   ].join('\n');
 
@@ -552,16 +773,25 @@ export async function handleGenerateSmartReport(
   // 4. Controller class (optional)
   // ──────────────────────────────────────────────────────────────────────────
   if (generateController) {
-    const controllerSourceCode = [
-      `/// <summary>`,
-      `/// Controller for the ${reportCaption} report.`,
-      `/// Extends <c>SrsReportRunController</c> to provide menu item integration`,
-      `/// and optional pre-prompt contract modifications.`,
-      `/// </summary>`,
-      `public class ${controllerClassName} extends SrsReportRunController`,
-      `{`,
-      `}`,
-      ``,
+    const isPrintMgmt = controllerType === 'printMgmt';
+    const ctrlBaseClass = isPrintMgmt ? 'SrsPrintMgmtController' : 'SrsReportRunController';
+
+    // Build main() — differs between simple and printMgmt
+    const mainMethod = isPrintMgmt ? [
+      `    /// <summary>`,
+      `    /// Entry point. Creates a print-management controller and starts the report.`,
+      `    /// </summary>`,
+      `    /// <param name="_args">The <c>Args</c> object from the menu item caller.</param>`,
+      `    public static void main(Args _args)`,
+      `    {`,
+      `        ${controllerClassName} controller = new ${controllerClassName}();`,
+      `        controller.parmArgs(_args);`,
+      `        // TODO: Replace SalesOrderConfirmation with the correct PrintMgmtDocumentType`,
+      `        controller.parmPrintMgmtDocType(PrintMgmtDocumentType::SalesOrderConfirmation);`,
+      `        controller.parmReportName(ssrsReportStr(${finalName}, Report));`,
+      `        controller.startOperation();`,
+      `    }`,
+    ].join('\n') : [
       `    /// <summary>`,
       `    /// Entry point for the report. Creates the controller and starts execution.`,
       `    /// </summary>`,
@@ -573,17 +803,63 @@ export async function handleGenerateSmartReport(
       `        controller.parmArgs(_args);`,
       `        controller.startOperation();`,
       `    }`,
-      ``,
+    ].join('\n');
+
+    // Build prePromptModifyContract() — with optional parmArgs() pre-fill (Improvement 2)
+    let prePromptBody: string;
+    if (callerTableName && contractParms.length > 0) {
+      // Try to match contract params to caller table fields by name heuristics
+      const callerVarName = callerTableName.charAt(0).toLowerCase() + callerTableName.slice(1);
+      const prefillLines = contractParms.flatMap(p => {
+        // Heuristic: param name matches a field pattern on the caller table
+        // e.g. CustAccount → callerRecord.AccountNum  (common D365FO convention)
+        const fieldGuess = p.name.charAt(0).toUpperCase() + p.name.slice(1); // CustAccount → CustAccount
+        const methodName = `parm${p.name.charAt(0).toUpperCase()}${p.name.slice(1)}`;
+        return [
+          `        if (${callerVarName}.${fieldGuess} != ${p.type === 'TransDate' ? 'dateNull()' : (p.type === 'str' || !p.type) ? '""' : '0'})`,
+          `            ${contractVarName}.${methodName}(${callerVarName}.${fieldGuess});`,
+        ];
+      });
+      prePromptBody = [
+        `        ${contractClassName} ${contractVarName} = this.parmReportContract().parmRdpContract() as ${contractClassName};`,
+        `        ${callerTableName} ${callerVarName} = this.parmArgs().record() as ${callerTableName};`,
+        `        if (${callerVarName})`,
+        `        {`,
+        ...prefillLines.map(l => `    ${l}`),
+        `        }`,
+      ].join('\n');
+    } else {
+      prePromptBody = [
+        `        ${contractClassName} ${contractVarName} = this.parmReportContract().parmRdpContract() as ${contractClassName};`,
+        `        // TODO: Set default parameter values here`,
+        `        // Example: ${contractVarName}.parmFromDate(DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone()));`,
+      ].join('\n');
+    }
+
+    const prePromptMethod = [
       `    /// <summary>`,
       `    /// Modifies the contract before the dialog is shown to the user.`,
-      `    /// Override to set default parameter values or apply business rules.`,
+      `    /// Override to set default parameter values or pre-fill from the caller record.`,
       `    /// </summary>`,
       `    protected void prePromptModifyContract()`,
       `    {`,
-      `        ${contractClassName} ${contractVarName} = this.parmReportContract().parmRdpContract() as ${contractClassName};`,
-      `        // TODO: Set default parameter values here`,
-      `        // Example: ${contractVarName}.parmFromDate(DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone()));`,
+      prePromptBody,
       `    }`,
+    ].join('\n');
+
+    const controllerSourceCode = [
+      `/// <summary>`,
+      `/// Controller for the ${reportCaption} report.`,
+      `/// Extends <c>${ctrlBaseClass}</c> to provide menu item integration`,
+      `/// and pre-prompt contract initialization.`,
+      `/// </summary>`,
+      `public class ${controllerClassName} extends ${ctrlBaseClass}`,
+      `{`,
+      `}`,
+      ``,
+      mainMethod,
+      ``,
+      prePromptMethod,
     ].join('\n');
 
     const controllerXml = XmlTemplateGenerator.generateAxClassXml(
@@ -597,11 +873,29 @@ export async function handleGenerateSmartReport(
       aotFolder: 'AxClass',
       content: controllerXml,
     });
-    log(`Generated Controller: ${controllerClassName}`);
+    log(`Generated Controller: ${controllerClassName} (${controllerType}, callerTable=${callerTableName ?? 'none'})`);
+
+    // ── 5. Output menu item (AxMenuItemOutput) ─────────────────────────────
+    const menuItemXml = XmlTemplateGenerator.generateAxMenuItemXml(
+      'menu-item-output',
+      finalName,
+      {
+        targetObject: controllerClassName,
+        objectType: 'Class',
+        label: reportCaption,
+      }
+    );
+    generatedObjects.push({
+      objectType: 'menu-item-output',
+      objectName: finalName,
+      aotFolder: 'AxMenuItemOutput',
+      content: menuItemXml,
+    });
+    log(`Generated output menu item: ${finalName} → ${controllerClassName}`);
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // 5. AxReport XML + RDL
+  // 6. AxReport XML + RDL (multi-dataset, page header, optional grouped tablix)
   // ──────────────────────────────────────────────────────────────────────────
   const reportFieldDefs = reportFields.map(f => ({
     name: f.name,
@@ -616,15 +910,53 @@ export async function handleGenerateSmartReport(
     label: p.label,
   }));
 
-  const reportXml = XmlTemplateGenerator.generateAxReportXml(finalName, {
-    dpClassName,
-    tmpTableName,
-    datasetName: tmpTableName,
+  // Build report properties — multi-dataset when additionalDatasets present (Improvement 9)
+  const reportProps: Record<string, any> = {
     designName: 'Report',
     caption: reportCaption,
-    fields: reportFieldDefs,
     contractParams: reportContractParams,
-  });
+  };
+
+  if (resolvedExtraDatasets.length > 0) {
+    reportProps.datasets = [
+      {
+        name: tmpTableName,
+        dpClassName,
+        tmpTableName,
+        fields: reportFieldDefs,
+        contractParams: reportContractParams,
+        ...(aotQuery ? { aotQuery } : {}),
+      },
+      ...resolvedExtraDatasets.map(ds => ({
+        name: ds.tmpTableName,
+        dpClassName,
+        tmpTableName: ds.tmpTableName,
+        fields: ds.fields.map(f => ({
+          name: f.name,
+          alias: `${ds.tmpTableName}.1.${f.name}`,
+          dataType: f.dataType || 'System.String',
+          caption: f.label,
+        })),
+      })),
+    ];
+  } else {
+    reportProps.dpClassName = dpClassName;
+    reportProps.tmpTableName = tmpTableName;
+    reportProps.datasetName = tmpTableName;
+    reportProps.fields = reportFieldDefs;
+    if (aotQuery) reportProps.aotQuery = aotQuery;
+  }
+
+  let reportXml = XmlTemplateGenerator.generateAxReportXml(finalName, reportProps);
+
+  // Improvement 7: inject RDL page header (always on — company name, title, execution time)
+  reportXml = injectRdlPageHeader(reportXml, reportCaption);
+
+  // Improvement 1: replace standard tablix with grouped design when requested
+  if (designStyle === 'GroupedWithTotals') {
+    reportXml = injectGroupedTablix(reportXml, reportFields, tmpTableName);
+    log(`Applied GroupedWithTotals RDL design`);
+  }
 
   generatedObjects.push({
     objectType: 'report',
@@ -632,7 +964,7 @@ export async function handleGenerateSmartReport(
     aotFolder: 'AxReport',
     content: reportXml,
   });
-  log(`Generated Report: ${finalName} (${reportFieldDefs.length} fields, ${reportContractParams.length} contract params)`);
+  log(`Generated Report: ${finalName} (${reportFieldDefs.length} fields, ${reportContractParams.length} contract params, ${resolvedExtraDatasets.length} extra datasets)`);
 
   // ── Output ─────────────────────────────────────────────────────────────────
   const objectSummary = generatedObjects.map(o => `   - ${o.objectType}: **${o.objectName}**`).join('\n');
@@ -757,10 +1089,9 @@ export async function handleGenerateSmartReport(
         ``,
         `Next steps:`,
         `1. Open Visual Studio and reload the project (close/reopen solution)`,
-        `2. Add the SSRS report design in Visual Studio Report Designer`,
+        `2. Open the AxReport in Report Designer and fine-tune the RDL design`,
         `3. Build the project to compile all objects`,
         `4. Deploy to the report server (right-click report → Deploy)`,
-        `5. Create an Output menu item pointing to ${controllerClassName || dpClassName}`,
       ].join('\n'),
     }],
   };
@@ -769,6 +1100,194 @@ export async function handleGenerateSmartReport(
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ── Improvement 7: RDL page header injection ──────────────────────────────────
+/**
+ * Injects an RDL <PageHeader> with company name, report title, and execution time
+ * into every ReportSection inside the AxReport XML (CDATA-embedded RDL).
+ * The header is placed before the closing </ReportSection> tag.
+ */
+function injectRdlPageHeader(axReportXml: string, caption: string): string {
+  const pageHeaderXml = [
+    `      <PageHeader>`,
+    `        <PrintOnFirstPage>true</PrintOnFirstPage>`,
+    `        <PrintOnLastPage>true</PrintOnLastPage>`,
+    `        <Height>0.5in</Height>`,
+    `        <ReportItems>`,
+    `          <Textbox Name="CompanyName">`,
+    `            <CanGrow>true</CanGrow>`,
+    `            <Value>=Parameters!AX_CompanyName.Value</Value>`,
+    `            <Style><FontWeight>Bold</FontWeight><FontSize>10pt</FontSize></Style>`,
+    `            <Top>0in</Top><Left>0in</Left><Width>4in</Width><Height>0.25in</Height>`,
+    `          </Textbox>`,
+    `          <Textbox Name="ReportTitle">`,
+    `            <CanGrow>true</CanGrow>`,
+    `            <Value>${caption.replace(/[<>&"]/g, c => c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '&' ? '&amp;' : '&quot;')}</Value>`,
+    `            <Style><FontSize>9pt</FontSize></Style>`,
+    `            <Top>0.25in</Top><Left>0in</Left><Width>4in</Width><Height>0.25in</Height>`,
+    `          </Textbox>`,
+    `          <Textbox Name="ExecutionTime">`,
+    `            <CanGrow>true</CanGrow>`,
+    `            <Value>=Globals!ExecutionTime</Value>`,
+    `            <Style><TextAlign>Right</TextAlign><FontSize>8pt</FontSize></Style>`,
+    `            <Top>0in</Top><Left>4in</Left><Width>3in</Width><Height>0.25in</Height>`,
+    `          </Textbox>`,
+    `        </ReportItems>`,
+    `      </PageHeader>`,
+  ].join('\n');
+  // Insert before </ReportSection> inside the embedded RDL string
+  return axReportXml.replace(/(<\/ReportSection>)/g, `${pageHeaderXml}\n    $1`);
+}
+
+// ── Improvement 1: GroupedWithTotals tablix injection ────────────────────────
+/**
+ * Replaces the auto-generated flat detail tablix in the RDL with a grouped tablix.
+ * Groups on the first non-numeric field; adds SUM() subtotals for numeric fields,
+ * and a grand-total footer row at the bottom.
+ */
+function injectGroupedTablix(
+  axReportXml: string,
+  fields: ReportFieldSpec[],
+  datasetName: string
+): string {
+  if (fields.length === 0) return axReportXml;
+
+  // Classify fields
+  const numericTypes = new Set(['System.Double', 'System.Int32', 'System.Int64']);
+  const groupField = fields.find(f => !numericTypes.has(f.dataType ?? '')) ?? fields[0];
+  const numericFields = fields.filter(f => numericTypes.has(f.dataType ?? ''));
+
+  const n = fields.length;
+  const colW = +Math.min(1.5, 7 / n).toFixed(2);
+  const totalW = +(colW * n).toFixed(2);
+  const rowGrp = `Group_${groupField.name}`;
+  const detailGrp = `Details_${datasetName}`;
+
+  const cols = fields.map(() =>
+    `            <TablixColumn><Width>${colW}in</Width></TablixColumn>`).join('\n');
+
+  // Header row (bold grey)
+  const hCells = fields.map(f => [
+    `            <TablixCell><CellContents>`,
+    `              <Textbox Name="Hdr_${f.name}">`,
+    `                <CanGrow>true</CanGrow><Value>${f.name}</Value>`,
+    `                <Style><FontWeight>Bold</FontWeight><BackgroundColor>LightGrey</BackgroundColor>`,
+    `                  <Border><Style>Solid</Style></Border>`,
+    `                  <PaddingLeft>2pt</PaddingLeft><PaddingRight>2pt</PaddingRight>`,
+    `                  <PaddingTop>2pt</PaddingTop><PaddingBottom>2pt</PaddingBottom>`,
+    `                </Style></Textbox>`,
+    `            </CellContents></TablixCell>`,
+  ].join('\n')).join('\n');
+
+  // Group header row (field value + subtotals for numerics, light blue)
+  const grpCells = fields.map(f => {
+    const isGrp = f.name === groupField.name;
+    const isNum = numericFields.some(nf => nf.name === f.name);
+    const val = isGrp ? `=Fields!${f.name}.Value` : isNum ? `=Sum(Fields!${f.name}.Value)` : ``;
+    return [
+      `            <TablixCell><CellContents>`,
+      `              <Textbox Name="Grp_${f.name}">`,
+      `                <CanGrow>true</CanGrow><Value>${val}</Value>`,
+      `                <Style><FontWeight>Bold</FontWeight><BackgroundColor>AliceBlue</BackgroundColor>`,
+      `                  <Border><Style>Solid</Style></Border>`,
+      `                  <PaddingLeft>2pt</PaddingLeft><PaddingRight>2pt</PaddingRight>`,
+      `                  <PaddingTop>2pt</PaddingTop><PaddingBottom>2pt</PaddingBottom>`,
+      `                </Style></Textbox>`,
+      `            </CellContents></TablixCell>`,
+    ].join('\n');
+  }).join('\n');
+
+  // Detail row
+  const dCells = fields.map(f => [
+    `            <TablixCell><CellContents>`,
+    `              <Textbox Name="Det_${f.name}">`,
+    `                <CanGrow>true</CanGrow><Value>=Fields!${f.name}.Value</Value>`,
+    `                <Style><Border><Style>Solid</Style></Border>`,
+    `                  <PaddingLeft>2pt</PaddingLeft><PaddingRight>2pt</PaddingRight>`,
+    `                  <PaddingTop>2pt</PaddingTop><PaddingBottom>2pt</PaddingBottom>`,
+    `                </Style></Textbox>`,
+    `            </CellContents></TablixCell>`,
+  ].join('\n')).join('\n');
+
+  // Grand total footer row (yellow)
+  const totCells = fields.map(f => {
+    const isNum = numericFields.some(nf => nf.name === f.name);
+    const val = isNum ? `=Sum(Fields!${f.name}.Value)` : (f.name === groupField.name ? `"Total"` : `""`);
+    return [
+      `            <TablixCell><CellContents>`,
+      `              <Textbox Name="Tot_${f.name}">`,
+      `                <CanGrow>true</CanGrow><Value>${val}</Value>`,
+      `                <Style><FontWeight>Bold</FontWeight><BackgroundColor>LightYellow</BackgroundColor>`,
+      `                  <Border><Style>Solid</Style></Border>`,
+      `                  <PaddingLeft>2pt</PaddingLeft><PaddingRight>2pt</PaddingRight>`,
+      `                  <PaddingTop>2pt</PaddingTop><PaddingBottom>2pt</PaddingBottom>`,
+      `                </Style></Textbox>`,
+      `            </CellContents></TablixCell>`,
+    ].join('\n');
+  }).join('\n');
+
+  const cMembers = fields.map(() => `          <TablixMember />`).join('\n');
+
+  const groupedTablix = [
+    `        <Tablix Name="Tablix_${datasetName}">`,
+    `          <TablixBody>`,
+    `            <TablixColumns>`,
+    cols,
+    `            </TablixColumns>`,
+    `            <TablixRows>`,
+    `              <TablixRow><Height>0.25in</Height><TablixCells>`,
+    hCells,
+    `              </TablixCells></TablixRow>`,
+    `              <TablixRow><Height>0.25in</Height><TablixCells>`,
+    grpCells,
+    `              </TablixCells></TablixRow>`,
+    `              <TablixRow><Height>0.25in</Height><TablixCells>`,
+    dCells,
+    `              </TablixCells></TablixRow>`,
+    `              <TablixRow><Height>0.25in</Height><TablixCells>`,
+    totCells,
+    `              </TablixCells></TablixRow>`,
+    `            </TablixRows>`,
+    `          </TablixBody>`,
+    `          <TablixColumnHierarchy><TablixMembers>`,
+    cMembers,
+    `          </TablixMembers></TablixColumnHierarchy>`,
+    `          <TablixRowHierarchy><TablixMembers>`,
+    `            <TablixMember>`,
+    `              <KeepWithGroup>After</KeepWithGroup>`,
+    `              <RepeatOnNewPage>true</RepeatOnNewPage>`,
+    `            </TablixMember>`,
+    `            <TablixMember>`,
+    `              <Group Name="${rowGrp}">`,
+    `                <DataGroupName>${rowGrp}</DataGroupName>`,
+    `                <GroupExpressions>`,
+    `                  <GroupExpression>=Fields!${groupField.name}.Value</GroupExpression>`,
+    `                </GroupExpressions>`,
+    `              </Group>`,
+    `              <TablixMembers>`,
+    `                <TablixMember><Group Name="${detailGrp}"><DataGroupName>${detailGrp}</DataGroupName></Group></TablixMember>`,
+    `              </TablixMembers>`,
+    `            </TablixMember>`,
+    `            <TablixMember>`,
+    `              <Group Name="Total_${datasetName}"><DataGroupName>Total_${datasetName}</DataGroupName></Group>`,
+    `            </TablixMember>`,
+    `          </TablixMembers></TablixRowHierarchy>`,
+    `          <DataSetName>${datasetName}</DataSetName>`,
+    `          <Top>0.5in</Top><Left>0.5in</Left>`,
+    `          <Height>1in</Height><Width>${totalW}in</Width>`,
+    `          <Style><Border><Style>Solid</Style></Border></Style>`,
+    `        </Tablix>`,
+  ].join('\n');
+
+  // Replace the existing flat tablix for this dataset
+  const tablixRe = new RegExp(
+    `        <Tablix Name="Tablix_${datasetName}">[\\s\\S]*?        </Tablix>`,
+    'g'
+  );
+  const replaced = axReportXml.replace(tablixRe, groupedTablix);
+  // If nothing matched (e.g. no fields were generated), return unchanged
+  return replaced;
+}
 
 /**
  * Suggest EDT based on field name heuristics (shared with generateSmartTable).
