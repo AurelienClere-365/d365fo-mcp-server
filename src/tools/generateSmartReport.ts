@@ -575,14 +575,14 @@ export async function handleGenerateSmartReport(
   const mandatoryChecks = mandatoryContractParams.map(p => [
     `        if (!${p.name})`,
     `        {`,
-    `            ret = checkFailed(strFmt("@SYS53419", literalStr("${p.name}")));`,
+    `            ret = checkFailed(strFmt("@SYS53419", "${p.name}"));`,
     `        }`,
   ].join('\n')).join('\n');
 
   const dateRangeCheck = (fromDateParam && toDateParam) ? [
     `        if (${fromDateParam.name} && ${toDateParam.name} && ${fromDateParam.name} > ${toDateParam.name})`,
     `        {`,
-    `            ret = checkFailed(strFmt("@SYS300396", literalStr("${fromDateParam.name}")));`,
+    `            ret = checkFailed(strFmt("@SYS300396", "${fromDateParam.name}"));`,
     `        }`,
   ].join('\n') : '';
 
