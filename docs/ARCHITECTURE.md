@@ -19,7 +19,7 @@ This document provides visual diagrams and detailed explanations of the D365 F&O
 graph TB
     subgraph "Client Layer"
         VS[Visual Studio 2022 17.14+ GitHub Copilot Agent Mode]
-        VSCODE[VS Code GitHub Copilot Extension]
+        VS2026[Visual Studio 2026 GitHub Copilot Agent Mode]
     end
 
     subgraph "Azure Cloud"
@@ -42,7 +42,7 @@ graph TB
     end
 
     VS -->|"Streamable HTTP, OAuth 2.0"| MCP
-    VSCODE -->|"Streamable HTTP, OAuth 2.0"| MCP
+    VS2026 -->|"Streamable HTTP, OAuth 2.0"| MCP
     MCP -->|"Download on startup"| BLOB
     MCP --> HTTP
     HTTP --> PROTO
@@ -52,7 +52,7 @@ graph TB
     TOOLS -.->|"Optional"| CACHE
     
     style VS fill:#68217A,color:#fff
-    style VSCODE fill:#0078D4,color:#fff
+    style VS2026 fill:#0078D4,color:#fff
     style MCP fill:#00A4EF,color:#fff
     style BLOB fill:#FF6C00,color:#fff
     style DB fill:#4CAF50,color:#fff
@@ -66,7 +66,7 @@ graph TB
 
 ```mermaid
 sequenceDiagram
-    participant IDE as Visual Studio 2022 / VS Code
+    participant IDE as Visual Studio 2022 / 2026
     participant HTTP as HTTP Transport
     participant MCP as MCP Protocol
     participant Handler as Tool Handler
@@ -1120,7 +1120,7 @@ graph LR
     end
 
     subgraph "Developer Experience"
-        D1[VS Code Extension - Direct integration]
+        D1[Visual Studio 2026 Extension - Direct integration]
         D2[CLI Tool - Local development]
         D3[REST API - Non-MCP clients]
     end

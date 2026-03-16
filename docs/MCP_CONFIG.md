@@ -41,7 +41,7 @@ The server will also:
 ### stdio (recommended for local / single-developer setup)
 
 The server is launched directly by the MCP client as a subprocess. No HTTP server, no port.
-VS 2022 and VS Code both support this via the `command:` key.
+VS 2022 and VS 2026 both support this via the `command:` key.
 
 ```json
 {
