@@ -39,6 +39,11 @@ export const LOCAL_TOOLS = new Set([
   'create_label',
   'rename_label',
   'verify_d365fo_project',
+  'update_symbol_index',
+  'build_d365fo_project',
+  'trigger_db_sync',
+  'run_bp_check',
+  'run_systest_class',
   'get_workspace_info',
 ]);
 

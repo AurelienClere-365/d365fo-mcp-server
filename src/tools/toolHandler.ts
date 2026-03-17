@@ -48,6 +48,15 @@ import { validateObjectNamingTool } from './validateObjectNaming.js';
 import { verifyD365ProjectTool } from './verifyD365Project.js';
 import { resolveObjectPrefix } from '../utils/modelClassifier.js';
 import { getStdioSessionInfo } from '../utils/stdioSessionInfo.js';
+import { updateSymbolIndexTool } from './updateSymbolIndex.js';
+import { buildProjectTool } from './buildProject.js';
+import { dbSyncTool } from './dbSync.js';
+import { runBpCheckTool } from './runBpCheck.js';
+import { sysTestRunnerTool } from './sysTestRunner.js';
+import { reviewWorkspaceChangesTool } from './reviewWorkspaceChanges.js';
+import { undoLastModificationTool } from './undoLastModification.js';
+
+
 
 /**
  * Extract workspace path from GitHub Copilot _meta and apply it to ConfigManager.
@@ -296,6 +305,21 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
         return validateObjectNamingTool(request, context);
       case 'verify_d365fo_project':
         return verifyD365ProjectTool(request, context);
+      case 'update_symbol_index':
+        return await updateSymbolIndexTool(request.params.arguments as any, context);
+      case 'build_d365fo_project':
+        return await buildProjectTool(request.params.arguments as any, context);
+      case 'trigger_db_sync':
+        return await dbSyncTool(request.params.arguments as any, context);
+      case 'run_bp_check':
+        return await runBpCheckTool(request.params.arguments as any, context);
+      case 'run_sys_test':
+      case 'run_systest_class':
+        return await sysTestRunnerTool(request.params.arguments as any, context);
+      case 'review_workspace_changes':
+        return await reviewWorkspaceChangesTool(request.params.arguments as any, context);
+      case 'undo_last_modification':
+        return await undoLastModificationTool(request.params.arguments as any, context);
       case 'get_workspace_info': {
         const args = (request as any).params?.arguments || {};
         const configManager = getConfigManager();

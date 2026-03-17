@@ -186,6 +186,7 @@ For any D365FO request, **start with MCP tools — never** `code_search`, `grep_
 | `get_file`, `read_file` on .xml/.xpp | `get_class_info()`, `get_table_info()`, `get_form_info()`, `get_report_info()` |
 | `edit_file`, `apply_patch`, `replace_string_in_file` | `modify_d365fo_file()` |
 | `create_file` for D365FO objects | `create_d365fo_file()` |
+  | PowerShell `run_in_terminal` or scripts to edit files | **FORBIDDEN. ALWAYS USE MCP TOOLS INSTEAD! PowerShell hangs in this workspace.** |
 | PowerShell `ls`, `Test-Path`, `Get-Item` to check D365FO files | `verify_d365fo_project()` |
 | PowerShell `Get-Content` / `Select-String` to find tab/control names in form XML | `get_form_info(formName, searchControl="General")` |
 
@@ -581,6 +582,22 @@ c) Save to disk:                     create_d365fo_file(objectType="report", obj
 | `modify_d365fo_file(objectType, objectName, operation, ...)` | Edit existing: methods (add/remove), fields (add/modify/rename/replace-all/remove), indexes (add/remove), relations (add/remove), field-groups (add/remove/add-field-to), add-field-modification, add-data-source, add-control, modify-property |
 | `verify_d365fo_project(objects, projectPath?, modelName?)` | Verify objects exist on disk and in .rnrproj — use INSTEAD OF PowerShell after `create_d365fo_file` |
 
+### SDLC & Build Tools
+| Tool | Use for |
+|------|---------|
+| `update_symbol_index(filePath)` | Index a newly generated XML file immediately so that references to it work without restarting. |
+| `build_d365fo_project(projectPath)` | Run MSBuild compilation locally to capture errors. |
+| `trigger_db_sync(modelName, tableName?)` | Run a database sync for the current model. |
+| `run_bp_check(projectPath, targetFilter?)` | Run Microsoft Best Practices (xppbp.exe) analysis. |
+| `run_systest(className, modelName)` | Execute unit testing using SysTestRunner.exe |
+
+### Code Review & Source Control
+| Tool | Use for |
+|------|---------|
+| `review_workspace_changes(directoryPath)` | Analyzes uncommitted X++ changes locally and fetches a git diff to perform AI-based D365 Code Review. |
+| `undo_last_modification(filePath)` | Safely checkout HEAD or delete specifically created untracked files when a code implementation was incorrectly generated. |
+
+
 ### Labels
 | Tool | Use for |
 |------|---------|
@@ -618,3 +635,4 @@ AOT path: `C:\AOSService\PackagesLocalDirectory\{Model}\{Model}\Ax{Type}\{Name}.
 ```
 
 XML formatting: TABs for indentation (never spaces); CDATA for X++ source: `<![CDATA[ ... ]]>`
+
