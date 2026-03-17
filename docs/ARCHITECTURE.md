@@ -15,7 +15,7 @@ This document provides visual diagrams and detailed explanations of the D365 F&O
 
 ## High-Level Architecture
 
-```mermaid
+````mermaid
 graph TB
     subgraph "Client Layer"
         VS[Visual Studio 2022 17.14+ GitHub Copilot Agent Mode]
@@ -35,7 +35,7 @@ graph TB
     subgraph "MCP Server Components"
         HTTP[HTTP Transport Layer - Express + Rate Limiting]
         PROTO[MCP Protocol Handler - JSON-RPC 2.0]
-        TOOLS[Tool Handlers - 44 MCP Tools]
+        TOOLS[Tool Handlers - 51 MCP Tools]
         DB[(Symbols Database - FTS5, 584K+ symbols)]
         LDB[(Labels Database - FTS5, 19M+ labels, 70 languages)]
         CACHE[Redis Cache - Optional]
@@ -64,7 +64,7 @@ graph TB
 
 ## Request Flow
 
-```mermaid
+````mermaid
 sequenceDiagram
     participant IDE as Visual Studio 2022 / 2026
     participant HTTP as HTTP Transport
@@ -104,7 +104,7 @@ sequenceDiagram
 
 ## Component Architecture
 
-```mermaid
+````mermaid
 graph LR
     subgraph "Entry Point"
         INDEX[index.ts - Main Entry]
@@ -315,7 +315,7 @@ graph LR
 
 ### 1. Startup Flow
 
-```mermaid
+````mermaid
 graph TD
     START([Server Startup]) --> ENV[Load .env Config]
     ENV --> CACHE_INIT[Initialize Redis Cache - Optional]
@@ -344,7 +344,7 @@ graph TD
 
 ### 2. Search Query Flow
 
-```mermaid
+````mermaid
 graph TD
     QUERY([User Search Query]) --> CACHE_KEY[Generate Cache Key - search:query:limit]
     CACHE_KEY --> CACHE_CHECK{Cache Hit?}
@@ -366,7 +366,7 @@ graph TD
 
 ### 3. Class Info Query Flow
 
-```mermaid
+````mermaid
 graph TD
     CLASS_REQ([Get Class Info]) --> DB_LOOKUP[Symbol Index Lookup]
     DB_LOOKUP --> FOUND{Symbol Found?}
@@ -398,7 +398,7 @@ graph TD
 
 ## Deployment Architecture
 
-```mermaid
+````mermaid
 graph TB
     subgraph "GitHub"
         REPO[GitHub Repository - main branch]
@@ -445,7 +445,7 @@ graph TB
 
 ### Symbols Database
 
-```mermaid
+````mermaid
 erDiagram
     SYMBOLS {
         integer id PK
@@ -482,7 +482,7 @@ erDiagram
 
 ### Labels Database
 
-```mermaid
+````mermaid
 erDiagram
     LABELS {
         integer id PK
@@ -579,12 +579,12 @@ CREATE VIRTUAL TABLE symbols_fts USING fts5(
 
 ## MCP Protocol Endpoints
 
-```mermaid
+````mermaid
 graph LR
     subgraph "MCP Protocol Methods"
         INIT[initialize - Server Capabilities]
         NOTIFY[notifications/initialized - Handshake Complete]
-        TOOLS_LIST[tools/list - 44 Available Tools]
+        TOOLS_LIST[tools/list - 51 Available Tools]
         TOOLS_CALL[tools/call - Execute Tool]
         RES_LIST[resources/list - Empty]
         RES_TMPL[resources/templates/list - Empty]
@@ -593,7 +593,7 @@ graph LR
     end
 
     INIT -.-> CAPS[Capabilities: tools, resources, prompts]
-    TOOLS_LIST -.-> TOOL_DEFS["44 tools: search, batch_search, search_extensions, get_class_info, get_table_info, code_completion, get_method_signature, get_method_source, find_references, get_form_info, get_query_info, get_view_info, get_enum_info, get_edt_info, get_report_info, generate_code, analyze_code_patterns, suggest_method_implementation, analyze_class_completeness, get_api_usage_patterns, generate_d365fo_xml, create_d365fo_file, modify_d365fo_file, search_labels, get_label_info, create_label, rename_label, get_table_patterns, get_form_patterns, generate_smart_table, generate_smart_form, generate_smart_report, suggest_edt, get_security_artifact_info, get_security_coverage_for_object, get_menu_item_info, find_coc_extensions, find_event_handlers, get_table_extension_info, get_data_entity_info, analyze_extension_points, validate_object_naming, get_workspace_info, verify_d365fo_project"]
+    TOOLS_LIST -.-> TOOL_DEFS["51 tools: search, batch_search, search_extensions, get_class_info, get_table_info, code_completion, get_method_signature, get_method_source, find_references, get_form_info, get_query_info, get_view_info, get_enum_info, get_edt_info, get_report_info, generate_code, analyze_code_patterns, suggest_method_implementation, analyze_class_completeness, get_api_usage_patterns, generate_d365fo_xml, create_d365fo_file, modify_d365fo_file, search_labels, get_label_info, create_label, rename_label, get_table_patterns, get_form_patterns, generate_smart_table, generate_smart_form, generate_smart_report, suggest_edt, get_security_artifact_info, get_security_coverage_for_object, get_menu_item_info, find_coc_extensions, find_event_handlers, get_table_extension_info, get_data_entity_info, analyze_extension_points, validate_object_naming, get_workspace_info, verify_d365fo_project"]
     TOOLS_CALL -.-> EXEC[Tool Execution: search DB, parse XML, return results]
     style INIT fill:#4CAF50,color:#fff
     style TOOLS_CALL fill:#2196F3,color:#fff
@@ -849,9 +849,63 @@ Found 5 matches:
 
 ---
 
-## Performance Optimizations
+#### 22. build_d365fo_project
+Triggers local execution of msbuild or xppc.exe tracking error objects and code output streams exactly into the console context window natively bypassing manual dev tasks.
+
+#### 23. trigger_db_sync
+Executes sync.exe internally pushing the local updated AxTables towards SQL synchronization validating structural changes autonomously.
+
+#### 24. run_bp_check
+Wraps xppbp.exe logic around the git modified files checking them against the defined local PackagesLocalDirectory best practice standard setups.
+
+#### 25. sysTestRunner
+Executes specific SysTest objects routing testing outputs to text blocks readable by AI validations.
+
+#### 26. review_workspace_changes
+Uses local git diff HEAD --unified=3 combined with standard D365FO knowledge to provide a fully integrated AI code review directly into the active Copilot stream.
+
+#### 27. undo_last_modification
+Intelligently handles reversing git commits via git checkout HEAD or explicitly unlinking untracked items dynamically.
+
+
+### Local SDLC Execution
 
 ```mermaid
+graph TD
+    subgraph "IDE Layer"
+        CP[Copilot Chat]
+    end
+
+    subgraph "MCP Server"
+        SH[Tool Handlers]
+    end
+
+    subgraph "Local Execution (D365 Binaries)"
+        MSB[MSBuild]
+        SYNC[sync.exe]
+        XPPBP[xppbp.exe]
+        SYS[SysTestRunner.exe]
+        GIT[Native Git CLI]
+    end
+
+    CP -->|Request| SH
+    SH -->|build_d365fo_project| MSB
+    SH -->|trigger_db_sync| SYNC
+    SH -->|run_bp_check| XPPBP
+    SH -->|sysTestRunner| SYS
+    SH -->|review_workspace_changes| GIT
+    SH -->|undo_last_modification| GIT
+    
+    MSB -->|Stdout| SH
+    SYNC -->|XML Logs| SH
+    XPPBP -->|Log file| SH
+    SYS -->|Test Results| SH
+    GIT -->|Diff/Status| SH
+```
+
+## Performance Optimizations
+
+````mermaid
 graph TD
     subgraph "Caching Strategy"
         L1[Request] --> L2{Redis Cache}
@@ -900,7 +954,7 @@ graph TD
 
 ## Security Architecture
 
-```mermaid
+````mermaid
 graph TD
     subgraph "Authentication"
         A1[GitHub Copilot] --> A2[OAuth 2.0 Token]
@@ -931,7 +985,7 @@ graph TD
 
 ## Error Handling Flow
 
-```mermaid
+````mermaid
 graph TD
     ERR([Error Occurs]) --> TYPE{Error Type?}
     
@@ -975,7 +1029,7 @@ graph TD
 
 ## Scalability Considerations
 
-```mermaid
+````mermaid
 graph LR
     subgraph "Vertical Scaling"
         V1[P0v3: 1 vCPU, 1.75GB] -.-> V2[P1v3: 2 vCPU, 3.5GB]
@@ -1014,7 +1068,7 @@ graph LR
 
 ## Testing Architecture
 
-```mermaid
+````mermaid
 graph TB
     subgraph "Test Pyramid"
         UNIT[Unit Tests - Tools, Utils, Metadata Parser]
@@ -1052,7 +1106,7 @@ graph TB
 
 ## Technology Stack
 
-```mermaid
+````mermaid
 graph TB
     subgraph "Runtime"
         NODE[Node.js 24 LTS]
@@ -1104,7 +1158,7 @@ graph TB
 
 ## Future Enhancements
 
-```mermaid
+````mermaid
 graph LR
     subgraph "Planned Features"
         F1[Multi-Tenant Support - Per-organization databases]
