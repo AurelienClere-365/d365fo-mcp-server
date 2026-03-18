@@ -701,7 +701,13 @@ export class XppSymbolIndex {
       // PERFORMANCE: Also select only essential columns in fallback
       const fallbackCacheKey = types?.length ? `fallback_typed_${types.join('_')}` : 'fallback_all';
       let fallbackSql = `SELECT s.id, s.name, s.type, s.parent_name, s.signature, s.file_path, s.model, s.description FROM symbols s WHERE s.name LIKE ?`;
-      const fallbackParams: any[] = [`%${query.replace(/[%_]/g, '\\$&')}%`];
+      const escapeLikePattern = (value: string): string => {
+        // First escape backslashes, then escape SQL LIKE wildcards % and _
+        return value
+          .replace(/\\/g, '\\\\')
+          .replace(/[%_]/g, '\\$&');
+      };
+      const fallbackParams: any[] = [`%${escapeLikePattern(query)}%`];
       if (types && types.length > 0) {
         fallbackSql += ` AND s.type IN (${types.map(() => '?').join(',')})`;  
         fallbackParams.push(...types);
