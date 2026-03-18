@@ -82,7 +82,6 @@ export class CustomHttpTransport implements Transport {
   private server: Server;
   private app: Express;
   private context: XppServerContext;
-  private currentResponse: Response | null = null;
   private pendingRequests = new Map<string | number, (message: JSONRPCMessage) => void>();
 
   // Transport interface properties
@@ -117,12 +116,11 @@ export class CustomHttpTransport implements Transport {
   }
 
   async close(): Promise<void> {
-    this.currentResponse = null;
     this.pendingRequests.clear();
   }
 
   async send(message: JSONRPCMessage): Promise<void> {
-    // If this is a response to a request (has id), resolve the pending promise
+    // Route response to the correct pending request by id
     if ('id' in message && message.id !== undefined && message.id !== null) {
       const resolver = this.pendingRequests.get(message.id);
       if (resolver) {
@@ -131,12 +129,7 @@ export class CustomHttpTransport implements Transport {
         return;
       }
     }
-    
-    // Fallback: send via currentResponse if available
-    if (this.currentResponse && !this.currentResponse.headersSent) {
-      this.currentResponse.json(message);
-      this.currentResponse = null;
-    }
+    // Notifications / server-initiated messages with no id — nothing to route
   }
 
   private setupRoutes(): void {
@@ -145,6 +138,8 @@ export class CustomHttpTransport implements Transport {
 
     // MCP endpoint - direct JSON-RPC
     this.app.post('/mcp', async (req: Request, res: Response): Promise<void> => {
+      // Declare here so the catch block can clean it up regardless of where an error fires
+      let internalId: string | undefined;
       try {
         // Set response headers (keep-alive enabled for performance)
         res.setHeader('Content-Type', 'application/json');
@@ -169,9 +164,6 @@ export class CustomHttpTransport implements Transport {
           return;
         }
 
-        // Store response object for send() method
-        this.currentResponse = res;
-
         // Handle notifications (no response expected)
         if (!('id' in request)) {
           // Handle special notifications
@@ -180,7 +172,6 @@ export class CustomHttpTransport implements Transport {
               (request as any).method === 'shutdown') {
             // Send 202 and signal completion
             res.status(202).json({ status: 'accepted', completed: true });
-            this.currentResponse = null;
             
             // Trigger cleanup after response is sent
             setImmediate(() => {
@@ -195,7 +186,6 @@ export class CustomHttpTransport implements Transport {
             this.onmessage(request);
           }
           res.status(202).json({ status: 'accepted' });
-          this.currentResponse = null;
           return;
         }
 
@@ -224,17 +214,28 @@ export class CustomHttpTransport implements Transport {
           }
 
           const responsePromise = new Promise<JSONRPCMessage>((resolve, reject) => {
+            // Use a unique internal key so concurrent requests from different clients
+            // with identical JSON-RPC ids (e.g. both sending id=1) never collide.
+            // We swap the request.id to this unique key before handing it to the MCP
+            // server, so the response comes back with the same unique key and we can
+            // route it back to the correct resolver. The original client id is restored
+            // in the response before it is sent to the HTTP client.
+            internalId = `__t_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+            const originalId = request.id;
+            (request as any).id = internalId;
+
             const timeoutId = setTimeout(() => {
-              if (this.pendingRequests.has(request.id)) {
-                this.pendingRequests.delete(request.id);
+              if (this.pendingRequests.has(internalId!)) {
+                this.pendingRequests.delete(internalId!);
+                (request as any).id = originalId; // restore on timeout
                 reject(new Error('Request timeout'));
               }
             }, 30000);
 
-            // Wrap resolve so the timeout is always cancelled when a response arrives,
-            // preventing the timer from leaking after the promise is already settled.
-            this.pendingRequests.set(request.id, (message) => {
+            this.pendingRequests.set(internalId, (message) => {
               clearTimeout(timeoutId);
+              // Restore the original client id before resolving
+              if ('id' in message) (message as any).id = originalId;
               resolve(message);
             });
           });
@@ -278,7 +279,6 @@ export class CustomHttpTransport implements Transport {
             .setHeader('Content-Type', 'application/json')
             .send(JSON.stringify(response))
             .end();
-          this.currentResponse = null;
         } else {
           res.status(500).json({
             jsonrpc: '2.0',
@@ -292,11 +292,10 @@ export class CustomHttpTransport implements Transport {
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         process.stderr.write(`← Transport error: ${errorMsg}\n`);
-        this.currentResponse = null;
         
-        // Clean up pending request if it exists
-        if ('id' in (req.body as any)) {
-          this.pendingRequests.delete((req.body as any).id);
+        // Clean up the pending request using internalId (the Map key after the id swap)
+        if (internalId) {
+          this.pendingRequests.delete(internalId);
         }
         
         if (!res.headersSent) {
