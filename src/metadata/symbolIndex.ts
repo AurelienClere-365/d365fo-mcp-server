@@ -65,6 +65,15 @@ export class XppSymbolIndex {
     this.db.pragma('cache_size = -64000'); // 64MB cache (negative = kibibytes)
     this.db.pragma('temp_store = MEMORY'); // Store temp tables in memory
     this.db.pragma('mmap_size = 268435456'); // 256MB memory-mapped I/O
+    // Retry for up to 5 s before throwing SQLITE_BUSY ("database is locked").
+    // With the read pool + WAL auto-checkpoint, without this the writer would
+    // fail immediately whenever a checkpoint races with an active reader.
+    this.db.pragma('busy_timeout = 5000');
+    // Raise checkpoint threshold: auto-checkpoint fires every N WAL frames.
+    // Default is 1000; raising it reduces checkpoint frequency and therefore
+    // the chance of readers blocking the checkpoint (and vice versa).
+    // In production the DB is effectively read-only so checkpoints rarely write.
+    this.db.pragma('wal_autocheckpoint = 4000');
     
     // Configure labels DB similarly
     if (!this.labelsDb.pragma('journal_mode', { simple: true })) {
@@ -74,6 +83,8 @@ export class XppSymbolIndex {
     this.labelsDb.pragma('cache_size = -32000'); // 32MB cache for labels
     this.labelsDb.pragma('temp_store = MEMORY');
     this.labelsDb.pragma('mmap_size = 134217728'); // 128MB memory-mapped I/O
+    this.labelsDb.pragma('busy_timeout = 5000');
+    this.labelsDb.pragma('wal_autocheckpoint = 4000');
     // Note: page_size is a no-op on an existing database; only applies to new DBs
     // Note: optimize and ANALYZE are intentionally NOT run here — they are slow
     //       (seconds on 500K+ rows) and the pre-built DB already has persisted stats.
@@ -90,7 +101,10 @@ export class XppSymbolIndex {
       ));
       for (let i = 0; i < poolSize; i++) {
         const rConn = new Database(dbPath, { readonly: true });
-        // Tip: journal_mode and synchronous are irrelevant for read-only connections
+        // Read-only connections: set busy_timeout so that if a WAL checkpoint
+        // races with this reader, SQLite waits up to 5 s instead of failing
+        // immediately with SQLITE_BUSY ("database is locked").
+        rConn.pragma('busy_timeout = 5000');
         rConn.pragma('cache_size = -32000'); // 32 MB page cache per connection
         rConn.pragma('temp_store = MEMORY');
         rConn.pragma('mmap_size = 268435456');
@@ -99,6 +113,7 @@ export class XppSymbolIndex {
         // Labels read pool is only useful when a real file exists
         if (labelPath !== ':memory:') {
           const rLabels = new Database(labelPath, { readonly: true });
+          rLabels.pragma('busy_timeout = 5000');
           rLabels.pragma('cache_size = -16000'); // 16 MB per labels connection
           rLabels.pragma('temp_store = MEMORY');
           rLabels.pragma('mmap_size = 134217728');
