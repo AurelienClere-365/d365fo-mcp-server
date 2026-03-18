@@ -21,6 +21,7 @@ import { dirname, resolve } from 'path';
   }
 }
 import express from 'express';
+import compression from 'compression';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createXppMcpServer } from './server/mcpServer.js';
 import { createStreamableHttpTransport } from './server/transport.js';
@@ -591,6 +592,10 @@ async function main() {
 
     // Trust proxy - required for Azure App Service (behind reverse proxy)
     app.set('trust proxy', 1);
+
+    // Compress responses — JSON search results can be 50–200 KB;
+    // gzip typically gives 70–80 % reduction and Azure egress billing benefits.
+    app.use(compression());
 
     app.use(express.json());
 

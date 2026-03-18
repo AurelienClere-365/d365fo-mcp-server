@@ -23,6 +23,23 @@ export class XppSymbolIndex {
   private stmtCache: Map<string, Database.Statement> = new Map();
   private labelsStmtCache: Map<string, Database.Statement> = new Map();
 
+  // ─── Read-only connection pool ───────────────────────────────────────────────
+  // SQLite WAL mode allows N concurrent readers + 1 writer without blocking each
+  // other at the OS/SQLite level.  In a single Node.js process the event loop is
+  // still single-threaded, but having separate connection objects means the OS
+  // can hand each reader its own shared-cache page without serialising through a
+  // single connection lock.  Each connection also carries its own stmt cache so
+  // concurrent FTS5 queries don't share a mutable prepared-statement object.
+  // Pool size: READ_POOL_SIZE env var (default 3, clamped to 1–8).
+  // Not used for :memory: databases (each new Database(':memory:') is a separate,
+  // initially-empty DB).
+  private readPool: Database.Database[] = [];
+  private labelsReadPool: Database.Database[] = [];
+  private readPoolRR = 0;
+  // Per-connection prepared-statement cache.  Prepared statements are bound to
+  // their originating connection and cannot be shared across connections.
+  private perConnStmtCache = new WeakMap<Database.Database, Map<string, Database.Statement>>();
+
   constructor(dbPath: string, labelsDbPath?: string) {
     // Ensure database directory exists
     const dbDir = path.dirname(dbPath);
@@ -64,6 +81,64 @@ export class XppSymbolIndex {
     
     this.loadStandardModels();
     this.initializeDatabase();
+
+    // Open read-only pool connections (skip for :memory: — each new connection
+    // would be a separate empty in-memory DB)
+    if (dbPath !== ':memory:') {
+      const poolSize = Math.min(8, Math.max(1,
+        parseInt(process.env.READ_POOL_SIZE || '3', 10) || 3
+      ));
+      for (let i = 0; i < poolSize; i++) {
+        const rConn = new Database(dbPath, { readonly: true });
+        // Tip: journal_mode and synchronous are irrelevant for read-only connections
+        rConn.pragma('cache_size = -32000'); // 32 MB page cache per connection
+        rConn.pragma('temp_store = MEMORY');
+        rConn.pragma('mmap_size = 268435456');
+        this.readPool.push(rConn);
+
+        // Labels read pool is only useful when a real file exists
+        if (labelPath !== ':memory:') {
+          const rLabels = new Database(labelPath, { readonly: true });
+          rLabels.pragma('cache_size = -16000'); // 16 MB per labels connection
+          rLabels.pragma('temp_store = MEMORY');
+          rLabels.pragma('mmap_size = 134217728');
+          this.labelsReadPool.push(rLabels);
+        }
+      }
+    }
+  }
+
+  /**
+   * Returns the next read-only connection from the pool (round-robin).
+   * Falls back to the main writer connection when the pool is empty
+   * (e.g. :memory: databases used in write-only mode).
+   */
+  private getReadDb(): Database.Database {
+    if (this.readPool.length === 0) return this.db;
+    return this.readPool[this.readPoolRR++ % this.readPool.length];
+  }
+
+  /**
+   * Get (or lazily prepare) a statement on a specific connection.
+   * Uses the per-connection WeakMap cache so statements are never shared
+   * across connections.
+   */
+  private getReadStmt(
+    db: Database.Database,
+    key: string,
+    buildSql: () => string
+  ): Database.Statement {
+    let cache = this.perConnStmtCache.get(db);
+    if (!cache) {
+      cache = new Map();
+      this.perConnStmtCache.set(db, cache);
+    }
+    let stmt = cache.get(key);
+    if (!stmt) {
+      stmt = db.prepare(buildSql());
+      cache.set(key, stmt);
+    }
+    return stmt;
   }
 
   /**
@@ -600,8 +675,6 @@ export class XppSymbolIndex {
    */
   searchSymbols(query: string, limit: number = 20, types?: string[]): XppSymbol[] {
     const ftsQuery = this.sanitizeFtsQuery(query);
-    
-    // PERFORMANCE: Cache prepared statements for common search patterns
     const cacheKey = types?.length ? `search_typed_${types.join('_')}` : 'search_all';
     
     // PERFORMANCE: Select only essential columns, not s.* (avoids loading large text fields)
@@ -611,25 +684,18 @@ export class XppSymbolIndex {
       JOIN symbols s ON s.id = fts.rowid
       WHERE symbols_fts MATCH ?
     `;
-
     const params: any[] = [ftsQuery];
-
     if (types && types.length > 0) {
       sql += ` AND s.type IN (${types.map(() => '?').join(',')})`;  
       params.push(...types);
     }
-
     sql += ` ORDER BY rank LIMIT ?`;
     params.push(limit);
 
+    const db = this.getReadDb();
     try {
-      let stmt = this.stmtCache.get(cacheKey);
-      if (!stmt) {
-        stmt = this.db.prepare(sql);
-        this.stmtCache.set(cacheKey, stmt);
-      }
-      const rows = stmt.all(...params) as any[];
-      return rows.map(row => this.rowToSymbol(row));
+      const stmt = this.getReadStmt(db, cacheKey, () => sql);
+      return (stmt.all(...params) as any[]).map(row => this.rowToSymbol(row));
     } catch {
       // FTS5 syntax error (e.g. user typed *, ", (, ), -) — fall back to LIKE contains search
       // PERFORMANCE: Also select only essential columns in fallback
@@ -637,17 +703,13 @@ export class XppSymbolIndex {
       let fallbackSql = `SELECT s.id, s.name, s.type, s.parent_name, s.signature, s.file_path, s.model, s.description FROM symbols s WHERE s.name LIKE ?`;
       const fallbackParams: any[] = [`%${query.replace(/[%_]/g, '\\$&')}%`];
       if (types && types.length > 0) {
-        fallbackSql += ` AND s.type IN (${types.map(() => '?').join(',')})`;
+        fallbackSql += ` AND s.type IN (${types.map(() => '?').join(',')})`;  
         fallbackParams.push(...types);
       }
       fallbackSql += ` ORDER BY s.name LIMIT ?`;
       fallbackParams.push(limit);
       
-      let fallbackStmt = this.stmtCache.get(fallbackCacheKey);
-      if (!fallbackStmt) {
-        fallbackStmt = this.db.prepare(fallbackSql);
-        this.stmtCache.set(fallbackCacheKey, fallbackStmt);
-      }
+      const fallbackStmt = this.getReadStmt(db, fallbackCacheKey, () => fallbackSql);
       return (fallbackStmt.all(...fallbackParams) as any[]).map(r => this.rowToSymbol(r));
     }
   }
@@ -662,31 +724,27 @@ export class XppSymbolIndex {
       FROM symbols
       WHERE name LIKE ?
     `;
-
     const params: any[] = [`${prefix}%`];
-
     if (types && types.length > 0) {
-      sql += ` AND type IN (${types.map(() => '?').join(',')})`;
+      sql += ` AND type IN (${types.map(() => '?').join(',')})`;  
       params.push(...types);
     }
-
     sql += ` ORDER BY name LIMIT ?`;
     params.push(limit);
 
-    const stmt = this.db.prepare(sql);
-    const rows = stmt.all(...params) as any[];
-    return rows.map(row => this.rowToSymbol(row));
+    const cacheKey = types?.length ? `prefix_typed_${types.join('_')}` : 'prefix_all';
+    const db = this.getReadDb();
+    const stmt = this.getReadStmt(db, cacheKey, () => sql);
+    return (stmt.all(...params) as any[]).map(row => this.rowToSymbol(row));
   }
 
   /**
    * Get a specific symbol by name and type
    */
   getSymbolByName(name: string, type: string): XppSymbol | null {
-    let stmt = this.stmtCache.get('getSymbolByName');
-    if (!stmt) {
-      stmt = this.db.prepare(`SELECT * FROM symbols WHERE name = ? AND type = ? LIMIT 1`);
-      this.stmtCache.set('getSymbolByName', stmt);
-    }
+    const db = this.getReadDb();
+    const stmt = this.getReadStmt(db, 'getSymbolByName',
+      () => `SELECT * FROM symbols WHERE name = ? AND type = ? LIMIT 1`);
     const row = stmt.get(name, type) as any;
     return row ? this.rowToSymbol(row) : null;
   }
@@ -695,41 +753,30 @@ export class XppSymbolIndex {
    * Get all classes (for resource listing)
    */
   getAllClasses(): XppSymbol[] {
-    const stmt = this.db.prepare(`
-      SELECT *
-      FROM symbols
-      WHERE type = 'class'
-      ORDER BY name
-    `);
-
-    const rows = stmt.all() as any[];
-    return rows.map(row => this.rowToSymbol(row));
+    const stmt = this.getReadDb().prepare(
+      `SELECT * FROM symbols WHERE type = 'class' ORDER BY name`
+    );
+    return (stmt.all() as any[]).map(row => this.rowToSymbol(row));
   }
 
   /**
    * Get symbol count
    */
   getSymbolCount(): number {
-    const stmt = this.db.prepare('SELECT COUNT(*) as count FROM symbols');
-    const result = stmt.get() as { count: number };
-    return result.count;
+    const stmt = this.getReadDb().prepare('SELECT COUNT(*) as count FROM symbols');
+    return (stmt.get() as { count: number }).count;
   }
 
   /**
    * Get symbol count by type
    */
   getSymbolCountByType(): Record<string, number> {
-    const stmt = this.db.prepare(`
-      SELECT type, COUNT(*) as count
-      FROM symbols
-      GROUP BY type
-    `);
-
+    const stmt = this.getReadDb().prepare(
+      `SELECT type, COUNT(*) as count FROM symbols GROUP BY type`
+    );
     const rows = stmt.all() as { type: string; count: number }[];
     const result: Record<string, number> = {};
-    for (const row of rows) {
-      result[row.type] = row.count;
-    }
+    for (const row of rows) result[row.type] = row.count;
     return result;
   }
 

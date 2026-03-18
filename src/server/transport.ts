@@ -146,11 +146,13 @@ export class CustomHttpTransport implements Transport {
         
         const request = req.body as JSONRPCRequest;
 
-        // Extract GitHub Copilot workspace path and update ConfigManager runtime context
+        // Extract GitHub Copilot workspace path for per-request isolation.
+        // We no longer mutate the global ConfigManager singleton — instead both
+        // onmessage call-sites below run inside runWithRequestContext so concurrent
+        // requests from different users never bleed their workspacePath through
+        // the shared runtimeContext.
         const workspacePath = extractWorkspaceFromRequest(req, request);
-        if (workspacePath) {
-          getConfigManager().setRuntimeContext({ workspacePath });
-        }
+        const requestCtx = workspacePath ? { workspacePath } : {};
 
         if (!request.jsonrpc || !request.method) {
           res.status(400).json({
@@ -183,7 +185,12 @@ export class CustomHttpTransport implements Transport {
           }
           
           if (this.onmessage) {
-            this.onmessage(request);
+            // Notifications don't need response routing, but they DO need the correct
+            // per-request workspacePath context so tool dispatch is consistent.
+            getConfigManager().runWithRequestContext(requestCtx, () => {
+              this.onmessage!(request);
+              return Promise.resolve();
+            }).catch(() => {});
           }
           res.status(202).json({ status: 'accepted' });
           return;
@@ -240,11 +247,13 @@ export class CustomHttpTransport implements Transport {
             });
           });
 
-          // Send request to MCP server
-          this.onmessage(request);
-          
-          // Wait for response from send()
-          const response = await responsePromise;
+          // Send request to MCP server and await response — both inside the
+          // per-request AsyncLocalStorage context so tool handlers see the correct
+          // workspacePath for this specific user's request.
+          const response = await getConfigManager().runWithRequestContext(requestCtx, async () => {
+            this.onmessage!(request);
+            return await responsePromise;
+          });
           
           // Log response (skip silent probes)
           if (!isSilentProbe) {

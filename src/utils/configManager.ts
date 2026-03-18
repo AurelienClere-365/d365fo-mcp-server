@@ -7,6 +7,7 @@ import * as fs from 'fs/promises';
 import { existsSync, realpathSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { autoDetectD365Project, detectD365Project, scanAllD365Projects, extractModelNameFromProject, detectGitBranch, isMicrosoftDemoModel, type D365ProjectInfo } from './workspaceDetector.js';
 import { registerCustomModel } from './modelClassifier.js';
 import { XppConfigProvider, type XppEnvironmentConfig } from './xppConfigProvider.js';
@@ -48,6 +49,13 @@ class ConfigManager {
   private config: McpConfig | null = null;
   private configPath: string;
   private runtimeContext: Partial<McpContext> = {};
+  /**
+   * Per-request context storage — isolates each HTTP request's workspace path
+   * from concurrent requests. Populated via runWithRequestContext() in transport.ts.
+   * Takes priority over runtimeContext in getContext() so multi-user HTTP scenarios
+   * never bleed workspace state between requests.
+   */
+  private requestContextStorage = new AsyncLocalStorage<Partial<McpContext>>();
   private autoDetectedProject: D365ProjectInfo | null = null;
   private autoDetectionAttempted: boolean = false;
   // Cache auto-detection results per workspace path (PERFORMANCE FIX)
@@ -591,16 +599,31 @@ class ConfigManager {
    */
   getContext(): McpContext | null {
     const fileContext = this.config?.servers.context || null;
-    
-    // Merge file config with runtime context (runtime overrides file)
-    if (!fileContext && Object.keys(this.runtimeContext).length === 0) {
+    // Per-request context (AsyncLocalStorage) takes priority over the shared
+    // runtimeContext singleton — this prevents workspace paths from bleeding
+    // between concurrent HTTP requests from different users.
+    const requestCtx = this.requestContextStorage.getStore() ?? {};
+    const effectiveRuntime = Object.keys(requestCtx).length > 0
+      ? { ...this.runtimeContext, ...requestCtx }
+      : this.runtimeContext;
+
+    if (!fileContext && Object.keys(effectiveRuntime).length === 0) {
       return null;
     }
-    
+
     return {
       ...fileContext,
-      ...this.runtimeContext,
+      ...effectiveRuntime,
     };
+  }
+
+  /**
+   * Run fn inside an isolated per-request AsyncLocalStorage context.
+   * All calls to getContext() within fn (and any awaited Promises it starts)
+   * will see ctx merged over runtimeContext, without mutating shared state.
+   */
+  runWithRequestContext<T>(ctx: Partial<McpContext>, fn: () => Promise<T>): Promise<T> {
+    return this.requestContextStorage.run(ctx, fn);
   }
 
   /**

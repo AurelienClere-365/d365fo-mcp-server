@@ -21,31 +21,42 @@ function parseEnvInt(key: string, defaultVal: number, min: number, max: number):
 }
 
 /**
- * Custom key generator that handles IP addresses with ports
- * Uses ipKeyGenerator helper for proper IPv6 support
- * Fixes Azure App Service proxy scenarios where IP comes as "IP:PORT"
+ * Rate-limit key generator: prefer Bearer token identity over IP address.
+ *
+ * Why: Behind corporate VPN / NAT all developers share a single egress IP.
+ * Using the IP as the key means 10 devs share the same bucket and each gets
+ * only 1/10 of the allowed requests. The Authorization header carries a
+ * per-user token (GitHub Copilot OAuth token), so it identifies individual
+ * users even when they all come from the same IP.
+ *
+ * Security: we use only the last 32 characters of the token so the full
+ * secret never appears in logs or memory for longer than necessary.
+ * Falls back to IP when no Authorization header is present (curl, healthz).
  */
 function generateKey(req: Request): string {
-  // Get IP from various sources (trusting proxy headers)
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.length > 8) {
+    // Take last 32 chars — enough entropy to distinguish users, avoids logging full token
+    return 'tok:' + authHeader.slice(-32);
+  }
+
+  // Fallback: IP-based key (same logic as before)
   const rawIp = req.ip || req.socket.remoteAddress || 'unknown';
-  
-  // Azure App Service sometimes appends port to IP (e.g., "20.73.89.75:1024")
-  // Strip port number before normalizing
   const ipWithoutPort = rawIp.replace(/:\d+$/, '');
-  
-  // Use the official ipKeyGenerator helper for proper IPv4/IPv6 normalization
-  const normalizedIp = ipKeyGenerator(ipWithoutPort);
-  
-  return normalizedIp;
+  return 'ip:' + ipKeyGenerator(ipWithoutPort);
 }
 
 /**
  * General API rate limiter
- * Default: 100 requests per 15 minutes per IP
+ * Default: 500 requests per 15 minutes per user token (or IP as fallback).
+ * GitHub Copilot is chatty: a single interaction (e.g. get_class_info + search
+ * + batch_search) can easily consume 10–20 requests. With 10 developers the old
+ * default of 100 / 15 min was hit within 1–2 minutes per user.
+ * Override via RATE_LIMIT_MAX_REQUESTS env var.
  */
 export const apiRateLimiter = rateLimit({
   windowMs: parseEnvInt('RATE_LIMIT_WINDOW_MS', 900000, 10000, 86400000), // 10s–24h
-  max: parseEnvInt('RATE_LIMIT_MAX_REQUESTS', 100, 1, 10000),
+  max: parseEnvInt('RATE_LIMIT_MAX_REQUESTS', 500, 1, 100000),
   keyGenerator: generateKey,
   validate: {
     // We safely use ipKeyGenerator in our custom generateKey function
