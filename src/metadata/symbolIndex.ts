@@ -134,6 +134,24 @@ export class XppSymbolIndex {
   }
 
   /**
+   * Close and drain all read-pool connections.
+   * Must be called before setting locking_mode = EXCLUSIVE on the writer
+   * connection (e.g. in build scripts) — SQLite cannot grant EXCLUSIVE while
+   * any other connection (even read-only, even in-process) holds a shared lock.
+   */
+  closeReadPool(): void {
+    for (const conn of this.readPool) {
+      try { conn.close(); } catch { /* ignore */ }
+    }
+    this.readPool = [];
+    for (const conn of this.labelsReadPool) {
+      try { conn.close(); } catch { /* ignore */ }
+    }
+    this.labelsReadPool = [];
+    this.readPoolRR = 0;
+  }
+
+  /**
    * Get (or lazily prepare) a statement on a specific connection.
    * Uses the per-connection WeakMap cache so statements are never shared
    * across connections.

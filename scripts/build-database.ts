@@ -45,6 +45,10 @@ async function buildDatabase() {
 
   // Optimize for bulk loading: use MEMORY journal during build
   console.log('⚡ Setting bulk load optimizations (MEMORY journal)...');
+  // Close read-pool connections first: SQLite cannot grant locking_mode = EXCLUSIVE
+  // while any other connection (even read-only, even in-process) holds a shared lock.
+  // The pool is only needed for concurrent production reads, not for build scripts.
+  symbolIndex.closeReadPool();
   symbolIndex.db.pragma('journal_mode = MEMORY'); // Fastest for bulk inserts
   symbolIndex.db.pragma('synchronous = OFF');     // Maximum speed (safe for build process)
   symbolIndex.db.pragma('locking_mode = EXCLUSIVE'); // No concurrent access needed during build
