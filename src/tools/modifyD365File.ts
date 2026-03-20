@@ -13,6 +13,7 @@ import path from 'path';
 import { parseStringPromise, Builder } from 'xml2js';
 import { getConfigManager } from '../utils/configManager.js';
 import { PackageResolver } from '../utils/packageResolver.js';
+import { resolveDbPathLocally } from '../utils/metadataResolver.js';
 
 /**
  * Decode the standard XML entities (&lt;, &gt;, &apos;, &quot;, &amp;) and normalise
@@ -132,6 +133,11 @@ const ModifyD365FileArgsSchema = z.object({
   ),
   previousSibling: z.string().optional().describe(
     'Name of the sibling control to position after (used with positionType=AfterItem).'
+  ),
+  baseFormName: z.string().optional().describe(
+    'Base form name used for auto-resolving parentControl when the extension name does not contain it. ' +
+    'E.g. if objectName="SalesOrder.MyExt" the base form is auto-detected as "SalesOrder". ' +
+    'Pass this only when auto-detection fails (e.g. the extension has a non-standard name).'
   ),
   
   // For add-method
@@ -395,6 +401,50 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
       filePath: explicitFilePath,
     } = args;
 
+    // ── Auto-resolve parentControl for add-control on form-extension ─────────
+    // When `parentControl` is a fuzzy / lowercase string (e.g. "general"), look
+    // up the base form XML, walk the control tree, and resolve to the exact name.
+    // This makes add-control seamless — no prior get_form_info call required.
+    let addControlNote = '';
+    if (operation === 'add-control' && objectType === 'form-extension' && args.parentControl) {
+      const resolution = await resolveParentControl(
+        objectName,
+        args.parentControl,
+        symbolIndex,
+        (args as any).baseFormName,
+      );
+
+      if (resolution && 'multiple' in resolution) {
+        const candidateList = resolution.multiple
+          .slice(0, 20)
+          .map(c =>
+            `  • \`${c.name}\`` +
+            (c.parentName ? ` (parent: \`${c.parentName}\`)` : '') +
+            ` — path: ${c.pathStr}`
+          )
+          .join('\n');
+        return {
+          content: [{
+            type: 'text',
+            text:
+              `⚠️ **Ambiguous parentControl** — "${args.parentControl}" matches multiple controls in the base form.\n\n` +
+              `**Candidates** (${resolution.multiple.length}):\n${candidateList}\n\n` +
+              `Re-call \`add-control\` with the exact \`parentControl\` name from the list above.`,
+          }],
+        };
+      }
+
+      if (resolution && 'resolved' in resolution) {
+        if (resolution.resolved !== args.parentControl) {
+          addControlNote = `\n\n> 🔍 **parentControl** auto-resolved: \`"${args.parentControl}"\` → \`"${resolution.resolved}"\` (${resolution.pathStr})`;
+        } else {
+          addControlNote = `\n\n> ✅ **parentControl** \`"${resolution.resolved}"\` confirmed in base form (${resolution.pathStr})`;
+        }
+        (args as any).parentControl = resolution.resolved;
+      }
+      // null → form not found or no match; proceed with original value (compiler will catch it)
+    }
+
     // 1. Find the file
     const filePath = await findD365File(symbolIndex, objectType, objectName, modelName, workspacePath, explicitFilePath);
 
@@ -573,6 +623,12 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
     // for all <Declaration> and <Source> elements. See rewrapXmlTagAsCdata() above.
     newXml = rewrapXmlTagAsCdata('Declaration', newXml);
     newXml = rewrapXmlTagAsCdata('Source', newXml);
+    // AxReport: re-wrap <Text> blocks (RDL design content) in CDATA.
+    // xml2js strips CDATA on parse and Builder entity-encodes < > & on serialize;
+    // rewrapXmlTagAsCdata decodes those entities and restores the CDATA wrapper.
+    if (objectType === 'report') {
+      newXml = rewrapXmlTagAsCdata('Text', newXml);
+    }
 
     // 6a. Dry-run: return a unified-diff preview without touching the file
     if (dryRun) {
@@ -590,7 +646,8 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
               `| **File** | \`${actualFilePath}\` |\n\n` +
               `### What will change\n\n` +
               `\`\`\`diff\n${diff}\n\`\`\`\n\n` +
-              `> ✅ To apply the changes, call again **without** the \`dryRun\` parameter (or with \`dryRun: false\`).`,
+              `> ✅ To apply the changes, call again **without** the \`dryRun\` parameter (or with \`dryRun: false\`).` +
+              addControlNote,
           },
         ],
       };
@@ -610,7 +667,7 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
           type: 'text',
           text:
             `✅ ${message}\n\n` +
-            `**File:** ${actualFilePath}\n\n` +
+            `**File:** ${actualFilePath}${addControlNote}\n\n` +
             `### Applied changes\n\n` +
             `\`\`\`diff\n${appliedDiff}\n\`\`\`\n\n` +
             `**Next steps:**\n- Review changes in Visual Studio\n- Build the model to validate\n- Commit changes to source control`,
@@ -975,7 +1032,57 @@ function hasMethodSignatureLine(code: string, methodName: string): boolean {
  * Behaviour mirrors replace_string_in_file: the surrounding code is preserved and
  * the match position is maintained — only the matched text is overwritten.
  */
+
+/**
+ * Recursively search all string leaf values in a parsed xml2js object tree and
+ * replace the first occurrence of `oldText` with `newText`.
+ * Returns true when a replacement was made.
+ */
+function replaceInXmlObjRecursive(obj: any, oldText: string, newText: string): boolean {
+  if (!obj || typeof obj !== 'object') return false;
+
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < obj.length; i++) {
+      if (typeof obj[i] === 'string') {
+        if (obj[i].includes(oldText)) {
+          obj[i] = obj[i].replace(oldText, newText);
+          return true;
+        }
+      } else {
+        if (replaceInXmlObjRecursive(obj[i], oldText, newText)) return true;
+      }
+    }
+  } else {
+    for (const key of Object.keys(obj)) {
+      if (replaceInXmlObjRecursive(obj[key], oldText, newText)) return true;
+    }
+  }
+  return false;
+}
+
 async function replaceCode(xmlObj: any, objectType: string, args: any): Promise<boolean> {
+  // AxReport has no <SourceCode> block — its content is the RDL XML stored in
+  // <Designs><AxReportDesign><Text> (CDATA) plus property values across the tree.
+  // For reports we perform a recursive text search-and-replace across the whole xmlObj.
+  if (objectType === 'report') {
+    const { oldCode, newCode } = args;
+    if (!oldCode) throw new Error('oldCode is required for replace-code operation');
+    if (newCode === undefined || newCode === null)
+      throw new Error('newCode is required for replace-code operation (pass "" to delete)');
+
+    const decodedOld = decodeXmlEntitiesFromXppSource(oldCode);
+    const decodedNew = decodeXmlEntitiesFromXppSource(newCode);
+
+    if (!replaceInXmlObjRecursive(xmlObj, decodedOld, decodedNew)) {
+      throw new Error(
+        `oldCode not found anywhere in the report XML.\n` +
+        `Searched for:\n${decodedOld}\n\n` +
+        `Tip: use get_report_info() to inspect the current report structure and verify the exact text.`
+      );
+    }
+    return true;
+  }
+
   const { methodName, oldCode, newCode } = args;
 
   if (!oldCode) {
@@ -1822,6 +1929,169 @@ function resolveControlTypeAttrs(controlType: string): { iType: string; xmlType:
  * Creates an <AxFormExtensionControl> entry with the new <FormControl> nested inside
  * and <Parent> pointing to the existing parent control in the base form.
  */
+// ─── Form parent-control auto-resolution ────────────────────────────────────
+//
+// When add-control is called with a fuzzy parentControl (e.g. "general"),
+// these helpers find the base form XML, walk the control hierarchy, and return
+// the exact control name so the caller never has to call get_form_info first.
+
+interface ResolvedControl {
+  name: string;
+  parentName: string | null;
+  pathStr: string;
+}
+
+/**
+ * Recursively walk an AxFormControl node forest and collect every control.
+ */
+function walkFormControls(
+  nodes: any[],
+  out: ResolvedControl[],
+  parentName: string | null,
+  pathParts: string[],
+): void {
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object') continue;
+    const name: string = Array.isArray(node.Name) ? node.Name[0] : (node.Name ?? '');
+    if (!name) continue;
+    const currentPath = [...pathParts, name];
+    out.push({ name, parentName, pathStr: currentPath.join(' › ') });
+    const cn = Array.isArray(node.Controls) ? node.Controls[0] : node.Controls;
+    if (cn?.AxFormControl) {
+      const children = Array.isArray(cn.AxFormControl) ? cn.AxFormControl : [cn.AxFormControl];
+      walkFormControls(children, out, name, currentPath);
+    }
+  }
+}
+
+/**
+ * Extract all controls from a parsed AxForm xmlObj.
+ */
+function allControlsFromFormXmlObj(xmlObj: any): ResolvedControl[] {
+  const results: ResolvedControl[] = [];
+  const axForm = xmlObj.AxForm;
+  if (!axForm) return results;
+
+  const designNode = Array.isArray(axForm.Design) ? axForm.Design[0] : axForm.Design;
+  if (!designNode) return results;
+
+  let rootNodes: any[] = [];
+  // AxFormDesign wrapper (standard D365FO 10.0 format)
+  if (designNode.AxFormDesign) {
+    const fds = Array.isArray(designNode.AxFormDesign) ? designNode.AxFormDesign : [designNode.AxFormDesign];
+    for (const fd of fds) {
+      const cn = Array.isArray(fd.Controls) ? fd.Controls[0] : fd.Controls;
+      if (cn?.AxFormControl) {
+        const items = Array.isArray(cn.AxFormControl) ? cn.AxFormControl : [cn.AxFormControl];
+        rootNodes = rootNodes.concat(items);
+      }
+    }
+  } else if (designNode.Controls) {
+    const cn = Array.isArray(designNode.Controls) ? designNode.Controls[0] : designNode.Controls;
+    if (cn?.AxFormControl) {
+      rootNodes = Array.isArray(cn.AxFormControl) ? cn.AxFormControl : [cn.AxFormControl];
+    }
+  }
+  walkFormControls(rootNodes, results, null, []);
+  return results;
+}
+
+/**
+ * Locate the base form XML on disk, trying DB path → remapped path → filesystem scan.
+ * Returns raw XML content, or null if not accessible.
+ */
+async function findBaseFormXml(baseFormName: string, symbolIndex: any): Promise<string | null> {
+  // Helper: read a file, transparently following JSON metadata proxies.
+  async function tryRead(p: string): Promise<string | null> {
+    try {
+      const raw = await fs.readFile(p, 'utf-8');
+      if (raw.trimStart().startsWith('{')) {
+        const data = JSON.parse(raw);
+        if (data.sourcePath) {
+          try { return await fs.readFile(data.sourcePath, 'utf-8'); } catch { return null; }
+        }
+        return null;
+      }
+      return raw;
+    } catch { return null; }
+  }
+
+  // 1. Symbol DB lookup
+  let dbFilePath: string | null = null;
+  try {
+    const row = symbolIndex.db.prepare(
+      `SELECT file_path FROM symbols WHERE type = 'form' AND name = ? LIMIT 1`
+    ).get(baseFormName) as any;
+    if (row?.file_path) dbFilePath = row.file_path;
+  } catch { /* ignore */ }
+
+  if (dbFilePath) {
+    // Try absolute DB path as-is
+    const direct = await tryRead(dbFilePath);
+    if (direct) return direct;
+
+    // DB stored a relative path — join with configured packagePath
+    if (!path.isAbsolute(dbFilePath)) {
+      const cm = getConfigManager();
+      await cm.ensureLoaded();
+      const pkgPath = cm.getPackagePath() || 'K:\\AosService\\PackagesLocalDirectory';
+      const abs = await tryRead(path.join(pkgPath, dbFilePath));
+      if (abs) return abs;
+    }
+
+    // Build-agent path remapping (e.g. /home/vsts/... → local PackagesLocalDirectory)
+    const remapped = await resolveDbPathLocally(dbFilePath);
+    if (remapped) {
+      const content = await tryRead(remapped);
+      if (content) return content;
+    }
+  }
+
+  // 2. Filesystem scan using model from config
+  const diskPath = await findD365FileOnDisk('form', baseFormName);
+  if (diskPath) return tryRead(diskPath);
+
+  return null;
+}
+
+/**
+ * Resolve a possibly-fuzzy `parentControl` value to the exact control name in the base form.
+ *
+ * Returns:
+ *  { resolved, pathStr }   — unique case-insensitive substring match (use this name)
+ *  { multiple }            — ambiguous (return candidates to caller)
+ *  null                    — form not found or no controls matched; caller uses original value
+ */
+async function resolveParentControl(
+  extensionObjectName: string,
+  parentControlQuery: string,
+  symbolIndex: any,
+  explicitBaseFormName?: string,
+): Promise<{ resolved: string; pathStr: string } | { multiple: ResolvedControl[] } | null> {
+  // Base form name: "CustTable.MyExt" → "CustTable"
+  const baseFormName = explicitBaseFormName || extensionObjectName.split('.')[0];
+  if (!baseFormName) return null;
+
+  const xmlContent = await findBaseFormXml(baseFormName, symbolIndex);
+  if (!xmlContent) return null;
+
+  let xmlObj: any;
+  try { xmlObj = await parseStringPromise(xmlContent); } catch { return null; }
+
+  const all = allControlsFromFormXmlObj(xmlObj);
+  const lq = parentControlQuery.toLowerCase();
+  const matches = all.filter(c => c.name.toLowerCase().includes(lq));
+
+  if (matches.length === 0) return null; // No match — caller proceeds with original
+  if (matches.length === 1) return { resolved: matches[0].name, pathStr: matches[0].pathStr };
+
+  // Multiple substring matches — try an exact case-insensitive match first
+  const exact = matches.filter(c => c.name.toLowerCase() === lq);
+  if (exact.length === 1) return { resolved: exact[0].name, pathStr: exact[0].pathStr };
+
+  return { multiple: matches };
+}
+
 async function addControl(xmlObj: any, objectType: string, args: any): Promise<boolean> {
   if (objectType !== 'form-extension') {
     throw new Error('add-control is only supported for form-extension objects');
