@@ -127,6 +127,31 @@ Use this guide to select the correct tool:
 
 **Why:** D365FO metadata is in SQL database, not workspace files. Built-in tools scan 350+ models causing hangs. MCP tools use indexed queries (<100ms).
 
+### 6. NEVER Use Scripts as Fallback — and NEVER Read-then-Write
+**When an MCP tool is unavailable or returns an error, NEVER:**
+- ❌ Write or run PowerShell scripts (.ps1) to modify D365FO XML files — they hang indefinitely in VS 2022
+- ❌ Write or run Python scripts to patch XML — same issue, no result
+- ❌ Use \`run_in_terminal\`, \`execute_command\`, or any shell execution to write files
+- ❌ Generate \`Set-Content\`, \`Out-File\`, \`[System.IO.File]::WriteAllText\` or similar file-write commands
+
+**Critical anti-pattern — NEVER do this:**
+\`\`\`
+// ❌ WRONG — read_file succeeds (file exists on disk), but there is no write_file tool in VS 2022
+read_file(path)          // reads XML for "context"
+→ manually construct XML edit in memory
+→ generate PowerShell Set-Content script to write it back
+→ script hangs forever, no output, infinite spinner
+\`\`\`
+This pattern looks reasonable but **always fails** in VS 2022 because \`read_file\` exists but \`write_file\`/\`edit_file\` do not. The only way to write D365FO XML is \`modify_d365fo_file\`.
+
+**Instead, when a tool cannot complete the operation:**
+1. Report the exact error to the user (e.g. "Field group X already exists")
+2. Suggest the correct MCP tool to use next (e.g. \`add-field-to-field-group\`)
+3. **Skip the step entirely** — never attempt a workaround via scripts or shell commands
+4. If no MCP tool exists for the operation, tell the user to perform it manually in Visual Studio AOT
+
+**Why:** Visual Studio 2022 MCP integration does not allow interactive terminal sessions. Any spawned PowerShell/Python process will hang waiting for stdin or permissions, causing an infinite spinner with no output.
+
 ## Workflow Examples
 
 ### Creating a New Class

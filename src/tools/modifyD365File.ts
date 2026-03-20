@@ -2049,6 +2049,14 @@ async function addFieldGroup(xmlObj: any, objectType: string, args: any): Promis
 
   const container = ensureArrayContainer(root, 'FieldGroups', 'AxTableFieldGroup');
 
+  // Check for duplicate — field group with this name already exists
+  const existing = container.AxTableFieldGroup.find(
+    (fg: any) => (Array.isArray(fg.Name) ? fg.Name[0] : fg.Name) === fieldGroupName
+  );
+  if (existing) {
+    throw new Error(`Field group "${fieldGroupName}" already exists in this ${objectType}. Use add-field-to-field-group to add fields to it.`);
+  }
+
   const fgFieldNodes = ((fieldGroupFields || []) as string[]).map((f: string) => ({ DataField: [f] }));
 
   const newFg: any = {
