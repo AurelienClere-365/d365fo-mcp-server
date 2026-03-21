@@ -100,6 +100,7 @@ export function createXppMcpServer(context: XppServerContext): Server {
         tools: {},
         resources: {},
         prompts: {},
+        logging: {},
       },
     }
   );

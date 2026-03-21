@@ -11,6 +11,7 @@ import type { Express, Request, Response } from 'express';
 import { apiRateLimiter } from '../middleware/rateLimiter.js';
 import type { XppServerContext } from '../types/context.js';
 import { getConfigManager } from '../utils/configManager.js';
+import { buildProgressMessage } from '../utils/toolProgressMessage.js';
 
 /**
  * Extract workspace folder path from GitHub Copilot MCP request.
@@ -255,6 +256,21 @@ export class CustomHttpTransport implements Transport {
             return await responsePromise;
           });
           
+          // In HTTP mode the server cannot push notifications before a response
+          // (request-response only — no SSE). As a workaround we prepend the same
+          // progress description as the first line of the tool result so the user
+          // can see what was processed when expanding the "ran <tool>" detail in VS2026.
+          if (!isSilentProbe && 'result' in response) {
+            const progressText = buildProgressMessage(toolName, args);
+            const resultContent = (response as any).result?.content;
+            if (Array.isArray(resultContent) && resultContent.length > 0) {
+              const first = resultContent[0];
+              if (first?.type === 'text' && typeof first.text === 'string') {
+                first.text = `${progressText}\n\n${first.text}`;
+              }
+            }
+          }
+
           // Log response (skip silent probes)
           if (!isSilentProbe) {
             if ('result' in response) {

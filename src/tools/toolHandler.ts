@@ -58,8 +58,7 @@ import { undoLastModificationTool } from './undoLastModification.js';
 import { xppKnowledgeTool } from './xppKnowledge.js';
 import { d365foErrorHelpTool } from './d365foErrorHelp.js';
 import { recordToolStart, startMetricsLogging } from '../utils/toolMetrics.js';
-
-
+import { buildProgressMessage } from '../utils/toolProgressMessage.js';
 
 /**
  * Extract workspace path from GitHub Copilot _meta and apply it to ConfigManager.
@@ -195,7 +194,20 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
     }
 
     const finishMetrics = recordToolStart(toolName);
-    const result = await (async () => { switch (toolName) {
+    const result = await (async () => {
+      // Send a progress/status message to the IDE chat so users can see what's happening.
+      // Uses MCP notifications/message (requires logging capability declared in mcpServer.ts).
+      // Silently ignored in HTTP mode (transport drops server-initiated notifications).
+      const args = request.params.arguments as Record<string, any> | undefined;
+      try {
+        await server.sendLoggingMessage({
+          level: 'info',
+          data: buildProgressMessage(toolName, args),
+        });
+      } catch {
+        // Non-fatal — logging is best-effort, never block the tool
+      }
+      return (async () => { switch (toolName) {
       case 'search':
         return searchTool(request, context);
       case 'batch_search':
@@ -530,6 +542,7 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
           isError: true,
         };
     } })();
+    })();
 
     const capped = capToolResponse(toolName, result);
     // Record metrics: detect empty result (no content or first text item is empty)
