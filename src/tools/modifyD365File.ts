@@ -14,6 +14,7 @@ import { parseStringPromise, Builder } from 'xml2js';
 import { getConfigManager } from '../utils/configManager.js';
 import { PackageResolver } from '../utils/packageResolver.js';
 import { resolveDbPathLocally } from '../utils/metadataResolver.js';
+import { ProjectFileManager, ProjectFileFinder } from './createD365File.js';
 
 /**
  * Decode the standard XML entities (&lt;, &gt;, &apos;, &quot;, &amp;) and normalise
@@ -310,6 +311,17 @@ const ModifyD365FileArgsSchema = z.object({
   filePath: z.string().optional().describe(
     'Absolute path to the XML file. Use this when the object was just created and the path is already known ' +
     '(e.g. from create_d365fo_file output). Bypasses symbol DB lookup entirely.'
+  ),
+  addToProject: z.boolean().optional().default(false).describe(
+    'When true, adds the modified file to the Visual Studio project (.rnrproj). ' +
+    'Use this when the file exists on disk but is not yet tracked in the VS project. ' +
+    'Requires projectPath or solutionPath (explicit or via .mcp.json). Default: false.'
+  ),
+  projectPath: z.string().optional().describe(
+    'Path to .rnrproj file. Required for addToProject to work. Auto-detected from .mcp.json if omitted.'
+  ),
+  solutionPath: z.string().optional().describe(
+    'Path to VS solution directory. Used to find .rnrproj when projectPath is not given.'
   ),
 });
 
@@ -735,7 +747,47 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
     const xmlBuffer = Buffer.concat([utf8BOM, Buffer.from(newXml, 'utf-8')]);
     await fs.writeFile(actualFilePath, xmlBuffer);
 
-    // 6b. Return success — include diff so user can see what was actually written
+    // 6b. Optionally add the file to the Visual Studio project
+    let projectMessage = '';
+    if (args.addToProject) {
+      const configManager = getConfigManager();
+      await configManager.ensureLoaded();
+
+      let resolvedProjectPath = args.projectPath || await configManager.getProjectPath() || undefined;
+      const resolvedSolutionPath = args.solutionPath || await configManager.getSolutionPath() || undefined;
+
+      if (!resolvedProjectPath && resolvedSolutionPath) {
+        resolvedProjectPath = await ProjectFileFinder.findProjectInSolution(
+          resolvedSolutionPath,
+          modelName || configManager.getModelName() || ''
+        ) || undefined;
+      }
+
+      if (resolvedProjectPath) {
+        try {
+          await fs.access(resolvedProjectPath);
+          const projectManager = new ProjectFileManager();
+          const wasAdded = await projectManager.addToProject(
+            resolvedProjectPath,
+            objectType,
+            objectName,
+            actualFilePath
+          );
+          projectMessage = wasAdded
+            ? `\n✅ Added to VS project: \`${resolvedProjectPath}\``
+            : `\n📋 Already in VS project: \`${resolvedProjectPath}\``;
+        } catch (projErr) {
+          const errMsg = projErr instanceof Error ? projErr.message : String(projErr);
+          projectMessage = `\n⚠️ File modified but could not add to VS project: ${errMsg}`;
+        }
+      } else {
+        projectMessage =
+          `\n⚠️ addToProject=true but no projectPath could be resolved.\n` +
+          `Add \`projectPath\` to .mcp.json or pass it explicitly.`;
+      }
+    }
+
+    // 6c. Return success — include diff so user can see what was actually written
     const appliedDiff = generateUnifiedDiff(xmlContent, newXml);
     return {
       content: [
@@ -743,7 +795,7 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
           type: 'text',
           text:
             `✅ ${message}\n\n` +
-            `**File:** ${actualFilePath}${addControlNote}\n\n` +
+            `**File:** ${actualFilePath}${addControlNote}${projectMessage}\n\n` +
             `### Applied changes\n\n` +
             `\`\`\`diff\n${appliedDiff}\n\`\`\`\n\n` +
             `**Next steps:**\n- Review changes in Visual Studio\n- Build the model to validate\n- Commit changes to source control`,
@@ -2949,6 +3001,7 @@ export const modifyD365FileToolDefinition = {
     '• Table-extension only: add-field-modification (modify base-table field label/mandatory)\n' +
     '• Form-extension: add-control (UI control), add-data-source (DataSourceReference)\n' +
     '• Any object: modify-property\n' +
-    'Always prefer this tool over replace_string_in_file for XML edits.',
+    'Always prefer this tool over replace_string_in_file for XML edits.\n' +
+    'Pass addToProject=true to also register the file in the Visual Studio .rnrproj (useful when the extension file existed on disk but was not yet in the project).',
   inputSchema: ModifyD365FileArgsSchema,
 };

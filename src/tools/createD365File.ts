@@ -86,7 +86,7 @@ const CreateD365FileArgsSchema = z.object({
  * Project File Finder
  * Finds .rnrproj files in solution directory or specific paths
  */
-class ProjectFileFinder {
+export class ProjectFileFinder {
   /**
    * Find .rnrproj file in solution directory
    * Recursively searches for .rnrproj files matching the model name (up to 3 levels deep)
