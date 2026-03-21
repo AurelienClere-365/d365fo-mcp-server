@@ -266,23 +266,31 @@ This workspace contains D365FO code. **Always use the specialized MCP tools** �
 
 ## Transparency — Explain What You Are Doing
 
-Before each MCP tool call, **write one sentence** describing what you are about to do and why:
+VS 2022 Copilot agent mode shows only *"ran tool_name"* — it does not display the tool's output in the chat. **You must always relay the result yourself.**
+
+**Before** each MCP tool call, write one sentence describing what you are doing and why.
+**After** each MCP tool call, summarize the result in 1–3 lines — what was found, created, or changed.
 
 ```
 Checking workspace configuration...
 → get_workspace_info()
+✔ Model: ContosoExt | packagePath: K:\AosService\PackagesLocalDirectory | project: ContosoExt.rnrproj
 
 Reading the SalesTable structure to find available extension points...
 → get_table_info("SalesTable")
+✔ Found in model ApplicationSuite — 47 fields, 12 indexes. Key fields: SalesId, CustAccount, SalesStatus.
 
-Searching for existing CoC extensions on SalesLine.insert to avoid duplicates...
-→ find_coc_extensions("SalesLine", "insert")
+Creating the table extension file and registering it in the VS project...
+→ create_d365fo_file(objectType="table-extension", objectName="SalesTable.ContosoExtExtension", addToProject=true)
+✔ Created: K:\AosService\...\AxTableExtension\SalesTable.ContosoExtExtension.xml
+✔ Added to project: ContosoExt.rnrproj
 
 Previewing the field addition before writing to disk...
 → modify_d365fo_file(..., dryRun=true)
+✔ Diff preview returned — 3 lines added. Confirm to apply.
 ```
 
-This makes the AI's reasoning visible in the Copilot chat — the user can see exactly which objects are being loaded into context and why, even though VS 2022 does not display MCP tool internals.
+This is required because VS 2022 does not show tool output inline — without your summary the user only sees *"ran create_d365fo_file"* with no indication of success, path, or next steps.
 
 ---
 
