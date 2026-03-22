@@ -1,7 +1,7 @@
 # All Available Tools
 
 When you ask GitHub Copilot a question about D365FO code, it automatically calls one of these
-53 tools to look up the answer or generate code. You do not need to name the tools yourself —
+54 tools to look up the answer or generate code. You do not need to name the tools yourself —
 just ask in plain English.
 
 ---
@@ -44,7 +44,7 @@ just ask in plain English.
 | **get_method_source** | Full X++ source code of a method | "Show me the full implementation of SalesTable.validateWrite()" |
 | **find_references** | Where is this class/method/field used? | "Where is DimensionAttributeValueSet used?" |
 
-### Intelligent Code Generation (5 tools)
+### Intelligent Code Generation (6 tools)
 
 | Tool | What it does | Example prompt |
 |------|-------------|---------------|
@@ -100,7 +100,7 @@ The following tools empower Copilot to trigger X++ compilation, testing, and db 
 | **modify_d365fo_file** | Local Windows VM only | Safely edits an existing file with automatic backup |
 | **verify_d365fo_project** | Local Windows VM only | Reads `.rnrproj` on K:\ to verify objects exist on disk and are referenced in the project file |
 
-### Security & Extensions (9 tools)
+### Security & Extensions (10 tools)
 
 | Tool | What it does | Example prompt |
 |------|-------------|---------------|
@@ -112,6 +112,7 @@ The following tools empower Copilot to trigger X++ compilation, testing, and db 
 | **get_table_extension_info** | All extensions of a table: added fields, indexes, methods | "What fields did ISV packages add to CustTable?" |
 | **get_data_entity_info** | Data entity category, OData name, data sources, keys | "Show me CustCustomerV3Entity details" |
 | **analyze_extension_points** | CoC-eligible methods, delegates, events — what can be extended | "What can I extend on SalesLine?" |
+| **recommend_extension_strategy** | Recommends the best extensibility mechanism for a scenario — prevents wrong choices (CoC vs event vs Business Event vs data entity) | "Should I use CoC or Business Event to notify an external system?" |
 | **validate_object_naming** | Validate proposed extension/object names against D365FO conventions | "Is SalesTableExtension a valid extension class name?" |
 
 ### Label Management (4 tools)

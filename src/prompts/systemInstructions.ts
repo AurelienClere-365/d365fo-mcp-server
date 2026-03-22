@@ -80,12 +80,19 @@ Use this guide to select the correct tool:
 | "Learn patterns for X" | \`analyze_code_patterns(scenario)\` | Always first |
 | "How to implement method" | \`suggest_method_implementation(className, methodName)\` | After get_method_signature |
 | "Where is X used" | \`find_references(targetName, targetType?)\` | For refactoring |
+| "Which extension mechanism?" | \`recommend_extension_strategy(goal, objectName?)\` | Use BEFORE any extension work |
 | "Why does this error occur" | \`get_d365fo_error_help(errorText, errorCode?)\` | None |
 | "Explain this X++ error" | \`get_d365fo_error_help(errorText)\` | None |
 | "Create CoC class extension" | \`create_d365fo_file(objectType="class-extension", ...)\` | find_coc_extensions |
 | "Create SSRS report" | \`generate_code(pattern="ssrs-report-full", name)\` | analyze_code_patterns |
 | "Create lookup form/method" | \`generate_code(pattern="lookup-form", name)\` | None |
 | "Create workspace form" | \`generate_smart_form(name, formPattern="Workspace")\` | None |
+| "Create business event" | \`generate_code(pattern="business-event", name)\` | None |
+| "Create custom service" | \`generate_code(pattern="custom-service", name)\` | None |
+| "Create feature toggle" | \`generate_code(pattern="feature-class", name)\` | None |
+| "Add telemetry" | \`generate_code(pattern="custom-telemetry", name)\` | None |
+| "Create ER function" | \`generate_code(pattern="er-custom-function", name)\` | None |
+| "Create composite entity" | \`generate_code(pattern="composite-entity", name)\` | None |
 
 ## Critical Rules
 

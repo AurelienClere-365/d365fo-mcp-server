@@ -15,7 +15,9 @@ const XppKnowledgeArgsSchema = z.object({
   topic: z.string().describe(
     'Topic to query — e.g. "batch job", "ttsbegin", "RunBase vs SysOperation", ' +
     '"set-based operations", "CoC", "data entities", "number sequences", "security", ' +
-    '"temp tables", "today() deprecated", "query patterns", "form patterns"'
+    '"temp tables", "today() deprecated", "query patterns", "form patterns", ' +
+    '"inventory", "feature management", "dual-write", "DMF", "warehouse", ' +
+    '"trade agreements", "configuration keys", "Power Platform"'
   ),
   format: z.enum(['concise', 'detailed']).optional().default('concise').describe(
     'concise = quick reference (default), detailed = full explanation with code examples'
@@ -29,7 +31,8 @@ export const xppKnowledgeToolDefinition = {
     'Returns distilled, verified patterns with code examples. Use BEFORE generating code to avoid deprecated ' +
     'APIs and AX2012 anti-patterns. Topics: batch jobs, transactions, queries, CoC/extensions, security, ' +
     'data entities, temp tables, number sequences, form patterns, set-based operations, error handling, ' +
-    'SysOperation framework, and more.',
+    'SysOperation framework, inventory management, feature management, dual-write, DMF, ' +
+    'warehouse management, trade agreements, configuration keys, Power Platform integration, and more.',
   inputSchema: XppKnowledgeArgsSchema,
 };
 
@@ -1465,6 +1468,335 @@ if (SecurityRights::hasTableAccess(tableNum(MyCustomTable), AccessType::Read))
       'For existing reports, use get_report_info() — NEVER read report XML with PowerShell',
     ],
     related: ['temp-tables', 'sysoperation'],
+  },
+
+  // ── Inventory Management ────────────────────────────────────────────────
+  {
+    id: 'inventory-management',
+    title: 'Inventory Management (InventTrans, InventDim, On-hand)',
+    keywords: ['inventory', 'inventtrans', 'inventdim', 'inventsum', 'inventonhand', 'reservation',
+               'inventtransorigin', 'inventmov', 'inventupdate', 'on-hand', 'stock'],
+    summary:
+      'D365FO inventory uses InventTrans (transactions), InventDim (dimension combinations), and InventSum ' +
+      '(aggregated on-hand). The InventMovement class hierarchy handles business logic for creating/updating ' +
+      'inventory transactions. Reservations flow through InventUpDate_Reservation.',
+    rules: [
+      'InventTrans: one record per inventory lot/transaction; linked via InventTransOrigin to source docs',
+      'InventDim: stores inventory dimensions (Site, Warehouse, Location, Batch, Serial, etc.) — NEVER create duplicates, use InventDim::findOrCreate()',
+      'InventSum: aggregated on-hand per ItemId + InventDimId — do NOT update directly, it is maintained by the system',
+      'InventOnHand: use InventOnHand class (not direct InventSum queries) for accurate on-hand calculations',
+      'InventMovement: abstract class hierarchy for business rules on inventory transactions — each source doc type has its own subclass',
+      'InventUpdate: updates InventTrans status (e.g. InventUpDate_Physical for packing slip, InventUpDate_Financial for invoice)',
+      'Reservation: InventUpDate_Reservation handles soft/hard reservation; respects reservation hierarchy (Site > Warehouse > Location > Batch > Serial)',
+      'Dimensions: configuration keys control which dimensions are active — check InventDimSetup',
+      'Use InventDimCtrl_Frm* classes to control dimension field visibility on forms',
+      'For custom inventory dimensions: follow the extension pattern in Microsoft docs — add via model extension, NOT overlayering',
+    ],
+    examples: [
+      {
+        label: 'Query on-hand',
+        code: `// Query available on-hand for an item
+InventDim       inventDim;
+InventOnHand    inventOnHand;
+
+inventDim.InventSiteId      = 'Site1';
+inventDim.InventLocationId  = 'WH1';
+inventDim = InventDim::findOrCreate(inventDim);
+
+inventOnHand = InventOnHand::newItemDim(
+    InventTable::find('ItemId'),
+    inventDim,
+    InventDimParm::activeDimFlag(inventDim));
+
+Qty availPhysical = inventOnHand.availPhysical();`,
+      },
+      {
+        label: 'Find or create InventDim',
+        code: `// ALWAYS use findOrCreate — never insert raw InventDim records
+InventDim dim;
+dim.InventSiteId     = 'Site1';
+dim.InventLocationId = 'WH-MAIN';
+dim = InventDim::findOrCreate(dim);
+// dim.inventDimId is now set`,
+      },
+    ],
+    related: ['query-patterns', 'set-based'],
+  },
+
+  // ── Feature Management ──────────────────────────────────────────────────
+  {
+    id: 'feature-management',
+    title: 'Feature Management & Feature Flighting',
+    keywords: ['feature management', 'feature class', 'feature flighting', 'featurestateprovider',
+               'isfeatureenabled', 'feature toggle', 'feature attribute', 'featureclassattribute'],
+    summary:
+      'D365FO Feature Management allows enabling/disabling features at runtime without redeployment. ' +
+      'ISV/custom features register via FeatureClassAttribute and appear in the Feature Management workspace. ' +
+      'Code checks feature state via FeatureStateProvider::isFeatureEnabled() to branch logic.',
+    rules: [
+      'Register custom feature: create a class with [FeatureClassAttribute] — it auto-appears in Feature Management workspace',
+      'Feature class: implement static methods label(), description(), module(), isEnabledByDefault()',
+      'Check at runtime: FeatureStateProvider::isFeatureEnabled(classStr(MyFeature)) returns true/false',
+      'NEVER use FeatureStateProvider inside a tight loop — cache the result in a local variable',
+      'Feature states: Enabled, Disabled, EnabledByDefault (user can still disable)',
+      'Always provide a meaningful description — it shows in the workspace and helps admins decide',
+      'For ISV: features can have dependencies on other features via [FeatureDependsOnAttribute]',
+      'Use Feature Management for gradual rollout — don\'t use configuration keys for new features (CK are compile-time)',
+      'In unit tests, mock feature state via SysTestFeatureStateProvider',
+    ],
+    examples: [
+      {
+        label: 'Feature class definition',
+        code: `/// <summary>
+/// My custom feature that enables enhanced validation.
+/// </summary>
+[FeatureClassAttribute]
+public final class MyEnhancedValidationFeature
+{
+    private static MyEnhancedValidationFeature instance = new MyEnhancedValidationFeature();
+
+    public static str label()
+    {
+        return "@MyModel:EnhancedValidationLabel";
+    }
+
+    public static str description()
+    {
+        return "@MyModel:EnhancedValidationDesc";
+    }
+
+    public static str module()
+    {
+        return "@MyModel:ModuleName";
+    }
+
+    public static boolean isEnabledByDefault()
+    {
+        return false;
+    }
+}`,
+      },
+      {
+        label: 'Runtime feature check',
+        code: `// Branch logic based on feature state
+if (FeatureStateProvider::isFeatureEnabled(
+        classStr(MyEnhancedValidationFeature)))
+{
+    // New enhanced validation path
+    this.validateEnhanced();
+}
+else
+{
+    // Legacy validation path
+    this.validateLegacy();
+}`,
+      },
+    ],
+    related: ['sysextension', 'testing'],
+  },
+
+  // ── Dual-write ──────────────────────────────────────────────────────────
+  {
+    id: 'dual-write',
+    title: 'Dual-write Integration (Dataverse ↔ F&O)',
+    keywords: ['dual-write', 'dual write', 'dataverse', 'cds', 'common data service', 'virtual entity',
+               'integration', 'synchronization', 'dualwriteentity'],
+    summary:
+      'Dual-write provides near-real-time bidirectional synchronization between D365FO and Dataverse (Power Platform). ' +
+      'It uses table maps (column mappings) and can be extended with custom logic via plug-ins on both sides. ' +
+      'Virtual entities expose F&O data in Dataverse without data duplication.',
+    rules: [
+      'Dual-write operates on data entities — ensure entities are OData-enabled and public',
+      'Table maps define column-level mappings between F&O entity fields and Dataverse table columns',
+      'Initial sync: always run from the side with the most complete data set',
+      'Error handling: dual-write has a retry mechanism — failed records go to an error queue',
+      'Live sync: changes in one system propagate to the other in near-real-time (~seconds)',
+      'Virtual entities: NO data copy — F&O data accessed via OData at runtime in Dataverse; read-only by default',
+      'For custom entities: add DataManagementEnabled=Yes, IsPublic=Yes, PublicEntityName/CollectionName',
+      'NEVER put complex business logic in dual-write transform — keep transforms simple (field mapping, default value)',
+      'For custom pre/post processing: use business events + Power Automate instead of dual-write plug-ins',
+      'Handle company (DataAreaId) filtering carefully — dual-write respects legal entity context',
+      'Performance: avoid dual-write on high-volume transaction tables — use async integration (business events + Service Bus) instead',
+    ],
+    related: ['data-entities', 'alerts-business-events'],
+  },
+
+  // ── Data Management Framework ───────────────────────────────────────────
+  {
+    id: 'data-management-framework',
+    title: 'Data Management Framework (DMF / DIXF)',
+    keywords: ['dmf', 'dixf', 'data import', 'data export', 'staging', 'data entity', 'data management',
+               'composite entity', 'recurring integration', 'data package', 'data project'],
+    summary:
+      'DMF (Data Import/Export Framework, formerly DIXF) is the standard mechanism for bulk data import/export in D365FO. ' +
+      'It uses data entities with optional staging tables for transformation, validation, and error handling. ' +
+      'Supports: file-based import, recurring integrations (queue-based), data packages, and composite entities.',
+    rules: [
+      'Data entities MUST have DataManagementEnabled=Yes to appear in Data Management workspace',
+      'Staging table: auto-generated or custom — holds imported records before target table insertion',
+      'Entity categories: Parameter, Reference, Master, Document, Transaction — controls import order in data packages',
+      'Composite entities: group header + line entities for hierarchical import (e.g. Sales order with lines)',
+      'Recurring integrations: REST API endpoint for automated queue-based import/export with external systems',
+      'ALWAYS refresh entity list after deploying new/modified entities: Data Management > Framework Parameters > Refresh entity list',
+      'Configuration keys: if entity/table/field config key is disabled, those elements are excluded from DMF',
+      'validateWrite() and insert/update chain is called per-record during import — keep these performant',
+      'For high-volume: use set-based processing via entity.insertEntityDataSource() where possible',
+      'Error handling: staging records get DMFTransferStatus (NotStarted, Completed, Error) — use error log for troubleshooting',
+      'Data packages: ZIP files containing multiple entity CSVs — used for ALM and environment configuration migration',
+    ],
+    examples: [
+      {
+        label: 'Entity with staging table (key XML properties)',
+        code: `<!-- AxDataEntityView key properties for DMF -->
+<IsPublic>Yes</IsPublic>
+<PublicEntityName>MyCustomer</PublicEntityName>
+<PublicCollectionName>MyCustomers</PublicCollectionName>
+<DataManagementEnabled>Yes</DataManagementEnabled>
+<DataManagementStagingTable>MyCustomerStaging</DataManagementStagingTable>
+<EntityCategory>Master</EntityCategory>
+<PrimaryKey>EntityKey</PrimaryKey>`,
+      },
+      {
+        label: 'Recurring integration API call',
+        code: `// External system pushes data via REST API:
+// POST https://{env}.operations.dynamics.com/api/connector/enqueue/{DataProject}
+// Content-Type: application/json
+// Body: { "MessageId": "...", "Company": "USMF" }
+// + attach file as multipart form data
+//
+// External system pulls exported data via:
+// GET https://{env}.operations.dynamics.com/api/connector/dequeue/{DataProject}`,
+      },
+    ],
+    related: ['data-entities', 'set-based'],
+  },
+
+  // ── Warehouse Management ────────────────────────────────────────────────
+  {
+    id: 'warehouse-management',
+    title: 'Warehouse Management (WHS / WMS)',
+    keywords: ['warehouse', 'whs', 'wms', 'wave', 'work', 'location directive', 'whswork',
+               'whsworktable', 'whsworkline', 'whswavetemplate', 'pick', 'put', 'replenishment'],
+    summary:
+      'D365FO Warehouse Management (WHS) manages advanced warehouse operations: wave processing, ' +
+      'work creation, pick/put execution, location directives, and mobile device flows. ' +
+      'WHSWorkTable/WHSWorkLine are core tables. Extensions use CoC on wave/work processor classes.',
+    rules: [
+      'WHSWorkTable: header of warehouse work (pick, put, count, replenishment) — one per work order',
+      'WHSWorkLine: detail lines (specific pick/put actions with from/to locations)',
+      'Wave processing: WHSWaveTemplate defines steps (wave template) — allocate, create work, etc.',
+      'Location directives: WHSLocDirTable rules determine where to pick from and put to',
+      'Work templates: define the work action sequence (Pick → Put, Count, etc.)',
+      'Mobile device: WHSMobileAppFlow — flows are customizable via extensions',
+      'For custom wave steps: extend WHSWaveStepBase and register in wave template config',
+      'NEVER directly update WHSWorkTable.WorkStatus — use the WHSWorkExecute class hierarchy',
+      'Use WHSLocationProfile for zone/location type configuration',
+      'Performance: wave processing is batch-capable — always use batch for large volumes',
+      'For extensions: use CoC on WHSPostEngine* classes for custom post-processing logic',
+    ],
+    related: ['inventory-management', 'sysoperation'],
+  },
+
+  // ── Trade Agreements ────────────────────────────────────────────────────
+  {
+    id: 'trade-agreements',
+    title: 'Trade Agreements & Pricing (PriceDisc)',
+    keywords: ['trade agreement', 'pricing', 'pricedisc', 'price', 'discount', 'sales price',
+               'purchase price', 'line discount', 'multiline discount', 'total discount',
+               'pricediscadmtrans', 'priceDiscTable'],
+    summary:
+      'D365FO trade agreements define prices and discounts for sales/purchase. ' +
+      'The PriceDisc class evaluates active agreements based on date, quantity, unit, dimensions, and customer/vendor hierarchy. ' +
+      'Agreements are stored in PriceDiscAdmTrans (journal lines) and activated via posting to PriceDiscTable.',
+    rules: [
+      'Trade agreement types: Sales price, Purchase price, Line discount, Multiline discount, Total discount',
+      'PriceDisc.findPrice() / findDisc(): core methods for price/discount evaluation — use these, NOT direct table queries',
+      'Agreement evaluation order: specific (customer+item) → group (cust group+item) → all (all+item) → all+all',
+      'Date effectivity: agreements have FromDate/ToDate — always pass the correct transaction date',
+      'Quantity breaks: agreements can be quantity-tiered — PriceDisc considers the line quantity',
+      'Dimension matching: agreements can be dimension-specific (color, size, config, style)',
+      'Journal posting: PriceDiscAdmTrans → post (validate + transfer) → PriceDiscTable (active agreements)',
+      'For custom pricing: extend PriceDisc via CoC on findPriceAgreement() or use pricing events',
+      'NEVER hardcode prices in code — always use the trade agreement / pricing framework',
+      'Supplementary items: PriceDiscAdmTrans can define supplementary items that auto-add to sales lines',
+    ],
+    related: ['coc', 'query-patterns'],
+  },
+
+  // ── Configuration Keys ──────────────────────────────────────────────────
+  {
+    id: 'configuration-keys',
+    title: 'Configuration Keys (Compile-time Feature Toggle)',
+    keywords: ['configuration key', 'config key', 'license code', 'conditional compilation',
+               'configurationkeynum', 'isconfiguationkeyenabled', 'sysconfigkey'],
+    summary:
+      'Configuration keys in D365FO control compile-time visibility of tables, fields, menu items, ' +
+      'and security. Unlike Feature Management (runtime), config keys require recompilation when changed. ' +
+      'They are typically used for module licensing and major functional areas.',
+    rules: [
+      'Configuration keys are compile-time — changing them requires deployment/recompilation',
+      'For runtime toggles, prefer Feature Management over config keys (no recompilation needed)',
+      'Tables/fields with disabled config keys are excluded from the database schema',
+      'Data entities respect config keys — disabled fields are excluded from DMF and OData',
+      'Use isConfigurationKeyEnabled(configurationKeyNum(MyKey)) for runtime checks',
+      'License codes: control which config keys are available — tied to ISV licensing',
+      'Custom config keys: create AxConfigurationKey XML and assign to tables/fields/menu items',
+      'Parent-child hierarchy: disabling a parent key disables all child keys',
+      'ALWAYS test with your config keys disabled — ensure no compile errors in alternate configurations',
+      'After config key changes: refresh entity list in Data Management workspace',
+    ],
+    examples: [
+      {
+        label: 'Runtime config key check',
+        code: `// Check if a configuration key is enabled at runtime
+if (isConfigurationKeyEnabled(configurationKeyNum(WHSAdvanced)))
+{
+    // WHS advanced features are available
+    this.processAdvancedWHS();
+}
+else
+{
+    // Basic warehouse (WMS) path
+    this.processBasicWMS();
+}`,
+      },
+      {
+        label: 'AxConfigurationKey XML',
+        code: `<?xml version="1.0" encoding="utf-8"?>
+<AxConfigurationKey xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+  <Name>MyModuleKey</Name>
+  <Label>@MyModel:ModuleLabel</Label>
+  <Enabled>Yes</Enabled>
+  <ParentKey>SysMaster</ParentKey>
+  <LicenseCode>MyModuleLicenseCode</LicenseCode>
+</AxConfigurationKey>`,
+      },
+    ],
+    related: ['feature-management', 'security-privileges-duties'],
+  },
+
+  // ── Power Platform Integration ──────────────────────────────────────────
+  {
+    id: 'power-platform-integration',
+    title: 'Power Platform Integration (Virtual Entities, Dataverse)',
+    keywords: ['power platform', 'power automate', 'power apps', 'virtual entity', 'dataverse',
+               'finance operations connector', 'odata', 'business event', 'flow'],
+    summary:
+      'D365FO integrates with Power Platform via: OData endpoints (data entities), Business Events (triggers for Power Automate), ' +
+      'Virtual Entities (Dataverse tables backed by F&O data), and the Finance and Operations connector in Power Automate.',
+    rules: [
+      'OData endpoint: data entities with IsPublic=Yes are auto-exposed at {env}/data/{CollectionName}',
+      'Business events: subscribe via Power Automate trigger "When a Business Event occurs" for real-time notifications',
+      'Virtual entities: F&O tables/entities visible in Dataverse WITHOUT data duplication — queries route to F&O at runtime',
+      'Virtual entity setup: enable in Dataverse admin, configure in Power Platform integration settings in F&O',
+      'Finance and Operations connector: Power Automate actions for CRUD on data entities, running business events, executing batch jobs',
+      'For custom triggers: create a custom business event class (extends BusinessEventsBase) → it auto-appears as a Power Automate trigger',
+      'Authentication: virtual entities and OData use Azure AD (Entra ID) authentication — configure app registrations properly',
+      'NEVER expose sensitive data via OData without proper security — configure security privileges on data entities',
+      'Rate limiting: OData has throttling limits — use batch operations ($batch) for bulk CRUD',
+      'For Canvas/Model-driven apps: use virtual entities for real-time F&O data, NOT dual-write (which is for bidirectional sync)',
+    ],
+    related: ['data-entities', 'alerts-business-events', 'dual-write'],
   },
 ];
 

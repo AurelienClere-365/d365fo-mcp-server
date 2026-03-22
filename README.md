@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**53 AI tools that know every X++ class, table, method, and EDT in your D365FO codebase**
+**54 AI tools that know every X++ class, table, method, and EDT in your D365FO codebase**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24.0.0-brightgreen.svg)](https://nodejs.org/)
@@ -20,7 +20,7 @@ GitHub Copilot excels at C#, Python, and JavaScript — languages with rich publ
 
 The result is AI that confidently generates code that doesn't compile: wrong method signatures, missing parameters, fields that don't exist on the table, CoC chains broken because Copilot didn't know an extension already wrapped the method.
 
-This MCP server solves that by pre-indexing your entire D365FO installation — 584,799+ symbols across standard and custom models — and exposing it to Copilot as 53 specialized tools. Before generating any X++ code, Copilot can look up exact method signatures, check what CoC extensions already exist, trace security hierarchies, find label translations, and understand the full shape of your data model. The result is code that compiles on the first try and integrates correctly with your existing customizations.
+This MCP server solves that by pre-indexing your entire D365FO installation — 584,799+ symbols across standard and custom models — and exposing it to Copilot as 54 specialized tools. Before generating any X++ code, Copilot can look up exact method signatures, check what CoC extensions already exist, trace security hierarchies, find label translations, and understand the full shape of your data model. The result is code that compiles on the first try and integrates correctly with your existing customizations.
 
 ![Solution Architecture](docs/img/solution-architecture-diagram.png)
 
@@ -138,7 +138,7 @@ Setup guide: [docs/SETUP.md](docs/SETUP.md) · CI/CD pipeline: [docs/PIPELINES.m
 |------|---------|
 | [docs/SETUP.md](docs/SETUP.md) | Installation, configuration, Azure deployment |
 | [docs/MCP_CONFIG.md](docs/MCP_CONFIG.md) | `.mcp.json` reference — workspace paths, UDE, project settings |
-| [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md) | All 53 tools with parameters and example prompts |
+| [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md) | All 54 tools with parameters and example prompts |
 | [docs/USAGE_EXAMPLES.md](docs/USAGE_EXAMPLES.md) | Practical examples: search, CoC, SysOperation, security |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical architecture, dual-database design |
 | [docs/CUSTOM_EXTENSIONS.md](docs/CUSTOM_EXTENSIONS.md) | ISV / custom model configuration |

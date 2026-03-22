@@ -15,7 +15,9 @@ const CodeGenArgsSchema = z.object({
            'ssrs-report-full', 'lookup-form',
            'dialog-box', 'dimension-controller', 'number-seq-handler',
            'display-menu-controller', 'data-entity-staging', 'service-class-ais',
-           'form-datasource-extension', 'form-control-extension', 'map-extension'])
+           'form-datasource-extension', 'form-control-extension', 'map-extension',
+           'business-event', 'custom-telemetry', 'feature-class',
+           'composite-entity', 'custom-service', 'er-custom-function'])
     .describe('Code pattern to generate'),
   name: z.string().describe(
     'For NEW objects (class, runnable, data-entity, batch-job, sysoperation): the object name WITHOUT prefix — prefix is auto-applied from EXTENSION_PREFIX env var or modelName. ' +
@@ -176,6 +178,12 @@ class ${name}Service extends SysOperationServiceBase
   'display-menu-controller': displayMenuControllerTemplate,
   'data-entity-staging': dataEntityStagingTemplate,
   'service-class-ais': serviceClassAisTemplate,
+  'business-event': businessEventTemplate,
+  'custom-telemetry': customTelemetryTemplate,
+  'feature-class': featureClassTemplate,
+  'composite-entity': compositeEntityTemplate,
+  'custom-service': customServiceTemplate,
+  'er-custom-function': erCustomFunctionTemplate,
 };
 
 // Templates for EXTENSION elements: (baseName = element being extended, prefix = model/ISV infix)
@@ -1249,6 +1257,519 @@ public class ${name}Contract
         return description;
     }
 }`;
+}
+
+// ── Business Event pattern (contract + event class) ──────────────────────
+function businessEventTemplate(name: string): string {
+  return `// ══════════════════════════════════════════════════════════════════
+// Business Event: ${name}
+// 2 classes: Contract (payload) + Event (trigger).
+// After deployment, appears in: System Admin > Set up > Business events > Catalog
+// ══════════════════════════════════════════════════════════════════
+
+// ── 1. Business Event Contract (payload definition) ─────────────────────
+/// <summary>
+/// Contract defining the payload for the ${name} business event.
+/// Properties here become the JSON schema available to Power Automate / Service Bus subscribers.
+/// </summary>
+[DataContractAttribute]
+public final class ${name}BusinessEventContract extends BusinessEventsContract
+{
+    private CustAccount custAccount;
+    private Name        custName;
+    private str         documentId;
+
+    /// <summary>
+    /// Creates a new contract from a source record.
+    /// </summary>
+    public static ${name}BusinessEventContract newFromRecord(/* SourceTable _record */)
+    {
+        ${name}BusinessEventContract contract = new ${name}BusinessEventContract();
+
+        // Map source record fields to contract properties
+        // contract.parmCustAccount(_record.CustAccount);
+        // contract.parmCustName(_record.custName());
+        // contract.parmDocumentId(_record.DocumentId);
+
+        return contract;
+    }
+
+    [DataMemberAttribute('CustAccount'),
+     BusinessEventsDataMemberAttribute('@AccountsReceivable:CustAccount')]
+    public CustAccount parmCustAccount(CustAccount _v = custAccount)
+    {
+        custAccount = _v;
+        return custAccount;
+    }
+
+    [DataMemberAttribute('CustName'),
+     BusinessEventsDataMemberAttribute('@SYS7399')]  // Customer name
+    public Name parmCustName(Name _v = custName)
+    {
+        custName = _v;
+        return custName;
+    }
+
+    [DataMemberAttribute('DocumentId'),
+     BusinessEventsDataMemberAttribute('@SYS3252')]
+    public str parmDocumentId(str _v = documentId)
+    {
+        documentId = _v;
+        return documentId;
+    }
+}
+
+// ── 2. Business Event class (trigger) ───────────────────────────────────
+/// <summary>
+/// Business event triggered when ${name} occurs.
+/// Activate in: System Admin > Set up > Business events > Catalog.
+/// </summary>
+[BusinessEventsAttribute('${name}BusinessEvent',
+    '@MyModel:${name}BusinessEventDescription',
+    ModuleAxapta::SalesOrder)]   // ← change to your module
+public final class ${name}BusinessEvent extends BusinessEventsBase
+{
+    private /* SourceTable */ Common sourceRecord;
+
+    /// <summary>
+    /// Constructs the business event from a source record.
+    /// </summary>
+    public static ${name}BusinessEvent newFromRecord(/* SourceTable */ Common _record)
+    {
+        ${name}BusinessEvent businessEvent = new ${name}BusinessEvent();
+        businessEvent.sourceRecord = _record;
+        return businessEvent;
+    }
+
+    /// <summary>
+    /// Builds the contract payload sent to subscribers.
+    /// </summary>
+    protected BusinessEventsContract buildContract()
+    {
+        return ${name}BusinessEventContract::newFromRecord(this.sourceRecord);
+    }
+
+    // ── How to trigger this event ────────────────────────────────────
+    // In your business logic (e.g. after posting, confirmation, etc.):
+    //
+    //   ${name}BusinessEvent businessEvent =
+    //       ${name}BusinessEvent::newFromRecord(myRecord);
+    //   businessEvent.send();   // ← sends to all activated endpoints
+}`;
+}
+
+// ── Custom Telemetry pattern ─────────────────────────────────────────────
+function customTelemetryTemplate(name: string): string {
+  return `/// <summary>
+/// Custom telemetry signal for ${name}.
+/// Emits events to Application Insights via the monitoring framework.
+/// </summary>
+/// <remarks>
+/// Prerequisites:
+///   1. Enable Monitoring and telemetry in Feature management
+///   2. Configure Application Insights connection string in LCS / Power Platform admin
+///   3. After deployment, signals appear in App Insights → customEvents / traces
+/// </remarks>
+public final class ${name}Telemetry
+{
+    /// <summary>
+    /// Emits a custom event to Application Insights with structured properties.
+    /// </summary>
+    public static void emitEvent(
+        str   _eventName,
+        str   _contextId = '',
+        str   _detail    = '')
+    {
+        SysApplicationInsightsEventLogger logger =
+            SysApplicationInsightsEventLogger::construct();
+
+        // Set custom properties (appear as customDimensions in KQL)
+        Map customProperties = new Map(Types::String, Types::String);
+        customProperties.insert('EventName',  _eventName);
+        customProperties.insert('ContextId',  _contextId);
+        customProperties.insert('Detail',     _detail);
+        customProperties.insert('UserId',     curUserId());
+        customProperties.insert('Company',    curExt());
+
+        logger.logCustomEvent('${name}', customProperties);
+    }
+
+    /// <summary>
+    /// Emits a custom metric (numeric measurement) to Application Insights.
+    /// </summary>
+    public static void emitMetric(
+        str   _metricName,
+        real  _value,
+        str   _dimension = '')
+    {
+        SysApplicationInsightsMetricLogger metricLogger =
+            SysApplicationInsightsMetricLogger::construct();
+
+        Map customDimensions = new Map(Types::String, Types::String);
+        customDimensions.insert('Dimension', _dimension);
+        customDimensions.insert('Company',   curExt());
+
+        metricLogger.logMetricValue(_metricName, _value, customDimensions);
+    }
+}
+
+// ── Usage examples ──────────────────────────────────────────────────────
+// After a batch job completes:
+//   ${name}Telemetry::emitEvent('BatchCompleted', batchId, strFmt('%1 records processed', count));
+//
+// Track processing duration:
+//   ${name}Telemetry::emitMetric('ProcessingDurationMs', durationMs, 'OrderImport');
+//
+// KQL query to find events in Application Insights:
+//   customEvents
+//   | where name == "${name}"
+//   | extend EventName = tostring(customDimensions.EventName)
+//   | where EventName == "BatchCompleted"
+//   | project timestamp, EventName, tostring(customDimensions.ContextId)`;
+}
+
+
+
+// ── Feature Class pattern ────────────────────────────────────────────────
+function featureClassTemplate(name: string): string {
+  return `/// <summary>
+/// Feature management class for ${name}.
+/// Registers in the Feature Management workspace automatically.
+/// Enable/disable at runtime without redeployment.
+/// </summary>
+[FeatureClassAttribute]
+public final class ${name}Feature
+{
+    private static ${name}Feature instance = new ${name}Feature();
+
+    /// <summary>
+    /// Display label shown in Feature Management workspace.
+    /// </summary>
+    public static str label()
+    {
+        return "@MyModel:${name}FeatureLabel";
+    }
+
+    /// <summary>
+    /// Detailed description shown when expanding the feature in the workspace.
+    /// </summary>
+    public static str description()
+    {
+        return "@MyModel:${name}FeatureDescription";
+    }
+
+    /// <summary>
+    /// Module this feature belongs to (shown as category in Feature Management).
+    /// </summary>
+    public static str module()
+    {
+        return "@MyModel:ModuleName";
+    }
+
+    /// <summary>
+    /// Whether this feature is enabled by default for new environments.
+    /// Return false for features that need explicit opt-in.
+    /// </summary>
+    public static boolean isEnabledByDefault()
+    {
+        return false;
+    }
+
+    // ── Usage in X++ code ───────────────────────────────────────────────
+    // Cache the check result — never call isFeatureEnabled in a loop:
+    //
+    //   boolean featureEnabled = FeatureStateProvider::isFeatureEnabled(
+    //       classStr(${name}Feature));
+    //
+    //   if (featureEnabled)
+    //   {
+    //       // New behavior
+    //   }
+    //   else
+    //   {
+    //       // Legacy behavior
+    //   }
+}`;
+}
+
+// ── Composite Entity pattern ─────────────────────────────────────────────
+function compositeEntityTemplate(name: string): string {
+  return `// ══════════════════════════════════════════════════════════════════
+// Composite Data Entity: ${name}
+// Combines header + line entities for hierarchical data import/export.
+//
+// Prerequisites:
+//   1. ${name}HeaderEntity  — AxDataEntityView for header table
+//   2. ${name}LineEntity    — AxDataEntityView for line table
+//   Then create the composite entity in the VS designer.
+// ══════════════════════════════════════════════════════════════════
+
+// ── Composite Entity XML (AxCompositeDataEntity - create via VS designer) ──
+// Key properties:
+//   <Name>${name}CompositeEntity</Name>
+//   <PublicEntityName>${name}Composite</PublicEntityName>
+//   <IsPublic>Yes</IsPublic>
+//   <RootDataEntity>${name}HeaderEntity</RootDataEntity>
+//
+//   Mapping:
+//     Header → ${name}HeaderEntity (root)
+//       └── Lines → ${name}LineEntity (child, linked by foreign key)
+
+// ── Header Entity class adjustments ─────────────────────────────────────
+/// <summary>
+/// Header entity for ${name} composite import.
+/// Ensure natural key is defined (NOT RecId) for DMF matching.
+/// </summary>
+// Key XML for ${name}HeaderEntity:
+//   <IsPublic>Yes</IsPublic>
+//   <PublicEntityName>${name}Header</PublicEntityName>
+//   <PublicCollectionName>${name}Headers</PublicCollectionName>
+//   <DataManagementEnabled>Yes</DataManagementEnabled>
+//   <EntityCategory>Document</EntityCategory>
+//   <PrimaryKey>EntityKey</PrimaryKey>   ← natural key (e.g. OrderId)
+
+// ── Line Entity class adjustments ───────────────────────────────────────
+/// <summary>
+/// Line entity for ${name} composite import.
+/// MUST have a relation to the header entity for composite linking.
+/// </summary>
+// Key XML for ${name}LineEntity:
+//   <IsPublic>Yes</IsPublic>
+//   <PublicEntityName>${name}Line</PublicEntityName>
+//   <PublicCollectionName>${name}Lines</PublicCollectionName>
+//   <DataManagementEnabled>Yes</DataManagementEnabled>
+//   <EntityCategory>Document</EntityCategory>
+//
+// Relation (in line entity datasource):
+//   <AxDataEntityViewRelation>
+//     <Name>${name}Header</Name>
+//     <Cardinality>ZeroMore</Cardinality>
+//     <RelatedDataEntity>${name}HeaderEntity</RelatedDataEntity>
+//     <RelatedDataEntityCardinality>ZeroOne</RelatedDataEntityCardinality>
+//     <RelatedDataEntityRole>Header</RelatedDataEntityRole>
+//     <Role>Lines</Role>
+//     <Constraints>
+//       <AxDataEntityViewRelationConstraint>
+//         <Name>OrderId</Name>
+//         <Field>OrderId</Field>
+//         <RelatedField>OrderId</RelatedField>
+//       </AxDataEntityViewRelationConstraint>
+//     </Constraints>
+//   </AxDataEntityViewRelation>
+
+// ── DMF import workflow ─────────────────────────────────────────────────
+// 1. Create a Data Project in Data Management workspace
+// 2. Add the composite entity (${name}CompositeEntity)
+// 3. Import file format: XML or JSON (composite entities do NOT support CSV)
+// 4. Header/Line records are imported together in correct order
+// 5. After import: check staging table for errors (DMFTransferStatus)`;
+}
+
+// ── Custom Service (Service Group + Operations) pattern ──────────────────
+function customServiceTemplate(name: string): string {
+  return `// ══════════════════════════════════════════════════════════════════
+// Custom Service: ${name}
+// Exposes custom X++ logic as a SOAP/JSON web service.
+// 3 objects: Service class + Service XML (AxService) + Service Group XML
+// ══════════════════════════════════════════════════════════════════
+
+// ── 1. Service Contract (request/response) ──────────────────────────────
+[DataContractAttribute]
+public final class ${name}ServiceRequest
+{
+    private str     recordId;
+    private str     operation;
+
+    [DataMemberAttribute('RecordId')]
+    public str parmRecordId(str _v = recordId)
+    {
+        recordId = _v;
+        return recordId;
+    }
+
+    [DataMemberAttribute('Operation')]
+    public str parmOperation(str _v = operation)
+    {
+        operation = _v;
+        return operation;
+    }
+}
+
+[DataContractAttribute]
+public final class ${name}ServiceResponse
+{
+    private boolean success;
+    private str     message;
+    private str     resultData;
+
+    [DataMemberAttribute('Success')]
+    public boolean parmSuccess(boolean _v = success)
+    {
+        success = _v;
+        return success;
+    }
+
+    [DataMemberAttribute('Message')]
+    public str parmMessage(str _v = message)
+    {
+        message = _v;
+        return message;
+    }
+
+    [DataMemberAttribute('ResultData')]
+    public str parmResultData(str _v = resultData)
+    {
+        resultData = _v;
+        return resultData;
+    }
+}
+
+// ── 2. Service class ────────────────────────────────────────────────────
+/// <summary>
+/// Custom service operations for ${name}.
+/// Each public method with [SysEntryPointAttribute] becomes a service operation.
+/// </summary>
+public class ${name}Service
+{
+    /// <summary>
+    /// Processes the request and returns a response.
+    /// </summary>
+    [SysEntryPointAttribute(true)]
+    public ${name}ServiceResponse processRequest(${name}ServiceRequest _request)
+    {
+        ${name}ServiceResponse response = new ${name}ServiceResponse();
+
+        try
+        {
+            str recordId  = _request.parmRecordId();
+            str operation = _request.parmOperation();
+
+            // TODO: Implement business logic based on operation
+            ttsbegin;
+
+            // Process...
+
+            ttscommit;
+
+            response.parmSuccess(true);
+            response.parmMessage('Operation completed successfully.');
+        }
+        catch (Exception::Error)
+        {
+            response.parmSuccess(false);
+            response.parmMessage(infologLine(infologLine()));
+        }
+
+        return response;
+    }
+
+    /// <summary>
+    /// Returns a health check / ping response.
+    /// </summary>
+    [SysEntryPointAttribute(false)]
+    public str ping()
+    {
+        return 'OK';
+    }
+}
+
+// ── 3. AOT objects (create via create_d365fo_file) ──────────────────────
+// a) AxService XML:
+//    <AxService>
+//      <Name>${name}Service</Name>
+//      <Class>${name}Service</Class>
+//      <Operations>
+//        <AxServiceOperation>
+//          <Name>processRequest</Name>
+//          <Enabled>Yes</Enabled>
+//        </AxServiceOperation>
+//        <AxServiceOperation>
+//          <Name>ping</Name>
+//          <Enabled>Yes</Enabled>
+//        </AxServiceOperation>
+//      </Operations>
+//    </AxService>
+//
+// b) AxServiceGroup XML:
+//    <AxServiceGroup>
+//      <Name>${name}ServiceGroup</Name>
+//      <AutoDeploy>Yes</AutoDeploy>
+//      <Services>
+//        <Name>${name}Service</Name>
+//      </Services>
+//    </AxServiceGroup>
+//
+// Endpoint URL after deploy:
+//   https://{env}.operations.dynamics.com/api/services/${name}ServiceGroup/${name}Service/processRequest`;
+}
+
+// ── ER Custom Function pattern ───────────────────────────────────────────
+function erCustomFunctionTemplate(name: string): string {
+  return `/// <summary>
+/// Electronic Reporting custom function provider for ${name}.
+/// Extends the ER formula designer with custom functions usable in ER configurations.
+/// </summary>
+/// <remarks>
+/// After deployment, the function appears in the ER formula designer
+/// under the "Functions" list and can be used in ER format/model mappings.
+///
+/// Registration: The class is auto-discovered via [ERExpressionCustomFunctionProvider].
+/// </remarks>
+[ERExpressionCustomFunctionProvider]
+public final class ${name}ERFunctions
+{
+    /// <summary>
+    /// Custom string formatting function usable from ER formula designer.
+    /// ER formula usage: ${name}.FormatValue(value, format)
+    /// </summary>
+    [ERExpressionCustomFunction('FormatValue',
+        '@MyModel:${name}FormatValueDescription')]
+    public static str formatValue(str _value, str _format)
+    {
+        // TODO: Implement custom formatting logic
+        if (_format == 'upper')
+        {
+            return strUpr(_value);
+        }
+        else if (_format == 'trim')
+        {
+            return strLTrim(strRTrim(_value));
+        }
+        return _value;
+    }
+
+    /// <summary>
+    /// Custom lookup function — retrieves a value from D365FO tables.
+    /// ER formula usage: ${name}.LookupDescription(id)
+    /// </summary>
+    [ERExpressionCustomFunction('LookupDescription',
+        '@MyModel:${name}LookupDescDescription')]
+    public static str lookupDescription(str _id)
+    {
+        // TODO: Replace with actual table lookup
+        // Example: return InventTable::find(_id).itemName();
+        return '';
+    }
+
+    /// <summary>
+    /// Custom validation function returning boolean.
+    /// ER formula usage: ${name}.IsValid(value)
+    /// </summary>
+    [ERExpressionCustomFunction('IsValid',
+        '@MyModel:${name}IsValidDescription')]
+    public static boolean isValid(str _value)
+    {
+        // TODO: Implement validation logic
+        return _value != '';
+    }
+}
+
+// ── Usage in ER formula designer ────────────────────────────────────────
+// After deployment:
+//   1. Open Organizational administration > Electronic reporting > Configurations
+//   2. In format/model mapping designer, open the formula editor
+//   3. Find ${name}.FormatValue in the functions list
+//   4. Apply: ${name}.FormatValue(model.CustomerName, "upper")`;
 }
 
 const EXTENSION_PATTERNS = new Set([

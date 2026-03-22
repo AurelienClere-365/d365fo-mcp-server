@@ -134,6 +134,60 @@ describe('generate_code', () => {
     );
     expect(result.isError).toBe(true);
   });
+
+  it('generates a business-event template', async () => {
+    const result = await codeGenTool(
+      req('generate_code', { pattern: 'business-event', name: 'OrderConfirmed', modelName: 'MyModel' }),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toMatch(/BusinessEventsBase|BusinessEventsContract/);
+  });
+
+  it('generates a custom-telemetry template', async () => {
+    const result = await codeGenTool(
+      req('generate_code', { pattern: 'custom-telemetry', name: 'OrderProcessing', modelName: 'MyModel' }),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toMatch(/ApplicationInsights|logCustomEvent|emitEvent/);
+  });
+
+  it('generates a feature-class template', async () => {
+    const result = await codeGenTool(
+      req('generate_code', { pattern: 'feature-class', name: 'EnhancedValidation', modelName: 'MyModel' }),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toMatch(/FeatureClassAttribute|isEnabledByDefault/);
+  });
+
+  it('generates a composite-entity template', async () => {
+    const result = await codeGenTool(
+      req('generate_code', { pattern: 'composite-entity', name: 'SalesOrder', modelName: 'MyModel' }),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toMatch(/HeaderEntity|LineEntity|Composite/);
+  });
+
+  it('generates a custom-service template', async () => {
+    const result = await codeGenTool(
+      req('generate_code', { pattern: 'custom-service', name: 'Inventory', modelName: 'MyModel' }),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toMatch(/ServiceRequest|ServiceResponse|SysEntryPointAttribute|ServiceGroup/);
+  });
+
+  it('generates an er-custom-function template', async () => {
+    const result = await codeGenTool(
+      req('generate_code', { pattern: 'er-custom-function', name: 'CustomFormats', modelName: 'MyModel' }),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toMatch(/ERExpressionCustomFunction|FormatValue|formula designer/i);
+  });
 });
 
 // ─── code_completion ─────────────────────────────────────────────────────────

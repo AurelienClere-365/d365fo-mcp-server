@@ -2293,6 +2293,45 @@ Examples:
         },
       },
       {
+        name: 'recommend_extension_strategy',
+        description: `Recommends the best D365FO extensibility mechanism for a given scenario.
+
+Prevents common design mistakes — e.g. using CoC where a Business Event or delegate is appropriate,
+or using a Business Event for inbound data where a Data Entity is correct.
+
+Returns: recommended mechanism, reasoning, risks/caveats, alternatives, anti-patterns, and next MCP tool calls.
+
+Use BEFORE writing any extension code to ensure the right approach.
+
+Examples:
+  { goal: "validate that SalesLine quantity is positive", objectName: "SalesLine" }
+  { goal: "send order confirmation to external ERP" }
+  { goal: "add custom field to CustTable form", objectName: "CustTable" }
+  { goal: "import vendor data from CSV", scenario: "inbound-data" }`,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            goal: {
+              type: 'string',
+              description: 'What you want to achieve — e.g. "validate that SalesLine quantity is positive"',
+            },
+            objectName: {
+              type: 'string',
+              description: 'Target D365FO object if known — e.g. "SalesTable", "CustTable"',
+            },
+            scenario: {
+              type: 'string',
+              enum: ['data-validation', 'field-defaulting', 'business-logic-change',
+                     'outbound-integration', 'inbound-data', 'ui-modification',
+                     'document-output', 'number-sequence', 'security-access',
+                     'batch-processing', 'custom'],
+              description: 'Scenario category (auto-detected from goal if omitted)',
+            },
+          },
+          required: ['goal'],
+        },
+      },
+      {
         name: 'validate_object_naming',
         description: `Validate a proposed D365FO object name against naming conventions.
 

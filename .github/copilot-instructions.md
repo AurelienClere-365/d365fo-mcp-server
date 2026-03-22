@@ -308,6 +308,7 @@ For any D365FO request, **start with MCP tools — never** `code_search`, `grep_
 | How does X work? | `get_class_info` / `get_table_info` / `get_form_info` / `get_report_info` |
 | How to implement X? (pattern) | `get_xpp_knowledge("batch job")` → `analyze_code_patterns` |
 | What can I extend on X? | `analyze_extension_points(objectName)` |
+| Which extension mechanism to use? | `recommend_extension_strategy(goal, objectName?)` |
 | Who already extends method X via CoC? | `find_coc_extensions(className, methodName)` |
 | Who handles events for table X? | `find_event_handlers(targetTable)` |
 | What fields/methods did extensions add to table X? | `get_table_extension_info(tableName)` |
@@ -317,6 +318,12 @@ For any D365FO request, **start with MCP tools — never** `code_search`, `grep_
 | Create SSRS report | `generate_smart_report` or `generate_code(pattern="ssrs-report-full")` → See **SSRS Report Workflow** section below |
 | Create CoC extension | See **CoC / Extension Workflows** section below |
 | Create workspace form | `generate_smart_form(name, formPattern="Workspace")` |
+| Create business event | `generate_code(pattern="business-event", name="MyEvent")` → creates BusinessEventsBase + contract |
+| Create custom service | `generate_code(pattern="custom-service", name="MyService")` → Service + contracts + group |
+| Create feature toggle | `generate_code(pattern="feature-class", name="MyFeature")` → FeatureClassAttribute class |
+| Add telemetry | `generate_code(pattern="custom-telemetry", name="MyModule")` → Application Insights signals |
+| Create ER function | `generate_code(pattern="er-custom-function", name="MyFunctions")` → ER formula provider |
+| Create composite entity | `generate_code(pattern="composite-entity", name="MyOrder")` → header + line DMF entity |
 | Diagnose X++ error | `get_d365fo_error_help(errorText, errorCode?)` |
 | What is the exact tab/group/control name in form X? | `get_form_info(formName, searchControl="General")` |
 ## Critical Rules
@@ -398,7 +405,7 @@ For any D365FO request, **start with MCP tools — never** `code_search`, `grep_
 21. **NEVER** use PowerShell / `run_in_terminal` to run BP checks, builds, or DB sync — ALWAYS use `run_bp_check()`, `build_d365fo_project()`, `trigger_db_sync()`, `run_systest_class()`. All parameters (model, packagePath, projectPath) are **optional** and auto-detected from `.mcp.json`. If one of these tools returns an error about a missing binary or path, inform the user to fix `.mcp.json` — do NOT fall back to PowerShell. Do NOT use `review_workspace_changes` as a substitute for `run_bp_check` — they serve different purposes.
 22. **ALWAYS** call `get_d365fo_error_help(errorText, errorCode?)` when the user pastes a D365FO compiler or runtime error. Do NOT guess the fix — X++ error semantics often differ from C# and the tool provides verified step-by-step fixes.
 23. **When creating a CoC class extension file** use `create_d365fo_file(objectType="class-extension", objectName="{TargetClass}{Prefix}_Extension", ...)` — this generates the correct `[ExtensionOf(classStr(...))]` + `final class` skeleton in the AxClass XML.
-24. **Available `generate_code` patterns** include: `batch-job`, `sysoperation`, `table-extension`, `class-extension`, `event-handler`, `security-privilege`, `menu-item`, `data-entity`, `ssrs-report-full` (generates DataContract + DP + Controller), `lookup-form` (SysTableLookup static method), `form-handler` (`[ExtensionOf(formStr(...))]` — pass `name`=FormName), `form-datasource-extension` (`[ExtensionOf(formDataSourceStr(Form, DS))]` — pass `name`=FormName + `baseName`=DataSourceName), `form-control-extension` (`[ExtensionOf(formControlStr(Form, Control))]` — pass `name`=FormName + `baseName`=ControlName; use `get_form_info` to find the exact control name first), `map-extension` (`[ExtensionOf(mapStr(...))]`), `dialog-box`, `dimension-controller`, `number-seq-handler`, `display-menu-controller`, `data-entity-staging`, `service-class-ais`.
+24. **Available `generate_code` patterns** include: `batch-job`, `sysoperation`, `table-extension`, `class-extension`, `event-handler`, `security-privilege`, `menu-item`, `data-entity`, `ssrs-report-full` (generates DataContract + DP + Controller), `lookup-form` (SysTableLookup static method), `form-handler` (`[ExtensionOf(formStr(...))]` — pass `name`=FormName), `form-datasource-extension` (`[ExtensionOf(formDataSourceStr(Form, DS))]` — pass `name`=FormName + `baseName`=DataSourceName), `form-control-extension` (`[ExtensionOf(formControlStr(Form, Control))]` — pass `name`=FormName + `baseName`=ControlName; use `get_form_info` to find the exact control name first), `map-extension` (`[ExtensionOf(mapStr(...))]`), `dialog-box`, `dimension-controller`, `number-seq-handler`, `display-menu-controller`, `data-entity-staging`, `service-class-ais`, `business-event` (BusinessEventsBase subclass + contract — triggers for Power Automate / Service Bus), `custom-telemetry` (Application Insights custom event/metric emission via SysApplicationInsightsEventLogger), `feature-class` (FeatureClassAttribute class for Feature Management workspace), `composite-entity` (header + line composite data entity for DMF), `custom-service` (Service class + Service Group + request/response contracts), `er-custom-function` (ERExpressionCustomFunctionProvider for ER formula designer).
 25. **Available `generate_smart_form` patterns** include: `SimpleList`, `SimpleListDetails`, `DetailsMaster`, `DetailsTransaction`, `Dialog`, `TableOfContents`, `Lookup`, `ListPage`, `Workspace` (operational workspace with panorama sections and KPI tile area).
 26. **NEVER** call a method or API marked with `[SysObsolete]` (or `[Obsolete]` in C# interop). The attribute message almost always names the replacement — read it and use that replacement instead. If you encounter an obsolete symbol while reading existing code with `get_method_source` or in `analyze_code_patterns` output, verify the replacement before generating any call to it. Common examples:
     - `today()` → `DateTimeUtil::getToday(DateTimeUtil::getUserPreferredTimeZone())`
@@ -743,6 +750,7 @@ c) Save to disk:                     create_d365fo_file(objectType="report", obj
 | Tool | Use for |
 |------|---------|
 | `analyze_extension_points(objectName, showExistingExtensions?)` | What CoC methods, delegates, and data events does an object expose? Start here before any extension work |
+| `recommend_extension_strategy(goal, objectName?, scenario?)` | Which extensibility mechanism is correct for a given scenario? Prevents wrong choices (CoC vs event vs Business Event vs data entity) |
 | `get_table_extension_info(tableName)` | All extensions of a table across all models: added fields, indexes, methods |
 | `find_coc_extensions(className, methodName?)` | Which extension classes use CoC to wrap a given class/method? |
 | `find_event_handlers(targetTable)` | All `[SubscribesTo]` event handler methods for a table or class |

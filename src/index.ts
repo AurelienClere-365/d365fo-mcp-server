@@ -569,13 +569,13 @@ async function main() {
     });
 
     // Log tool count immediately (transport is already connected)
-    const totalTools = 51;
+    const totalTools = 54;
     const localToolCount = LOCAL_TOOLS.size;
     const toolCount = SERVER_MODE === 'write-only' ? localToolCount :
                      SERVER_MODE === 'read-only' ? totalTools - localToolCount : totalTools;
     const toolDesc = SERVER_MODE === 'write-only' ? `(${Array.from(LOCAL_TOOLS).join(', ')})` :
                     SERVER_MODE === 'read-only' ? '(all except local tools)' :
-                    '(8 discovery + 4 labels + 7 object-info + 4 intelligent + 4 smart-gen + 3 file-ops + 3 pattern-analysis + 11 security-ext + 5 sdlc-build + 2 code-review)';
+                    '(8 discovery + 7 object-info + 6 intelligent + 4 smart-gen + 3 pattern-analysis + 10 security-ext + 4 file-ops + 7 sdlc-build + 4 labels + 1 workspace)';
     console.log(`🎯 Registered ${toolCount} X++ MCP tools ${toolDesc}`);
     serverState.isReady = true;
     serverState.isHealthy = true;
@@ -695,6 +695,7 @@ async function main() {
           { name: 'get_table_extension_info',     desc: 'All extensions of a table: added fields, indexes, methods' },
           { name: 'get_data_entity_info',         desc: 'Data entity: category, OData settings, data sources, keys' },
           { name: 'analyze_extension_points',     desc: 'CoC-eligible methods, delegates, events — what can be extended?' },
+          { name: 'recommend_extension_strategy',  desc: 'Recommends the best extensibility mechanism for a given scenario' },
           { name: 'validate_object_naming',       desc: 'Validate proposed extensions and object names against D365FO conventions' },
           { name: 'get_workspace_info',           desc: 'Detected workspace paths, model name, project file, and server mode' },
           { name: 'verify_d365fo_project',        desc: 'Verify objects exist on disk and are referenced in the .rnrproj project file' },

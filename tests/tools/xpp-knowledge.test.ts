@@ -136,4 +136,62 @@ describe('get_xpp_knowledge', () => {
     const text = getText(result);
     expect(text).toContain('Related topics');
   });
+
+  // ── New knowledge topics (P1) ──────────────────────────────────────────
+
+  it('handles inventory management query', async () => {
+    const result = await xppKnowledgeTool(req({ topic: 'inventory InventTrans' }));
+    const text = getText(result);
+    expect(text).toContain('InventTrans');
+    expect(text).toContain('InventDim');
+  });
+
+  it('handles feature management query', async () => {
+    const result = await xppKnowledgeTool(req({ topic: 'feature management toggle' }));
+    const text = getText(result);
+    expect(text).toContain('FeatureClassAttribute');
+    expect(text).toContain('isFeatureEnabled');
+  });
+
+  it('handles dual-write query', async () => {
+    const result = await xppKnowledgeTool(req({ topic: 'dual-write Dataverse' }));
+    const text = getText(result);
+    expect(text).toContain('Dataverse');
+    expect(text).toContain('dual-write');
+  });
+
+  it('handles DMF/DIXF query', async () => {
+    const result = await xppKnowledgeTool(req({ topic: 'DMF data import staging' }));
+    const text = getText(result);
+    expect(text).toContain('Data Management');
+    expect(text).toContain('staging');
+  });
+
+  it('handles warehouse management query', async () => {
+    const result = await xppKnowledgeTool(req({ topic: 'warehouse WHS wave' }));
+    const text = getText(result);
+    expect(text).toContain('Warehouse');
+    expect(text).toContain('WHSWork');
+  });
+
+  it('handles trade agreements query', async () => {
+    const result = await xppKnowledgeTool(req({ topic: 'trade agreement pricing' }));
+    const text = getText(result);
+    expect(text).toContain('PriceDisc');
+    expect(text).toContain('Trade');
+  });
+
+  it('handles configuration keys query', async () => {
+    const result = await xppKnowledgeTool(req({ topic: 'configuration key license' }));
+    const text = getText(result);
+    expect(text).toContain('Configuration');
+    expect(text).toContain('config key');
+  });
+
+  it('handles Power Platform integration query', async () => {
+    const result = await xppKnowledgeTool(req({ topic: 'Power Platform virtual entity' }));
+    const text = getText(result);
+    expect(text).toContain('Power Platform');
+    expect(text).toContain('virtual entit');
+  });
 });

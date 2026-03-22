@@ -2,7 +2,8 @@
  * Extensions & Security Tools Tests
  * Covers: find_coc_extensions, find_event_handlers, get_table_extension_info,
  *         get_security_artifact_info, get_security_coverage_for_object,
- *         analyze_extension_points, get_menu_item_info, get_data_entity_info
+ *         analyze_extension_points, get_menu_item_info, get_data_entity_info,
+ *         recommend_extension_strategy
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -14,6 +15,7 @@ import { securityCoverageInfoTool } from '../../src/tools/securityCoverageInfo';
 import { analyzeExtensionPointsTool } from '../../src/tools/analyzeExtensionPoints';
 import { menuItemInfoTool } from '../../src/tools/menuItemInfo';
 import { dataEntityInfoTool } from '../../src/tools/dataEntityInfo';
+import { extensionStrategyAdvisorTool } from '../../src/tools/extensionStrategyAdvisor';
 import type { XppServerContext } from '../../src/types/context';
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 
@@ -440,5 +442,164 @@ describe('get_data_entity_info', () => {
   it('returns error when entityName is missing', async () => {
     const result = await dataEntityInfoTool(req('get_data_entity_info', {}), buildContext());
     expect(result.isError).toBe(true);
+  });
+});
+
+// ─── recommend_extension_strategy ────────────────────────────────────────────
+
+describe('recommend_extension_strategy', () => {
+  it('recommends table event for data validation scenario', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'validate that SalesLine quantity is positive',
+        objectName: 'SalesLine',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toContain('data-validation');
+    expect(text).toMatch(/Table Event|onValidat/i);
+    expect(text).toContain('SalesLine');
+  });
+
+  it('recommends Business Event for outbound integration', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'send order confirmation to external ERP via Power Automate',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toContain('Business Event');
+    expect(text).toContain('outbound-integration');
+  });
+
+  it('recommends Data Entity for inbound data', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'import vendor master data from CSV via DMF',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toContain('Data Entity');
+    expect(text).toContain('inbound-data');
+  });
+
+  it('recommends Form Extension for UI modification', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'add custom field to CustTable form',
+        objectName: 'CustTable',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toContain('Form Extension');
+    expect(text).toContain('CustTable');
+  });
+
+  it('recommends CoC for business logic modification', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'add logic before posting sales invoice',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toContain('Chain of Command');
+  });
+
+  it('recommends ER/SSRS for document output', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'customize invoice print layout with new fields',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toMatch(/Electronic Reporting|SSRS/);
+  });
+
+  it('uses explicit scenario parameter when provided', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'do something with numbers',
+        scenario: 'number-sequence',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toContain('Number Sequence');
+  });
+
+  it('returns anti-patterns to avoid', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'validate sales order amount is not negative',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toContain('Anti-Patterns');
+  });
+
+  it('returns next steps with MCP tool calls', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'add field to CustTable form',
+        objectName: 'CustTable',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toContain('Next Steps');
+    expect(text).toContain('CustTable');
+  });
+
+  it('shows fallback guidance when goal is ambiguous', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'do something completely unrelated to any known pattern xyz123',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toContain('scenario');
+  });
+
+  it('recommends SysOperation for batch processing', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'create a scheduled batch job to recalculate inventory',
+        scenario: 'batch-processing',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toContain('SysOperation');
+  });
+
+  it('recommends security hierarchy for access control', async () => {
+    const result = await extensionStrategyAdvisorTool(
+      req('recommend_extension_strategy', {
+        goal: 'grant users access to new custom form via security role',
+      }),
+      buildContext(),
+    );
+    expect(result.isError).toBeFalsy();
+    const text = result.content[0].text;
+    expect(text).toMatch(/Privilege|Duty|Role/);
   });
 });

@@ -54,6 +54,7 @@ import { dbSyncTool } from './dbSync.js';
 import { runBpCheckTool } from './runBpCheck.js';
 import { sysTestRunnerTool } from './sysTestRunner.js';
 import { reviewWorkspaceChangesTool } from './reviewWorkspaceChanges.js';
+import { extensionStrategyAdvisorTool } from './extensionStrategyAdvisor.js';
 import { undoLastModificationTool } from './undoLastModification.js';
 import { xppKnowledgeTool } from './xppKnowledge.js';
 import { d365foErrorHelpTool } from './d365foErrorHelp.js';
@@ -122,6 +123,7 @@ const TOOL_CAP_SIZES: Record<string, number | 'uncapped'> = {
   get_security_coverage_for_object: 8000,
   get_table_extension_info:         6000,
   analyze_extension_points:         6000,
+  recommend_extension_strategy:     6000,
   find_coc_extensions:              5000,
   find_event_handlers:              5000,
   get_data_entity_info:             5000,
@@ -357,6 +359,8 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
         return securityCoverageInfoTool(request, context);
       case 'analyze_extension_points':
         return analyzeExtensionPointsTool(request, context);
+      case 'recommend_extension_strategy':
+        return extensionStrategyAdvisorTool(request, context);
       case 'validate_object_naming':
         return validateObjectNamingTool(request, context);
       case 'verify_d365fo_project':

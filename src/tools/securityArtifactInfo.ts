@@ -13,7 +13,10 @@ const SecurityArtifactInfoArgsSchema = z.object({
   includeChain: z.boolean().optional().default(true).describe('Walk the full hierarchy (role→duties→privileges→entry points)'),
 });
 
-export async function securityArtifactInfoTool(request: CallToolRequest, context: XppServerContext) {
+export async function securityArtifactInfoTool(
+  request: CallToolRequest,
+  context: XppServerContext,
+): Promise<{ content: { type: string; text: string }[]; isError?: boolean }> {
   try {
     const args = SecurityArtifactInfoArgsSchema.parse(request.params.arguments);
     const db = context.symbolIndex.db;
