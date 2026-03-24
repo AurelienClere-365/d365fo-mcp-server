@@ -831,6 +831,270 @@ namespace D365MetadataBridge.Services
         }
 
         // ========================
+        // DELETE
+        // ========================
+
+        /// <summary>
+        /// Delete a D365FO object by removing its XML file from disk.
+        /// Uses IMetadataProvider to verify existence and locate the file path.
+        /// This is a file-level delete — the caller should also update any indexes.
+        /// </summary>
+        public DeleteResultModel DeleteObject(string objectType, string objectName)
+        {
+            var result = new DeleteResultModel { ObjectType = objectType, ObjectName = objectName };
+
+            try
+            {
+                // Map objectType to folder and provider check
+                string aotFolder;
+                bool exists;
+                string? model = null;
+
+                switch (objectType.ToLowerInvariant())
+                {
+                    case "class":
+                    case "class-extension":
+                        exists = _provider.Classes.Exists(objectName);
+                        aotFolder = objectType.ToLowerInvariant() == "class-extension" ? "AxClassExtension" : "AxClass";
+                        try { var mi = _provider.Classes.GetModelInfo(objectName); if (mi?.Count > 0) model = mi.First().Name; } catch { }
+                        break;
+                    case "table":
+                        exists = _provider.Tables.Exists(objectName);
+                        aotFolder = "AxTable";
+                        try { var mi = _provider.Tables.GetModelInfo(objectName); if (mi?.Count > 0) model = mi.First().Name; } catch { }
+                        break;
+                    case "table-extension":
+                        exists = _provider.Tables.Exists(objectName);
+                        aotFolder = "AxTableExtension";
+                        try { var mi = _provider.Tables.GetModelInfo(objectName); if (mi?.Count > 0) model = mi.First().Name; } catch { }
+                        break;
+                    case "enum":
+                        exists = _provider.Enums.Exists(objectName);
+                        aotFolder = "AxEnum";
+                        try { var mi = _provider.Enums.GetModelInfo(objectName); if (mi?.Count > 0) model = mi.First().Name; } catch { }
+                        break;
+                    case "edt":
+                        exists = _provider.Edts.Exists(objectName);
+                        aotFolder = "AxEdt";
+                        try { var mi = _provider.Edts.GetModelInfo(objectName); if (mi?.Count > 0) model = mi.First().Name; } catch { }
+                        break;
+                    case "form":
+                        exists = _provider.Forms.Exists(objectName);
+                        aotFolder = "AxForm";
+                        try { var mi = _provider.Forms.GetModelInfo(objectName); if (mi?.Count > 0) model = mi.First().Name; } catch { }
+                        break;
+                    case "form-extension":
+                        exists = _provider.Forms.Exists(objectName);
+                        aotFolder = "AxFormExtension";
+                        try { var mi = _provider.Forms.GetModelInfo(objectName); if (mi?.Count > 0) model = mi.First().Name; } catch { }
+                        break;
+                    case "query":
+                        exists = _provider.Queries.Exists(objectName);
+                        aotFolder = "AxQuery";
+                        try { var mi = _provider.Queries.GetModelInfo(objectName); if (mi?.Count > 0) model = mi.First().Name; } catch { }
+                        break;
+                    case "view":
+                        exists = _provider.Views.Exists(objectName);
+                        aotFolder = "AxView";
+                        try { var mi = _provider.Views.GetModelInfo(objectName); if (mi?.Count > 0) model = mi.First().Name; } catch { }
+                        break;
+                    case "report":
+                        exists = _provider.Reports.Exists(objectName);
+                        aotFolder = "AxReport";
+                        try { var mi = _provider.Reports.GetModelInfo(objectName); if (mi?.Count > 0) model = mi.First().Name; } catch { }
+                        break;
+                    case "security-privilege":
+                        aotFolder = "AxSecurityPrivilege";
+                        exists = true; // No direct provider check for security types
+                        break;
+                    case "security-duty":
+                        aotFolder = "AxSecurityDuty";
+                        exists = true;
+                        break;
+                    case "security-role":
+                        aotFolder = "AxSecurityRole";
+                        exists = true;
+                        break;
+                    case "menu-item-display":
+                        aotFolder = "AxMenuItemDisplay";
+                        exists = true;
+                        break;
+                    case "menu-item-action":
+                        aotFolder = "AxMenuItemAction";
+                        exists = true;
+                        break;
+                    case "menu-item-output":
+                        aotFolder = "AxMenuItemOutput";
+                        exists = true;
+                        break;
+                    default:
+                        result.Error = $"Unsupported objectType for deletion: {objectType}";
+                        return result;
+                }
+
+                result.Model = model;
+
+                // Locate the XML file on disk
+                // Path: {packagesPath}/{model}/{model}/{aotFolder}/{objectName}.xml
+                // If model is unknown, scan all model directories
+                string? filePath = null;
+                if (!string.IsNullOrEmpty(model))
+                {
+                    var candidate = System.IO.Path.Combine(_packagesPath, model, model, aotFolder, objectName + ".xml");
+                    if (System.IO.File.Exists(candidate)) filePath = candidate;
+                }
+
+                if (filePath == null)
+                {
+                    // Scan for the file across all models
+                    try
+                    {
+                        foreach (var packageDir in System.IO.Directory.GetDirectories(_packagesPath))
+                        {
+                            var dirName = System.IO.Path.GetFileName(packageDir);
+                            var candidate = System.IO.Path.Combine(packageDir, dirName, aotFolder, objectName + ".xml");
+                            if (System.IO.File.Exists(candidate)) { filePath = candidate; break; }
+                        }
+                    }
+                    catch { }
+                }
+
+                if (filePath == null)
+                {
+                    result.Error = $"File not found for {objectType}/{objectName} in any model directory";
+                    return result;
+                }
+
+                result.FilePath = filePath;
+
+                // Delete the file
+                System.IO.File.Delete(filePath);
+                result.Success = true;
+                Console.Error.WriteLine($"[DELETE] Successfully deleted: {filePath}");
+            }
+            catch (Exception ex)
+            {
+                result.Error = $"Delete failed: {ex.Message}";
+                Console.Error.WriteLine($"[ERROR] DeleteObject({objectType}, {objectName}): {ex.Message}");
+            }
+
+            return result;
+        }
+
+        // ========================
+        // CAPABILITIES
+        // ========================
+
+        /// <summary>
+        /// Returns a capabilities map listing available modification operations per object type.
+        /// This is a static declaration — no reflection needed.
+        /// </summary>
+        public CapabilitiesModel GetCapabilities()
+        {
+            return new CapabilitiesModel
+            {
+                ObjectTypes = new Dictionary<string, List<string>>
+                {
+                    ["table"] = new List<string> { "add-field", "modify-field", "rename-field", "replace-all-fields", "remove-field", "add-index", "remove-index", "add-relation", "remove-relation", "add-field-group", "remove-field-group", "add-field-to-field-group", "add-method", "remove-method", "replace-code", "modify-property" },
+                    ["table-extension"] = new List<string> { "add-field", "modify-field", "rename-field", "remove-field", "add-index", "remove-index", "add-relation", "remove-relation", "add-field-group", "remove-field-group", "add-field-to-field-group", "add-field-modification", "add-method", "remove-method", "replace-code", "modify-property" },
+                    ["class"] = new List<string> { "add-method", "remove-method", "replace-code", "modify-property" },
+                    ["class-extension"] = new List<string> { "add-method", "remove-method", "replace-code", "modify-property" },
+                    ["form"] = new List<string> { "add-method", "remove-method", "replace-code", "modify-property" },
+                    ["form-extension"] = new List<string> { "add-control", "add-data-source", "add-method", "remove-method", "replace-code", "modify-property" },
+                    ["enum"] = new List<string> { "modify-property" },
+                    ["edt"] = new List<string> { "modify-property" },
+                    ["view"] = new List<string> { "add-method", "remove-method", "replace-code", "modify-property" },
+                    ["query"] = new List<string> { "modify-property" },
+                    ["report"] = new List<string> { "modify-property" },
+                }
+            };
+        }
+
+        // ========================
+        // FORM PATTERN DISCOVERY
+        // ========================
+
+        /// <summary>
+        /// Discovers available D365FO form patterns by attempting to load
+        /// Microsoft.Dynamics.AX.Metadata.Patterns.dll from the D365FO bin directory.
+        /// Falls back to a hardcoded list of well-known patterns.
+        /// </summary>
+        public FormPatternDiscoveryResult DiscoverFormPatterns()
+        {
+            var result = new FormPatternDiscoveryResult();
+
+            // Attempt runtime discovery from PatternFactory
+            try
+            {
+                var binPath = System.IO.Path.Combine(_packagesPath, "bin");
+                var patternsDll = System.IO.Path.Combine(binPath, "Microsoft.Dynamics.AX.Metadata.Patterns.dll");
+
+                if (System.IO.File.Exists(patternsDll))
+                {
+                    var assembly = System.Reflection.Assembly.LoadFrom(patternsDll);
+                    var factoryType = assembly.GetType("Microsoft.Dynamics.AX.Metadata.Patterns.PatternFactory");
+
+                    if (factoryType != null)
+                    {
+                        var getAllMethod = factoryType.GetMethod("GetAllPatterns", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                        if (getAllMethod != null)
+                        {
+                            var patterns = getAllMethod.Invoke(null, null) as System.Collections.IEnumerable;
+                            if (patterns != null)
+                            {
+                                foreach (dynamic p in patterns)
+                                {
+                                    try
+                                    {
+                                        result.Patterns.Add(new FormPatternModel
+                                        {
+                                            Name = Safe(() => (string)p.Name) ?? "",
+                                            Version = Safe(() => p.Version?.ToString() as string),
+                                            Description = Safe(() => (string)p.Description),
+                                        });
+                                    }
+                                    catch { }
+                                }
+                                result.Count = result.Patterns.Count;
+                                result.Source = "runtime";
+                                Console.Error.WriteLine($"[INFO] Discovered {result.Count} form patterns from Patterns DLL");
+                                return result;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[WARN] Pattern discovery via DLL failed: {ex.Message}");
+            }
+
+            // Fallback: well-known patterns
+            var knownPatterns = new[] {
+                ("SimpleList", "Simple flat list of records"),
+                ("SimpleListDetails", "List with details pane"),
+                ("DetailsMaster", "Master record form with header and lines"),
+                ("DetailsTransaction", "Transaction form with header and lines"),
+                ("Dialog", "Modal dialog box"),
+                ("DropDialog", "Drop dialog (compact dialog)"),
+                ("TableOfContents", "Navigation form with sections"),
+                ("ListPage", "Browse/filter list page"),
+                ("Lookup", "Lookup form for field selection"),
+                ("FactBox", "FactBox information panel"),
+                ("FormPart", "Embedded form part"),
+                ("Workspace", "Operational workspace with panorama sections"),
+                ("WizardDialog", "Multi-step wizard dialog"),
+            };
+
+            foreach (var (name, desc) in knownPatterns)
+                result.Patterns.Add(new FormPatternModel { Name = name, Description = desc });
+
+            result.Count = result.Patterns.Count;
+            result.Source = "hardcoded";
+            return result;
+        }
+
+        // ========================
         // SEARCH / LIST
         // ========================
         public SearchResultModel SearchObjects(string type, string query, int maxResults)

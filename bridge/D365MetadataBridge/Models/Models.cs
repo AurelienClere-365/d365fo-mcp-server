@@ -685,4 +685,119 @@ namespace D365MetadataBridge.Models
         [JsonPropertyName("found")]
         public bool Found { get; set; }
     }
+
+    // ========================
+    // Delete result model
+    // ========================
+
+    public class DeleteResultModel
+    {
+        [JsonPropertyName("success")]
+        public bool Success { get; set; }
+
+        [JsonPropertyName("objectType")]
+        public string ObjectType { get; set; } = "";
+
+        [JsonPropertyName("objectName")]
+        public string ObjectName { get; set; } = "";
+
+        [JsonPropertyName("model")]
+        public string? Model { get; set; }
+
+        [JsonPropertyName("filePath")]
+        public string? FilePath { get; set; }
+
+        [JsonPropertyName("error")]
+        public string? Error { get; set; }
+    }
+
+    // ========================
+    // Batch operation models
+    // ========================
+
+    public class BatchOperationRequest
+    {
+        [JsonPropertyName("operation")]
+        public string Operation { get; set; } = "";
+
+        [JsonPropertyName("params")]
+        public Dictionary<string, object>? Params { get; set; }
+    }
+
+    public class BatchOperationResult
+    {
+        [JsonPropertyName("objectType")]
+        public string ObjectType { get; set; } = "";
+
+        [JsonPropertyName("objectName")]
+        public string ObjectName { get; set; } = "";
+
+        [JsonPropertyName("totalOperations")]
+        public int TotalOperations { get; set; }
+
+        [JsonPropertyName("successCount")]
+        public int SuccessCount { get; set; }
+
+        [JsonPropertyName("failureCount")]
+        public int FailureCount { get; set; }
+
+        [JsonPropertyName("operations")]
+        public List<BatchOperationItemResult> Operations { get; set; } = new List<BatchOperationItemResult>();
+    }
+
+    public class BatchOperationItemResult
+    {
+        [JsonPropertyName("operation")]
+        public string Operation { get; set; } = "";
+
+        [JsonPropertyName("success")]
+        public bool Success { get; set; }
+
+        [JsonPropertyName("error")]
+        public string? Error { get; set; }
+
+        [JsonPropertyName("elapsedMs")]
+        public long ElapsedMs { get; set; }
+    }
+
+    // ========================
+    // Capabilities model
+    // ========================
+
+    public class CapabilitiesModel
+    {
+        [JsonPropertyName("objectTypes")]
+        public Dictionary<string, List<string>> ObjectTypes { get; set; } = new Dictionary<string, List<string>>();
+
+        [JsonPropertyName("version")]
+        public string Version { get; set; } = "1.0.0";
+    }
+
+    // ========================
+    // Form pattern discovery models
+    // ========================
+
+    public class FormPatternModel
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = "";
+
+        [JsonPropertyName("version")]
+        public string? Version { get; set; }
+
+        [JsonPropertyName("description")]
+        public string? Description { get; set; }
+    }
+
+    public class FormPatternDiscoveryResult
+    {
+        [JsonPropertyName("patterns")]
+        public List<FormPatternModel> Patterns { get; set; } = new List<FormPatternModel>();
+
+        [JsonPropertyName("count")]
+        public int Count { get; set; }
+
+        [JsonPropertyName("source")]
+        public string Source { get; set; } = "";
+    }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using D365MetadataBridge.Services;
 
@@ -155,6 +156,31 @@ namespace D365MetadataBridge.Protocol
                             return _xrefService!.SampleRows(tableName);
                         });
 
+                    // === Delete ===
+                    case "deleteobject":
+                        return HandleMetadata(request, () =>
+                        {
+                            var objectType = request.GetStringParam("objectType")
+                                ?? throw new ArgumentException("Missing parameter: objectType");
+                            var objectName = request.GetStringParam("objectName")
+                                ?? throw new ArgumentException("Missing parameter: objectName");
+                            return _metadataService!.DeleteObject(objectType, objectName);
+                        });
+
+                    // === Capabilities ===
+                    case "getcapabilities":
+                        return HandleMetadata(request, () =>
+                        {
+                            return _metadataService!.GetCapabilities();
+                        });
+
+                    // === Form Pattern Discovery ===
+                    case "discoverformpatterns":
+                        return HandleMetadata(request, () =>
+                        {
+                            return _metadataService!.DiscoverFormPatterns();
+                        });
+
                     // === Info ===
                     case "getinfo":
                         return Task.FromResult(BridgeResponse.CreateSuccess(request.Id, new
@@ -171,7 +197,8 @@ namespace D365MetadataBridge.Protocol
                                 "listObjects", "findReferences", "getInfo",
                                 "validateObject", "resolveObjectInfo", "refreshProvider",
                                 "createObject", "addMethod", "addField",
-                                "setProperty", "replaceCode"
+                                "setProperty", "replaceCode",
+                                "deleteObject", "getCapabilities", "discoverFormPatterns"
                             }
                         }));
 
@@ -240,6 +267,39 @@ namespace D365MetadataBridge.Protocol
                                     return _writeService!.CreateEdt(objectName, modelName,
                                         request.GetDictParam("properties"));
 
+                                case "query":
+                                    return _writeService!.CreateQuery(objectName, modelName,
+                                        request.GetDictParam("properties"));
+
+                                case "view":
+                                    return _writeService!.CreateView(objectName, modelName,
+                                        request.GetParam<System.Collections.Generic.List<WriteFieldParam>>("fields"),
+                                        request.GetDictParam("properties"));
+
+                                case "menu-item-action":
+                                    return _writeService!.CreateMenuItemAction(objectName, modelName,
+                                        request.GetDictParam("properties"));
+
+                                case "menu-item-display":
+                                    return _writeService!.CreateMenuItemDisplay(objectName, modelName,
+                                        request.GetDictParam("properties"));
+
+                                case "menu-item-output":
+                                    return _writeService!.CreateMenuItemOutput(objectName, modelName,
+                                        request.GetDictParam("properties"));
+
+                                case "security-privilege":
+                                    return _writeService!.CreateSecurityPrivilege(objectName, modelName,
+                                        request.GetDictParam("properties"));
+
+                                case "security-duty":
+                                    return _writeService!.CreateSecurityDuty(objectName, modelName,
+                                        request.GetDictParam("properties"));
+
+                                case "security-role":
+                                    return _writeService!.CreateSecurityRole(objectName, modelName,
+                                        request.GetDictParam("properties"));
+
                                 default:
                                     throw new ArgumentException($"createObject not supported for '{objectType}' via bridge — use XML fallback");
                             }
@@ -301,6 +361,10 @@ namespace D365MetadataBridge.Protocol
                             return _writeService!.ReplaceCode(objectType, objectName,
                                 request.GetStringParam("methodName"), oldCode, newCode);
                         });
+
+                    // === Batch Modify (multiple operations in one call) ===
+                    case "batchmodify":
+                        return HandleBatchModify(request);
 
                     default:
                         return Task.FromResult(
@@ -387,6 +451,119 @@ namespace D365MetadataBridge.Protocol
                 Console.Error.WriteLine($"[ERROR] {request.Method}: {ex.Message}\n{ex.StackTrace}");
                 return Task.FromResult(
                     BridgeResponse.CreateError(request.Id, -32603, $"Error in {request.Method}: {ex.Message}"));
+            }
+        }
+
+        /// <summary>
+        /// Handles batch modification: multiple write operations on one object in a single call.
+        /// Each operation is executed independently — failures don't stop subsequent operations.
+        /// </summary>
+        private Task<BridgeResponse> HandleBatchModify(BridgeRequest request)
+        {
+            if (_writeService == null)
+                return Task.FromResult(
+                    BridgeResponse.CreateError(request.Id, -32000, "Write service not available"));
+
+            try
+            {
+                var objectType = request.GetStringParam("objectType")
+                    ?? throw new ArgumentException("Missing: objectType");
+                var objectName = request.GetStringParam("objectName")
+                    ?? throw new ArgumentException("Missing: objectName");
+                var operations = request.GetParam<System.Collections.Generic.List<D365MetadataBridge.Models.BatchOperationRequest>>("operations")
+                    ?? throw new ArgumentException("Missing: operations array");
+
+                var batchResult = new D365MetadataBridge.Models.BatchOperationResult
+                {
+                    ObjectType = objectType,
+                    ObjectName = objectName,
+                    TotalOperations = operations.Count,
+                };
+
+                foreach (var op in operations)
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var itemResult = new D365MetadataBridge.Models.BatchOperationItemResult
+                    {
+                        Operation = op.Operation,
+                    };
+
+                    try
+                    {
+                        object? writeResult = null;
+                        var p = op.Params ?? new Dictionary<string, object>();
+
+                        // Extract string helper
+                        string? S(string key) => p.TryGetValue(key, out var v) ? v?.ToString() : null;
+                        bool? B(string key) => p.TryGetValue(key, out var v) && v != null ? Convert.ToBoolean(v) : null;
+
+                        switch (op.Operation.ToLowerInvariant())
+                        {
+                            case "addmethod":
+                            case "add-method":
+                                writeResult = _writeService.AddMethod(objectType, objectName,
+                                    S("methodName") ?? throw new ArgumentException("Missing: methodName"),
+                                    S("sourceCode") ?? throw new ArgumentException("Missing: sourceCode"));
+                                break;
+
+                            case "addfield":
+                            case "add-field":
+                                writeResult = _writeService.AddField(objectName,
+                                    S("fieldName") ?? throw new ArgumentException("Missing: fieldName"),
+                                    S("fieldType") ?? "String",
+                                    S("edt"),
+                                    B("mandatory") ?? false,
+                                    S("label"));
+                                break;
+
+                            case "setproperty":
+                            case "set-property":
+                            case "modify-property":
+                                writeResult = _writeService.SetProperty(objectType, objectName,
+                                    S("propertyPath") ?? throw new ArgumentException("Missing: propertyPath"),
+                                    S("propertyValue") ?? throw new ArgumentException("Missing: propertyValue"));
+                                break;
+
+                            case "replacecode":
+                            case "replace-code":
+                                writeResult = _writeService.ReplaceCode(objectType, objectName,
+                                    S("methodName"),
+                                    S("oldCode") ?? throw new ArgumentException("Missing: oldCode"),
+                                    S("newCode") ?? throw new ArgumentException("Missing: newCode"));
+                                break;
+
+                            default:
+                                throw new ArgumentException($"Unsupported batch operation: {op.Operation}");
+                        }
+
+                        itemResult.Success = true;
+                        batchResult.SuccessCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        itemResult.Success = false;
+                        itemResult.Error = ex.Message;
+                        batchResult.FailureCount++;
+                        Console.Error.WriteLine($"[BATCH] Operation '{op.Operation}' failed: {ex.Message}");
+                    }
+
+                    sw.Stop();
+                    itemResult.ElapsedMs = sw.ElapsedMilliseconds;
+                    batchResult.Operations.Add(itemResult);
+                }
+
+                return Task.FromResult(BridgeResponse.CreateSuccess(request.Id, batchResult));
+            }
+            catch (ArgumentException ex)
+            {
+                return Task.FromResult(
+                    BridgeResponse.CreateError(request.Id, -32602, ex.Message));
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[ERROR] batchModify: {ex.Message}\n{ex.StackTrace}");
+                return Task.FromResult(
+                    BridgeResponse.CreateError(request.Id, -32603, $"Error in batchModify: {ex.Message}"));
             }
         }
     }

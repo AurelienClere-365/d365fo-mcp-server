@@ -347,6 +347,214 @@ namespace D365MetadataBridge.Services
             return new { success = true, objectType = "edt", objectName = name, modelName, filePath, api = "IMetaEdtProvider.Create" };
         }
 
+        /// <summary>
+        /// Creates a new Query object via IMetaQueryProvider.
+        /// AxQuery is abstract — use AxQuerySimple (concrete subclass) for creation.
+        /// </summary>
+        public object CreateQuery(string name, string modelName, Dictionary<string, string>? properties)
+        {
+            var msi = ResolveModelSaveInfo(modelName);
+
+            // AxQuery is abstract. Use reflection to try AxQuerySimple first.
+            // If that fails, fall back by creating a dynamic instance.
+            AxQuery axQuery;
+            try
+            {
+                var queryType = typeof(AxQuery).Assembly.GetType("Microsoft.Dynamics.AX.Metadata.MetaModel.AxQuerySimple");
+                if (queryType != null)
+                {
+                    axQuery = (AxQuery)Activator.CreateInstance(queryType)!;
+                }
+                else
+                {
+                    throw new InvalidOperationException("AxQuerySimple type not found in metadata assembly");
+                }
+            }
+            catch
+            {
+                throw new InvalidOperationException("Cannot create AxQuery instance — AxQuery is abstract and AxQuerySimple was not found. Use XML fallback.");
+            }
+            axQuery.Name = name;
+
+            if (properties != null)
+            {
+                foreach (var kv in properties)
+                    SetAxQueryProperty(axQuery, kv.Key, kv.Value);
+            }
+
+            var queryProvider = _provider.Queries as IMetaQueryProvider
+                ?? throw new InvalidOperationException("DiskProvider.Queries does not implement IMetaQueryProvider");
+            queryProvider.Create(axQuery, msi);
+
+            var filePath = GetExpectedPath("AxQuery", name, modelName);
+            return new { success = true, objectType = "query", objectName = name, modelName, filePath, api = "IMetaQueryProvider.Create" };
+        }
+
+        /// <summary>
+        /// Creates a new View object via IMetaViewProvider.
+        /// Note: View fields are NOT added during creation because AxViewField is abstract.
+        /// Use modify_d365fo_file to add fields after creation, or pass xmlContent for full XML.
+        /// </summary>
+        public object CreateView(string name, string modelName,
+            List<WriteFieldParam>? fields,
+            Dictionary<string, string>? properties)
+        {
+            var msi = ResolveModelSaveInfo(modelName);
+            var axView = new AxView { Name = name };
+
+            if (properties != null)
+            {
+                foreach (var kv in properties)
+                    SetAxViewProperty(axView, kv.Key, kv.Value);
+            }
+
+            // Note: AxViewField is abstract — field creation is skipped during initial Create.
+            // Fields should be added via modify_d365fo_file or by passing full xmlContent.
+            if (fields != null && fields.Count > 0)
+            {
+                Console.Error.WriteLine($"[WriteService] CreateView: {fields.Count} fields requested but AxViewField is abstract — fields skipped. Use XML fallback for views with fields.");
+            }
+
+            var viewProvider = _provider.Views as IMetaViewProvider
+                ?? throw new InvalidOperationException("DiskProvider.Views does not implement IMetaViewProvider");
+            viewProvider.Create(axView, msi);
+
+            var filePath = GetExpectedPath("AxView", name, modelName);
+            return new { success = true, objectType = "view", objectName = name, modelName, filePath, api = "IMetaViewProvider.Create" };
+        }
+
+        /// <summary>
+        /// Creates a new MenuItemAction object via IMetaMenuItemActionProvider.
+        /// </summary>
+        public object CreateMenuItemAction(string name, string modelName, Dictionary<string, string>? properties)
+        {
+            var msi = ResolveModelSaveInfo(modelName);
+            var axMI = new AxMenuItemAction { Name = name };
+
+            if (properties != null)
+            {
+                foreach (var kv in properties)
+                    SetAxMenuItemProperty(axMI, kv.Key, kv.Value);
+            }
+
+            var provider = _provider.MenuItemActions as IMetaMenuItemActionProvider
+                ?? throw new InvalidOperationException("DiskProvider.MenuItemActions does not implement IMetaMenuItemActionProvider");
+            provider.Create(axMI, msi);
+
+            var filePath = GetExpectedPath("AxMenuItemAction", name, modelName);
+            return new { success = true, objectType = "menu-item-action", objectName = name, modelName, filePath, api = "IMetaMenuItemActionProvider.Create" };
+        }
+
+        /// <summary>
+        /// Creates a new MenuItemDisplay object via IMetaMenuItemDisplayProvider.
+        /// </summary>
+        public object CreateMenuItemDisplay(string name, string modelName, Dictionary<string, string>? properties)
+        {
+            var msi = ResolveModelSaveInfo(modelName);
+            var axMI = new AxMenuItemDisplay { Name = name };
+
+            if (properties != null)
+            {
+                foreach (var kv in properties)
+                    SetAxMenuItemProperty(axMI, kv.Key, kv.Value);
+            }
+
+            var provider = _provider.MenuItemDisplays as IMetaMenuItemDisplayProvider
+                ?? throw new InvalidOperationException("DiskProvider.MenuItemDisplays does not implement IMetaMenuItemDisplayProvider");
+            provider.Create(axMI, msi);
+
+            var filePath = GetExpectedPath("AxMenuItemDisplay", name, modelName);
+            return new { success = true, objectType = "menu-item-display", objectName = name, modelName, filePath, api = "IMetaMenuItemDisplayProvider.Create" };
+        }
+
+        /// <summary>
+        /// Creates a new MenuItemOutput object via IMetaMenuItemOutputProvider.
+        /// </summary>
+        public object CreateMenuItemOutput(string name, string modelName, Dictionary<string, string>? properties)
+        {
+            var msi = ResolveModelSaveInfo(modelName);
+            var axMI = new AxMenuItemOutput { Name = name };
+
+            if (properties != null)
+            {
+                foreach (var kv in properties)
+                    SetAxMenuItemProperty(axMI, kv.Key, kv.Value);
+            }
+
+            var provider = _provider.MenuItemOutputs as IMetaMenuItemOutputProvider
+                ?? throw new InvalidOperationException("DiskProvider.MenuItemOutputs does not implement IMetaMenuItemOutputProvider");
+            provider.Create(axMI, msi);
+
+            var filePath = GetExpectedPath("AxMenuItemOutput", name, modelName);
+            return new { success = true, objectType = "menu-item-output", objectName = name, modelName, filePath, api = "IMetaMenuItemOutputProvider.Create" };
+        }
+
+        /// <summary>
+        /// Creates a new SecurityPrivilege object via IMetaSecurityPrivilegeProvider.
+        /// </summary>
+        public object CreateSecurityPrivilege(string name, string modelName, Dictionary<string, string>? properties)
+        {
+            var msi = ResolveModelSaveInfo(modelName);
+            var axObj = new AxSecurityPrivilege { Name = name };
+
+            if (properties != null)
+            {
+                foreach (var kv in properties)
+                    SetAxSecurityPrivilegeProperty(axObj, kv.Key, kv.Value);
+            }
+
+            var provider = _provider.SecurityPrivileges as IMetaSecurityPrivilegeProvider
+                ?? throw new InvalidOperationException("DiskProvider.SecurityPrivileges does not implement IMetaSecurityPrivilegeProvider");
+            provider.Create(axObj, msi);
+
+            var filePath = GetExpectedPath("AxSecurityPrivilege", name, modelName);
+            return new { success = true, objectType = "security-privilege", objectName = name, modelName, filePath, api = "IMetaSecurityPrivilegeProvider.Create" };
+        }
+
+        /// <summary>
+        /// Creates a new SecurityDuty object via IMetaSecurityDutyProvider.
+        /// </summary>
+        public object CreateSecurityDuty(string name, string modelName, Dictionary<string, string>? properties)
+        {
+            var msi = ResolveModelSaveInfo(modelName);
+            var axObj = new AxSecurityDuty { Name = name };
+
+            if (properties != null)
+            {
+                foreach (var kv in properties)
+                    SetAxSecurityDutyProperty(axObj, kv.Key, kv.Value);
+            }
+
+            var provider = _provider.SecurityDuties as IMetaSecurityDutyProvider
+                ?? throw new InvalidOperationException("DiskProvider.SecurityDuties does not implement IMetaSecurityDutyProvider");
+            provider.Create(axObj, msi);
+
+            var filePath = GetExpectedPath("AxSecurityDuty", name, modelName);
+            return new { success = true, objectType = "security-duty", objectName = name, modelName, filePath, api = "IMetaSecurityDutyProvider.Create" };
+        }
+
+        /// <summary>
+        /// Creates a new SecurityRole object via IMetaSecurityRoleProvider.
+        /// </summary>
+        public object CreateSecurityRole(string name, string modelName, Dictionary<string, string>? properties)
+        {
+            var msi = ResolveModelSaveInfo(modelName);
+            var axObj = new AxSecurityRole { Name = name };
+
+            if (properties != null)
+            {
+                foreach (var kv in properties)
+                    SetAxSecurityRoleProperty(axObj, kv.Key, kv.Value);
+            }
+
+            var provider = _provider.SecurityRoles as IMetaSecurityRoleProvider
+                ?? throw new InvalidOperationException("DiskProvider.SecurityRoles does not implement IMetaSecurityRoleProvider");
+            provider.Create(axObj, msi);
+
+            var filePath = GetExpectedPath("AxSecurityRole", name, modelName);
+            return new { success = true, objectType = "security-role", objectName = name, modelName, filePath, api = "IMetaSecurityRoleProvider.Create" };
+        }
+
         // ========================
         // MODIFY OPERATIONS
         // ========================
@@ -393,6 +601,57 @@ namespace D365MetadataBridge.Services
                     tableProvider.Update(axTable, msi);
 
                     return new { success = true, operation = "add-method", objectType, objectName, methodName, api = "IMetaTableProvider.Update" };
+                }
+                case "form":
+                {
+                    var axForm = _provider.Forms.Read(objectName)
+                        ?? throw new ArgumentException($"Form '{objectName}' not found");
+                    var msi = GetModelSaveInfoForObject(_provider.Forms, objectName);
+
+                    RemoveMethodIfExists(axForm, methodName);
+
+                    var axMethod = new AxMethod { Name = methodName, Source = source };
+                    axForm.AddMethod(axMethod);
+
+                    var formProvider = _provider.Forms as IMetaFormProvider
+                        ?? throw new InvalidOperationException("IMetaFormProvider not available");
+                    formProvider.Update(axForm, msi);
+
+                    return new { success = true, operation = "add-method", objectType, objectName, methodName, api = "IMetaFormProvider.Update" };
+                }
+                case "query":
+                {
+                    var axQuery = _provider.Queries.Read(objectName)
+                        ?? throw new ArgumentException($"Query '{objectName}' not found");
+                    var msi = GetModelSaveInfoForObject(_provider.Queries, objectName);
+
+                    RemoveMethodIfExists(axQuery, methodName);
+
+                    var axMethod = new AxMethod { Name = methodName, Source = source };
+                    axQuery.AddMethod(axMethod);
+
+                    var queryProvider = _provider.Queries as IMetaQueryProvider
+                        ?? throw new InvalidOperationException("IMetaQueryProvider not available");
+                    queryProvider.Update(axQuery, msi);
+
+                    return new { success = true, operation = "add-method", objectType, objectName, methodName, api = "IMetaQueryProvider.Update" };
+                }
+                case "view":
+                {
+                    var axView = _provider.Views.Read(objectName)
+                        ?? throw new ArgumentException($"View '{objectName}' not found");
+                    var msi = GetModelSaveInfoForObject(_provider.Views, objectName);
+
+                    RemoveMethodIfExists(axView, methodName);
+
+                    var axMethod = new AxMethod { Name = methodName, Source = source };
+                    axView.AddMethod(axMethod);
+
+                    var viewProvider = _provider.Views as IMetaViewProvider
+                        ?? throw new InvalidOperationException("IMetaViewProvider not available");
+                    viewProvider.Update(axView, msi);
+
+                    return new { success = true, operation = "add-method", objectType, objectName, methodName, api = "IMetaViewProvider.Update" };
                 }
                 default:
                     throw new ArgumentException($"add-method not supported for objectType '{objectType}' via bridge (use XML fallback)");
@@ -472,6 +731,51 @@ namespace D365MetadataBridge.Services
                     ((IMetaEdtProvider)_provider.Edts).Update(obj, msi);
                     return new { success = true, operation = "modify-property", objectType, objectName, propertyPath, propertyValue, api = "Update" };
                 }
+                case "query":
+                {
+                    var obj = _provider.Queries.Read(objectName)
+                        ?? throw new ArgumentException($"Query '{objectName}' not found");
+                    var msi = GetModelSaveInfoForObject(_provider.Queries, objectName);
+                    SetAxQueryProperty(obj, propertyPath, propertyValue);
+                    ((IMetaQueryProvider)_provider.Queries).Update(obj, msi);
+                    return new { success = true, operation = "modify-property", objectType, objectName, propertyPath, propertyValue, api = "Update" };
+                }
+                case "view":
+                {
+                    var obj = _provider.Views.Read(objectName)
+                        ?? throw new ArgumentException($"View '{objectName}' not found");
+                    var msi = GetModelSaveInfoForObject(_provider.Views, objectName);
+                    SetAxViewProperty(obj, propertyPath, propertyValue);
+                    ((IMetaViewProvider)_provider.Views).Update(obj, msi);
+                    return new { success = true, operation = "modify-property", objectType, objectName, propertyPath, propertyValue, api = "Update" };
+                }
+                case "menu-item-action":
+                {
+                    var obj = _provider.MenuItemActions.Read(objectName)
+                        ?? throw new ArgumentException($"MenuItemAction '{objectName}' not found");
+                    var msi = GetModelSaveInfoForObject(_provider.MenuItemActions, objectName);
+                    SetAxMenuItemProperty(obj, propertyPath, propertyValue);
+                    ((IMetaMenuItemActionProvider)_provider.MenuItemActions).Update(obj, msi);
+                    return new { success = true, operation = "modify-property", objectType, objectName, propertyPath, propertyValue, api = "Update" };
+                }
+                case "menu-item-display":
+                {
+                    var obj = _provider.MenuItemDisplays.Read(objectName)
+                        ?? throw new ArgumentException($"MenuItemDisplay '{objectName}' not found");
+                    var msi = GetModelSaveInfoForObject(_provider.MenuItemDisplays, objectName);
+                    SetAxMenuItemProperty(obj, propertyPath, propertyValue);
+                    ((IMetaMenuItemDisplayProvider)_provider.MenuItemDisplays).Update(obj, msi);
+                    return new { success = true, operation = "modify-property", objectType, objectName, propertyPath, propertyValue, api = "Update" };
+                }
+                case "menu-item-output":
+                {
+                    var obj = _provider.MenuItemOutputs.Read(objectName)
+                        ?? throw new ArgumentException($"MenuItemOutput '{objectName}' not found");
+                    var msi = GetModelSaveInfoForObject(_provider.MenuItemOutputs, objectName);
+                    SetAxMenuItemProperty(obj, propertyPath, propertyValue);
+                    ((IMetaMenuItemOutputProvider)_provider.MenuItemOutputs).Update(obj, msi);
+                    return new { success = true, operation = "modify-property", objectType, objectName, propertyPath, propertyValue, api = "Update" };
+                }
                 default:
                     throw new ArgumentException($"modify-property not supported for objectType '{objectType}' via bridge");
             }
@@ -505,6 +809,39 @@ namespace D365MetadataBridge.Services
                     if (!replaced)
                         throw new InvalidOperationException($"oldCode not found in {objectName}" + (methodName != null ? $".{methodName}" : ""));
                     ((IMetaTableProvider)_provider.Tables).Update(obj, msi);
+                    return new { success = true, operation = "replace-code", objectType, objectName, methodName, api = "Update" };
+                }
+                case "form":
+                {
+                    var obj = _provider.Forms.Read(objectName)
+                        ?? throw new ArgumentException($"Form '{objectName}' not found");
+                    var msi = GetModelSaveInfoForObject(_provider.Forms, objectName);
+                    var replaced = ReplaceInMethods(obj, methodName, oldCode, newCode);
+                    if (!replaced)
+                        throw new InvalidOperationException($"oldCode not found in {objectName}" + (methodName != null ? $".{methodName}" : ""));
+                    ((IMetaFormProvider)_provider.Forms).Update(obj, msi);
+                    return new { success = true, operation = "replace-code", objectType, objectName, methodName, api = "Update" };
+                }
+                case "query":
+                {
+                    var obj = _provider.Queries.Read(objectName)
+                        ?? throw new ArgumentException($"Query '{objectName}' not found");
+                    var msi = GetModelSaveInfoForObject(_provider.Queries, objectName);
+                    var replaced = ReplaceInMethods(obj, methodName, oldCode, newCode);
+                    if (!replaced)
+                        throw new InvalidOperationException($"oldCode not found in {objectName}" + (methodName != null ? $".{methodName}" : ""));
+                    ((IMetaQueryProvider)_provider.Queries).Update(obj, msi);
+                    return new { success = true, operation = "replace-code", objectType, objectName, methodName, api = "Update" };
+                }
+                case "view":
+                {
+                    var obj = _provider.Views.Read(objectName)
+                        ?? throw new ArgumentException($"View '{objectName}' not found");
+                    var msi = GetModelSaveInfoForObject(_provider.Views, objectName);
+                    var replaced = ReplaceInMethods(obj, methodName, oldCode, newCode);
+                    if (!replaced)
+                        throw new InvalidOperationException($"oldCode not found in {objectName}" + (methodName != null ? $".{methodName}" : ""));
+                    ((IMetaViewProvider)_provider.Views).Update(obj, msi);
                     return new { success = true, operation = "replace-code", objectType, objectName, methodName, api = "Update" };
                 }
                 default:
@@ -651,6 +988,110 @@ namespace D365MetadataBridge.Services
                 case "basetype": break; // handled at construction time
                 default:
                     Console.Error.WriteLine($"[WriteService] Unknown AxEdt property: {prop}");
+                    break;
+            }
+        }
+
+        private void SetAxQueryProperty(AxQuery q, string prop, string value)
+        {
+            // AxQuery is abstract — properties may vary by subclass. Use dynamic for safety.
+            dynamic dq = q;
+            switch (prop.ToLowerInvariant())
+            {
+                case "title":
+                    try { dq.Title = value; } catch { Console.Error.WriteLine($"[WriteService] AxQuery.Title not available on this subclass"); }
+                    break;
+                case "description":
+                    try { dq.Description = value; } catch { Console.Error.WriteLine($"[WriteService] AxQuery.Description not available on this subclass"); }
+                    break;
+                case "allowcrosscompany":
+                    try { dq.AllowCrossCompany = ParseNoYes(value); } catch { Console.Error.WriteLine($"[WriteService] AxQuery.AllowCrossCompany not available"); }
+                    break;
+                default:
+                    Console.Error.WriteLine($"[WriteService] Unknown AxQuery property: {prop}");
+                    break;
+            }
+        }
+
+        private void SetAxViewProperty(AxView v, string prop, string value)
+        {
+            switch (prop.ToLowerInvariant())
+            {
+                case "label": v.Label = value; break;
+                case "developerdocumentation": v.DeveloperDocumentation = value; break;
+                default:
+                    Console.Error.WriteLine($"[WriteService] Unknown AxView property: {prop}");
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Shared property setter for all three menu item types (Action, Display, Output).
+        /// AxMenuItemAction/Display/Output all inherit from AxMenuItem which shares these properties.
+        /// </summary>
+        private void SetAxMenuItemProperty(dynamic mi, string prop, string value)
+        {
+            switch (prop.ToLowerInvariant())
+            {
+                case "label": mi.Label = value; break;
+                case "helptext": mi.HelpText = value; break;
+                case "object": mi.Object = value; break;
+                case "objecttype":
+                    if (Enum.TryParse<Microsoft.Dynamics.AX.Metadata.Core.MetaModel.MenuItemObjectType>(value, true, out var ot))
+                        mi.ObjectType = ot;
+                    break;
+                case "openmode":
+                    if (Enum.TryParse<Microsoft.Dynamics.AX.Metadata.Core.MetaModel.OpenMode>(value, true, out var om))
+                        mi.OpenMode = om;
+                    break;
+                case "normalimage": mi.NormalImage = value; break;
+                case "imagelocation":
+                    // ImageLocation enum type varies across D365FO versions — skip for safety
+                    Console.Error.WriteLine($"[WriteService] ImageLocation not directly supported — use modify-property after creation");
+                    break;
+                case "configurationkey": mi.ConfigurationKey = value; break;
+                case "countryregioncodes": mi.CountryRegionCodes = value; break;
+                case "maintainuserauthorization":
+                    mi.MaintainUserAuthorization = ParseNoYes(value);
+                    break;
+                default:
+                    Console.Error.WriteLine($"[WriteService] Unknown AxMenuItem property: {prop}");
+                    break;
+            }
+        }
+
+        private void SetAxSecurityPrivilegeProperty(AxSecurityPrivilege priv, string prop, string value)
+        {
+            switch (prop.ToLowerInvariant())
+            {
+                case "label": priv.Label = value; break;
+                case "description": priv.Description = value; break;
+                default:
+                    Console.Error.WriteLine($"[WriteService] Unknown AxSecurityPrivilege property: {prop}");
+                    break;
+            }
+        }
+
+        private void SetAxSecurityDutyProperty(AxSecurityDuty duty, string prop, string value)
+        {
+            switch (prop.ToLowerInvariant())
+            {
+                case "label": duty.Label = value; break;
+                case "description": duty.Description = value; break;
+                default:
+                    Console.Error.WriteLine($"[WriteService] Unknown AxSecurityDuty property: {prop}");
+                    break;
+            }
+        }
+
+        private void SetAxSecurityRoleProperty(AxSecurityRole role, string prop, string value)
+        {
+            switch (prop.ToLowerInvariant())
+            {
+                case "label": role.Label = value; break;
+                case "description": role.Description = value; break;
+                default:
+                    Console.Error.WriteLine($"[WriteService] Unknown AxSecurityRole property: {prop}");
                     break;
             }
         }
