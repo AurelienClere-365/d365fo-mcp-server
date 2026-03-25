@@ -200,4 +200,44 @@ describe('ProjectFileManager', () => {
       expect(result).toContain('xmlns="http://schemas.microsoft.com/developer/msbuild/2003"');
     });
   });
+
+  describe('addLabelToProject', () => {
+    it('adds both descriptor and resource entries per language', async () => {
+      const projectPath = 'K:\\Test\\Test.rnrproj';
+      fileStore.set(projectPath, REALISTIC_RNRPROJ_WITH_BOM);
+
+      const manager = new ProjectFileManager();
+      const added = await manager.addLabelToProject(projectPath, 'TestLabels', ['en-US', 'de']);
+
+      expect(added).toEqual(['TestLabels_en-US', 'TestLabels_de']);
+      const xml = fileStore.get(projectPath)!;
+
+      // Descriptor entries
+      expect(xml).toContain('AxLabelFile\\TestLabels_en-US');
+      expect(xml).toContain('Label Files\\TestLabels_en-US');
+      expect(xml).toContain('AxLabelFile\\TestLabels_de');
+      expect(xml).toContain('Label Files\\TestLabels_de');
+
+      // Resource entries with DependentUpon
+      expect(xml).toContain('TestLabels.en-US.label.txt');
+      expect(xml).toContain('<DependentUpon>AxLabelFile\\TestLabels_en-US</DependentUpon>');
+      expect(xml).toContain('TestLabels.de.label.txt');
+      expect(xml).toContain('<DependentUpon>AxLabelFile\\TestLabels_de</DependentUpon>');
+
+      // Folder entry
+      expect(xml).toContain('Label Files\\');
+    });
+
+    it('returns empty array when all entries already exist', async () => {
+      const projectPath = 'K:\\Test\\Test.rnrproj';
+      fileStore.set(projectPath, REALISTIC_RNRPROJ_WITH_BOM);
+
+      const manager = new ProjectFileManager();
+      // First call adds
+      await manager.addLabelToProject(projectPath, 'TestLabels', ['en-US']);
+      // Second call should detect duplicates
+      const added2 = await manager.addLabelToProject(projectPath, 'TestLabels', ['en-US']);
+      expect(added2).toEqual([]);
+    });
+  });
 });

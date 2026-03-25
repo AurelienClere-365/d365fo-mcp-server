@@ -3019,6 +3019,136 @@ export class ProjectFileManager {
   }
 
   /**
+   * Add label file entries to Visual Studio project.
+   * Each language needs TWO entries:
+   *   1. AxLabelFile descriptor:   Include="AxLabelFile\{id}_{lang}"  Link="Label Files\{id}_{lang}"
+   *   2. LabelResources .label.txt: Include="{id}.{lang}.label.txt"  DependentUpon="AxLabelFile\{id}_{lang}"
+   * Both are added inside a single file-lock + parse/write cycle for efficiency.
+   * Returns the list of descriptor names that were newly added.
+   */
+  async addLabelToProject(
+    projectPath: string,
+    labelFileId: string,
+    languages: string[],
+  ): Promise<string[]> {
+    return withProjectFileLock(projectPath, () =>
+      this._addLabelToProjectLocked(projectPath, labelFileId, languages));
+  }
+
+  private async _addLabelToProjectLocked(
+    projectPath: string,
+    labelFileId: string,
+    languages: string[],
+  ): Promise<string[]> {
+    // Read project file (with retry for transient VS file locks)
+    let projectXml = '';
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        projectXml = await fs.readFile(projectPath, 'utf-8');
+        break;
+      } catch (err: any) {
+        if ((err.code === 'EBUSY' || err.code === 'EPERM' || err.code === 'EACCES') && attempt < 4) {
+          await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
+    }
+    let hadBom = false;
+    if (projectXml.charCodeAt(0) === 0xFEFF) {
+      projectXml = projectXml.slice(1);
+      hadBom = true;
+    }
+    const project = await this.parser.parseStringPromise(projectXml);
+    if (!project.Project) throw new Error('Invalid .rnrproj file structure');
+
+    // Ensure ItemGroup structure
+    if (!project.Project.ItemGroup) {
+      const { Import, ...rest } = project.Project;
+      project.Project = { ...rest, ItemGroup: [{ Folder: [] }, { Content: [] }] };
+      if (Import) project.Project.Import = Import;
+    }
+    if (!Array.isArray(project.Project.ItemGroup)) {
+      project.Project.ItemGroup = [project.Project.ItemGroup];
+    }
+
+    let folderGroup = project.Project.ItemGroup.find((g: any) => g.Folder !== undefined);
+    if (!folderGroup) { folderGroup = { Folder: [] }; project.Project.ItemGroup.push(folderGroup); }
+
+    let contentGroup = project.Project.ItemGroup.find((g: any) => g.Content !== undefined);
+    if (!contentGroup) { contentGroup = { Content: [] }; project.Project.ItemGroup.push(contentGroup); }
+
+    if (!Array.isArray(folderGroup.Folder)) folderGroup.Folder = folderGroup.Folder ? [folderGroup.Folder] : [];
+    if (!Array.isArray(contentGroup.Content)) contentGroup.Content = contentGroup.Content ? [contentGroup.Content] : [];
+
+    // Ensure "Label Files\" folder entry
+    const folderExists = folderGroup.Folder.some(
+      (f: any) => f.$ && f.$.Include === 'Label Files\\'
+    );
+    if (!folderExists) {
+      folderGroup.Folder.push({ $: { Include: 'Label Files\\' } });
+    }
+
+    const added: string[] = [];
+    const existingIncludes = new Set(
+      contentGroup.Content.map((c: any) => c.$?.Include).filter(Boolean)
+    );
+
+    for (const lang of languages) {
+      const descriptorName = `${labelFileId}_${lang}`;
+      const descriptorInclude = `AxLabelFile\\${descriptorName}`;
+      const resourceFileName = `${labelFileId}.${lang}.label.txt`;
+
+      // 1. AxLabelFile descriptor entry
+      if (!existingIncludes.has(descriptorInclude)) {
+        contentGroup.Content.push({
+          $: { Include: descriptorInclude },
+          SubType: 'Content',
+          Name: descriptorName,
+          Link: `Label Files\\${descriptorName}`,
+        });
+        existingIncludes.add(descriptorInclude);
+        added.push(descriptorName);
+      }
+
+      // 2. LabelResources .label.txt entry with DependentUpon
+      if (!existingIncludes.has(resourceFileName)) {
+        contentGroup.Content.push({
+          $: { Include: resourceFileName },
+          SubType: 'Content',
+          Name: resourceFileName,
+          DependentUpon: descriptorInclude,
+        });
+        existingIncludes.add(resourceFileName);
+      }
+    }
+
+    if (added.length === 0) {
+      console.error(`[ProjectFileManager] All label entries already in project — skipping write`);
+      return added;
+    }
+
+    // Write back
+    const updatedXml = this.builder.buildObject(project);
+    const output = hadBom ? '\uFEFF' + updatedXml : updatedXml;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await fs.writeFile(projectPath, output, 'utf-8');
+        break;
+      } catch (err: any) {
+        if ((err.code === 'EBUSY' || err.code === 'EPERM' || err.code === 'EACCES') && attempt < 4) {
+          await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    console.error(`[ProjectFileManager] Added ${added.length} label descriptor(s) + resource entries to project`);
+    return added;
+  }
+
+  /**
    * Extract ModelName from Visual Studio project file
    * Returns the actual model name from PropertyGroup/Model or PropertyGroup/ModelName
    */

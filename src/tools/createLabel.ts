@@ -429,15 +429,12 @@ export async function createLabelTool(request: CallToolRequest, context: XppServ
       if (projectPath) {
         const pfm = new ProjectFileManager();
         // Collect all languages that have an XML descriptor
-        const allLangs = new Set([...written, ...existingLanguages]);
-        for (const lang of allLangs) {
-          const descriptorName = `${labelFileId}_${lang}`;
-          try {
-            const added = await pfm.addToProject(projectPath, 'label-file', descriptorName, '');
-            if (added) addedToProject.push(descriptorName);
-          } catch (projErr: any) {
-            console.error(`[create_label] Failed to add ${descriptorName} to project: ${projErr.message}`);
-          }
+        const allLangs = [...new Set([...written, ...existingLanguages])];
+        try {
+          const added = await pfm.addLabelToProject(projectPath, labelFileId, allLangs);
+          addedToProject.push(...added);
+        } catch (projErr: any) {
+          console.error(`[create_label] Failed to add label entries to project: ${projErr.message}`);
         }
       } else {
         console.error('[create_label] projectPath is null — label descriptors will NOT be added to .rnrproj.');

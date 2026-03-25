@@ -28,10 +28,13 @@ vi.mock('fs', async (orig) => {
 });
 
 const mockAddToProject = vi.fn(async () => true);
+const mockAddLabelToProject = vi.fn(async (_proj: string, _id: string, langs: string[]): Promise<string[]> =>
+  langs.map(l => `${_id}_${l}`));
 const mockFindProjectInSolution = vi.fn(async (_sol: string, _model: string): Promise<string | null> => null);
 vi.mock('../../src/tools/createD365File', () => ({
   ProjectFileManager: vi.fn().mockImplementation(function(this: any) {
     this.addToProject = mockAddToProject;
+    this.addLabelToProject = mockAddLabelToProject;
   }),
   ProjectFileFinder: {
     findProjectInSolution: (solutionPath: string, modelName: string) => mockFindProjectInSolution(solutionPath, modelName),
@@ -252,7 +255,7 @@ describe('create_label', () => {
   });
 
   it('adds label file descriptors to VS project', async () => {
-    mockAddToProject.mockClear();
+    mockAddLabelToProject.mockClear();
     // Enable project path for this test
     mockConfigMgr.getProjectPath.mockResolvedValueOnce('K:\\repos\\MySolution\\MyProject\\MyProject.rnrproj');
 
@@ -272,19 +275,19 @@ describe('create_label', () => {
     );
     if (result.isError) throw new Error(result.content[0].text);
     expect(result.isError).toBeFalsy();
-    // ProjectFileManager.addToProject should have been called for each language descriptor
-    expect(mockAddToProject).toHaveBeenCalled();
-    const calls = mockAddToProject.mock.calls;
-    // Each call receives (projectPath, 'label-file', descriptorName, '')
-    const descriptorNames = calls.map((c: any[]) => c[2]);
-    expect(descriptorNames).toContain('MyModel_en-US');
-    expect(descriptorNames).toContain('MyModel_cs');
+    // addLabelToProject should have been called once with all languages
+    expect(mockAddLabelToProject).toHaveBeenCalled();
+    const [projPath, labelFileId, langs] = (mockAddLabelToProject.mock.calls as any[][])[0];
+    expect(projPath).toBe('K:\\repos\\MySolution\\MyProject\\MyProject.rnrproj');
+    expect(labelFileId).toBe('MyModel');
+    expect(langs).toContain('en-US');
+    expect(langs).toContain('cs');
     // Summary should mention project addition
     expect(result.content[0].text).toContain('Added to VS project');
   });
 
   it('uses explicit projectPath arg over configManager', async () => {
-    mockAddToProject.mockClear();
+    mockAddLabelToProject.mockClear();
     // configManager.getProjectPath returns null, but explicit arg is provided
     const result = await createLabelTool(
       req('create_label', {
@@ -301,15 +304,14 @@ describe('create_label', () => {
       ctx,
     );
     expect(result.isError).toBeFalsy();
-    expect(mockAddToProject).toHaveBeenCalled();
+    expect(mockAddLabelToProject).toHaveBeenCalled();
     // Verify the explicit path was used (not the null from configManager)
-    expect(mockAddToProject.mock.calls.length).toBeGreaterThan(0);
-    expect((mockAddToProject.mock.calls as any[][])[0][0]).toBe('K:\\repos\\Explicit\\Explicit.rnrproj');
+    expect((mockAddLabelToProject.mock.calls as any[][])[0][0]).toBe('K:\\repos\\Explicit\\Explicit.rnrproj');
     expect(result.content[0].text).toContain('Added to VS project');
   });
 
   it('skips addToProject when addToProject=false', async () => {
-    mockAddToProject.mockClear();
+    mockAddLabelToProject.mockClear();
     // projectPath doesn't matter — addToProject=false should skip the entire block
 
     const result = await createLabelTool(
@@ -327,12 +329,12 @@ describe('create_label', () => {
       ctx,
     );
     expect(result.isError).toBeFalsy();
-    expect(mockAddToProject).not.toHaveBeenCalled();
+    expect(mockAddLabelToProject).not.toHaveBeenCalled();
     expect(result.content[0].text).not.toContain('Added to VS project');
   });
 
   it('falls back to solutionPath when projectPath is null', async () => {
-    mockAddToProject.mockClear();
+    mockAddLabelToProject.mockClear();
     mockFindProjectInSolution.mockClear();
     mockConfigMgr.getProjectPath.mockReset();
     mockConfigMgr.getSolutionPath.mockReset();
@@ -357,14 +359,14 @@ describe('create_label', () => {
     expect(result.isError).toBeFalsy();
     // ProjectFileFinder should have been called with the solution path and model
     expect(mockFindProjectInSolution).toHaveBeenCalledWith('K:\\repos\\Found', 'MyModel');
-    // addToProject should have been called with the found project path
-    expect(mockAddToProject).toHaveBeenCalled();
-    expect((mockAddToProject.mock.calls as any[][])[0][0]).toBe('K:\\repos\\Found\\Found.rnrproj');
+    // addLabelToProject should have been called with the found project path
+    expect(mockAddLabelToProject).toHaveBeenCalled();
+    expect((mockAddLabelToProject.mock.calls as any[][])[0][0]).toBe('K:\\repos\\Found\\Found.rnrproj');
     expect(result.content[0].text).toContain('Added to VS project');
   });
 
   it('shows warning when projectPath cannot be resolved', async () => {
-    mockAddToProject.mockClear();
+    mockAddLabelToProject.mockClear();
     mockFindProjectInSolution.mockClear();
     mockConfigMgr.getProjectPath.mockReset();
     mockConfigMgr.getSolutionPath.mockReset();
@@ -385,7 +387,7 @@ describe('create_label', () => {
       ctx,
     );
     expect(result.isError).toBeFalsy();
-    expect(mockAddToProject).not.toHaveBeenCalled();
+    expect(mockAddLabelToProject).not.toHaveBeenCalled();
     expect(result.content[0].text).toContain('projectPath not resolved');
   });
 
