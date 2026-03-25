@@ -256,7 +256,8 @@ describe('create_label', () => {
 
   it('adds label file descriptors to VS project', async () => {
     mockAddLabelToProject.mockClear();
-    // Enable project path for this test
+    // Enable project path for this test (called twice: once for description, once for step 5b)
+    mockConfigMgr.getProjectPath.mockResolvedValueOnce('K:\\repos\\MySolution\\MyProject\\MyProject.rnrproj');
     mockConfigMgr.getProjectPath.mockResolvedValueOnce('K:\\repos\\MySolution\\MyProject\\MyProject.rnrproj');
 
     const result = await createLabelTool(
@@ -394,6 +395,8 @@ describe('create_label', () => {
   it('surfaces addLabelToProject error in tool response', async () => {
     mockAddLabelToProject.mockClear();
     mockAddLabelToProject.mockRejectedValueOnce(new Error('EBUSY: resource busy, open \'K:\\Test.rnrproj\''));
+    // Called twice: once for description fallback, once for step 5b project resolution
+    mockConfigMgr.getProjectPath.mockResolvedValueOnce('K:\\Test.rnrproj');
     mockConfigMgr.getProjectPath.mockResolvedValueOnce('K:\\Test.rnrproj');
 
     const result = await createLabelTool(
@@ -417,6 +420,8 @@ describe('create_label', () => {
     mockAddLabelToProject.mockClear();
     // Return empty array = all entries already present
     mockAddLabelToProject.mockResolvedValueOnce([]);
+    // Called twice: once for description fallback, once for step 5b project resolution
+    mockConfigMgr.getProjectPath.mockResolvedValueOnce('K:\\Test.rnrproj');
     mockConfigMgr.getProjectPath.mockResolvedValueOnce('K:\\Test.rnrproj');
 
     const result = await createLabelTool(
@@ -452,7 +457,7 @@ describe('create_label', () => {
     expect(result.isError).toBe(true);
   });
 
-  it('defaults description to model name when no comment is provided', async () => {
+  it('defaults description to VS project name when no comment is provided', async () => {
     const fsMock = await import('fs');
     const writeCalls: string[] = [];
     (fsMock.promises.writeFile as any).mockImplementation(async (_p: string, content: string) => {
@@ -460,6 +465,8 @@ describe('create_label', () => {
     });
     (fsMock.promises.readdir as any).mockResolvedValueOnce(['en-US']);
     (fsMock.promises.readFile as any).mockResolvedValueOnce('\uFEFF');
+    // Provide a project path so the project name is extracted
+    mockConfigMgr.getProjectPath.mockResolvedValueOnce('K:\\repos\\MySolution\\ContosoExt\\ContosoExt.rnrproj');
 
     const result = await createLabelTool(
       req('create_label', {
@@ -472,9 +479,35 @@ describe('create_label', () => {
       ctx,
     );
     expect(result.isError).toBeFalsy();
-    // The written content should contain the model name as comment
+    // The written content should contain the VS project name (not model) as comment
     const labelWrite = writeCalls.find(c => c.includes('TestDesc='));
-    expect(labelWrite).toContain(' ;MyModel');
+    expect(labelWrite).toContain(' ;ContosoExt');
+  });
+
+  it('falls back to labelFileId when projectPath is null and no description', async () => {
+    const fsMock = await import('fs');
+    const writeCalls: string[] = [];
+    (fsMock.promises.writeFile as any).mockImplementation(async (_p: string, content: string) => {
+      writeCalls.push(content);
+    });
+    (fsMock.promises.readdir as any).mockResolvedValueOnce(['en-US']);
+    (fsMock.promises.readFile as any).mockResolvedValueOnce('\uFEFF');
+    // projectPath is null (default mock)
+
+    const result = await createLabelTool(
+      req('create_label', {
+        labelId: 'TestDescFallback',
+        labelFileId: 'BankLabels',
+        model: 'MyModel',
+        updateIndex: false,
+        translations: [{ language: 'en-US', text: 'Fallback test' }],
+      }),
+      ctx,
+    );
+    expect(result.isError).toBeFalsy();
+    // Should use labelFileId, not model name
+    const labelWrite = writeCalls.find(c => c.includes('TestDescFallback='));
+    expect(labelWrite).toContain(' ;BankLabels');
   });
 
   it('uses explicit description over model name default', async () => {
