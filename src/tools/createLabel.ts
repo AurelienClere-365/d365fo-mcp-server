@@ -20,6 +20,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { getConfigManager } from '../utils/configManager.js';
 import { PackageResolver } from '../utils/packageResolver.js';
+import { ProjectFileManager } from './createD365File.js';
 
 // UTF-8 BOM (Byte Order Mark)
 const UTF8_BOM = '\uFEFF';
@@ -394,6 +395,24 @@ export async function createLabelTool(request: CallToolRequest, context: XppServ
       symbolIndex.bulkAddLabels(indexEntries);
     }
 
+    // 5b. Add label file descriptors to VS project (.rnrproj) so builds detect them
+    const addedToProject: string[] = [];
+    if (written.length > 0) {
+      const projectPath = await configManager.getProjectPath();
+      if (projectPath) {
+        const pfm = new ProjectFileManager();
+        // Collect all languages that have an XML descriptor
+        const allLangs = new Set([...written, ...existingLanguages]);
+        for (const lang of allLangs) {
+          const descriptorName = `${labelFileId}_${lang}`;
+          try {
+            const added = await pfm.addToProject(projectPath, 'label-file', descriptorName, '');
+            if (added) addedToProject.push(descriptorName);
+          } catch { /* non-fatal — project file may be locked by VS */ }
+        }
+      }
+    }
+
     // 6. Build result summary
     if (written.length === 0 && skipped.length > 0) {
       return {
@@ -424,6 +443,11 @@ export async function createLabelTool(request: CallToolRequest, context: XppServ
       lines.push('');
       lines.push('Skipped (already existed):');
       lines.push(...skipped.map(s => `  ⚠ ${s}`));
+    }
+    if (addedToProject.length > 0) {
+      lines.push('');
+      lines.push('Added to VS project:');
+      lines.push(...addedToProject.map(n => `  ✔ ${n}`));
     }
     lines.push('');
     lines.push('Use in X++:');

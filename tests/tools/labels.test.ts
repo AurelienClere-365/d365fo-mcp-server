@@ -27,17 +27,25 @@ vi.mock('fs', async (orig) => {
   };
 });
 
+const mockAddToProject = vi.fn(async () => true);
+vi.mock('../../src/tools/createD365File', () => ({
+  ProjectFileManager: vi.fn().mockImplementation(function(this: any) {
+    this.addToProject = mockAddToProject;
+  }),
+}));
+
+const mockConfigMgr = {
+  ensureLoaded: vi.fn(async () => {}),
+  getPackagePath: vi.fn(() => 'K:\\PackagesLocalDirectory'),
+  getModelName: vi.fn(() => 'MyModel'),
+  getPackageNameFromWorkspacePath: vi.fn(() => 'MyPackage'),
+  getProjectPath: vi.fn(async () => null as string | null),
+  getDevEnvironmentType: vi.fn(async () => 'traditional'),
+  getCustomPackagesPath: vi.fn(async () => null),
+  getMicrosoftPackagesPath: vi.fn(async () => null),
+};
 vi.mock('../../src/utils/configManager', () => ({
-  getConfigManager: vi.fn(() => ({
-    ensureLoaded: vi.fn(async () => {}),
-    getPackagePath: vi.fn(() => 'K:\\PackagesLocalDirectory'),
-    getModelName: vi.fn(() => 'MyModel'),
-    getPackageNameFromWorkspacePath: vi.fn(() => 'MyPackage'),
-    getProjectPath: vi.fn(async () => null),
-    getDevEnvironmentType: vi.fn(async () => 'traditional'),
-    getCustomPackagesPath: vi.fn(async () => null),
-    getMicrosoftPackagesPath: vi.fn(async () => null),
-  })),
+  getConfigManager: vi.fn(() => mockConfigMgr),
 }));
 
 vi.mock('../../src/utils/packageResolver', () => ({
@@ -236,6 +244,38 @@ describe('create_label', () => {
     // Result is success (file write is mocked) or at minimum not a Zod validation error
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toMatch(/created|success|MyNewFeature/i);
+  });
+
+  it('adds label file descriptors to VS project', async () => {
+    mockAddToProject.mockClear();
+    // Enable project path for this test
+    mockConfigMgr.getProjectPath.mockResolvedValueOnce('K:\\repos\\MySolution\\MyProject\\MyProject.rnrproj');
+
+    const result = await createLabelTool(
+      req('create_label', {
+        labelId: 'ProjectTest',
+        labelFileId: 'MyModel',
+        model: 'MyModel',
+        createLabelFileIfMissing: true,
+        updateIndex: false,
+        translations: [
+          { language: 'en-US', text: 'Project test label' },
+          { language: 'cs', text: 'Projektový test' },
+        ],
+      }),
+      ctx,
+    );
+    if (result.isError) throw new Error(result.content[0].text);
+    expect(result.isError).toBeFalsy();
+    // ProjectFileManager.addToProject should have been called for each language descriptor
+    expect(mockAddToProject).toHaveBeenCalled();
+    const calls = mockAddToProject.mock.calls;
+    // Each call receives (projectPath, 'label-file', descriptorName, '')
+    const descriptorNames = calls.map((c: any[]) => c[2]);
+    expect(descriptorNames).toContain('MyModel_en-US');
+    expect(descriptorNames).toContain('MyModel_cs');
+    // Summary should mention project addition
+    expect(result.content[0].text).toContain('Added to VS project');
   });
 
   it('returns error when labelId contains invalid characters', async () => {

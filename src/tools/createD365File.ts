@@ -2817,6 +2817,7 @@ export class ProjectFileManager {
       'security-duty': 'Security Duties',
       'security-role': 'Security Roles',
       'business-event': 'Classes',
+      'label-file': 'Label Files',
       tile: 'Tiles',
       kpi: 'KPIs',
     };
@@ -2856,6 +2857,7 @@ export class ProjectFileManager {
       'security-duty': 'AxSecurityDuty',
       'security-role': 'AxSecurityRole',
       'business-event': 'AxClass',
+      'label-file': 'AxLabelFile',
       tile: 'AxTile',
       kpi: 'AxKPI',
     };
@@ -3359,6 +3361,7 @@ export async function handleCreateD365File(
       'security-duty': 'AxSecurityDuty',
       'security-role': 'AxSecurityRole',
       'business-event': 'AxClass',
+      'label-file': 'AxLabelFile',
       tile: 'AxTile',
       kpi: 'AxKPI',
     };
