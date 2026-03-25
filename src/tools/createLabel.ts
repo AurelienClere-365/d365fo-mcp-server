@@ -390,9 +390,10 @@ export async function createLabelTool(request: CallToolRequest, context: XppServ
       }
     }
 
-    // 5. Update SQLite index
+    // 5. Update SQLite index (skip immediate FTS rebuild — schedule debounced)
     if (updateIndex && indexEntries.length > 0) {
-      symbolIndex.bulkAddLabels(indexEntries);
+      symbolIndex.bulkAddLabels(indexEntries, { skipFtsRebuild: true });
+      symbolIndex.scheduleLabelsFtsRebuild();
     }
 
     // 5b. Add label file descriptors to VS project (.rnrproj) so builds detect them

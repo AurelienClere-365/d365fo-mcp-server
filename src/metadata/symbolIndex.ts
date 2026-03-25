@@ -2568,6 +2568,37 @@ export class XppSymbolIndex {
     `);
   }
 
+  // ── Debounced labels FTS rebuild ────────────────────────────────────────────
+  private _labelsFtsTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly LABELS_FTS_SETTLE_MS = 300;
+
+  /**
+   * Schedule a debounced labels FTS rebuild.
+   * Multiple rapid create_label calls defer the expensive rebuild to ~300ms
+   * after the last insertion, so a batch of 5 labels triggers only 1 rebuild.
+   */
+  scheduleLabelsFtsRebuild(): void {
+    if (this._labelsFtsTimer) clearTimeout(this._labelsFtsTimer);
+    this._labelsFtsTimer = setTimeout(() => {
+      this._labelsFtsTimer = null;
+      try {
+        this.rebuildLabelsFts();
+        console.error('[SymbolIndex] Debounced labels FTS rebuild complete');
+      } catch (e) {
+        console.error(`[SymbolIndex] Debounced labels FTS rebuild failed: ${e}`);
+      }
+    }, XppSymbolIndex.LABELS_FTS_SETTLE_MS);
+  }
+
+  /** Flush any pending labels FTS rebuild immediately (for tests / shutdown). */
+  flushLabelsFtsRebuild(): void {
+    if (this._labelsFtsTimer) {
+      clearTimeout(this._labelsFtsTimer);
+      this._labelsFtsTimer = null;
+      this.rebuildLabelsFts();
+    }
+  }
+
   /**
    * Full-text search labels (default language: en-US, falls back to any)
    */

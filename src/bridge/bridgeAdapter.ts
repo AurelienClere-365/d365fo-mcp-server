@@ -12,6 +12,7 @@
  */
 
 import type { BridgeClient } from './bridgeClient.js';
+import * as debouncedRefresh from './debouncedRefresh.js';
 import type {
   BridgeTableInfo,
   BridgeClassInfo,
@@ -843,8 +844,9 @@ export async function bridgeValidateAfterWrite(
 ): Promise<string | null> {
   if (!bridge?.isReady || !bridge.metadataAvailable) return null;
   try {
-    // Refresh so DiskProvider sees the new/modified file
-    await bridge.refreshProvider();
+    // Debounced refresh — coalesces multiple rapid create/modify operations
+    // into a single DiskProvider refresh (400ms settle, 2s max wait)
+    await debouncedRefresh.refresh(bridge);
     const result = await bridge.validateObject(objectType, objectName);
     if (!result) return null;
 
