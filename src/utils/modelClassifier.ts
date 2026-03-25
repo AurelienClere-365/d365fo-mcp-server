@@ -52,11 +52,11 @@ export function getExtensionPrefix(): string {
 
 /**
  * Get configurable object suffix from environment.
- * Returns the raw OBJECT_SUFFIX value (trailing underscores stripped).
+ * Returns the raw EXTENSION_SUFFIX value (trailing underscores stripped).
  * Empty string when not configured.
  */
 export function getObjectSuffix(): string {
-  return process.env.OBJECT_SUFFIX?.trim().replace(/_+$/, '') || '';
+  return process.env.EXTENSION_SUFFIX?.trim().replace(/_+$/, '') || '';
 }
 
 /**
@@ -68,7 +68,7 @@ export function getObjectSuffix(): string {
  *  - Extension classes ending with _Extension (SalesFormLetterXy_Extension)
  *  - Names that already end with the suffix (case-insensitive)
  *
- * Examples with OBJECT_SUFFIX="ZZ":
+ * Examples with EXTENSION_SUFFIX="ZZ":
  *   MyTable        → MyTableZZ
  *   MyClass        → MyClassZZ
  *   MyTableZZ      → MyTableZZ  (no double-suffix)

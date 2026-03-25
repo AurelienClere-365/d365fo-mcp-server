@@ -1,44 +1,44 @@
 /**
- * Object Suffix Tests (issue #365)
- * Tests for configurable object name suffixes.
+ * Extension Suffix Tests (issue #365)
+ * Tests for configurable object name suffixes (EXTENSION_SUFFIX).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getObjectSuffix, applyObjectSuffix } from '../../src/utils/modelClassifier';
 
 describe('getObjectSuffix', () => {
-  const originalEnv = process.env.OBJECT_SUFFIX;
+  const originalEnv = process.env.EXTENSION_SUFFIX;
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.OBJECT_SUFFIX;
+      delete process.env.EXTENSION_SUFFIX;
     } else {
-      process.env.OBJECT_SUFFIX = originalEnv;
+      process.env.EXTENSION_SUFFIX = originalEnv;
     }
   });
 
-  it('returns empty string when OBJECT_SUFFIX is not set', () => {
-    delete process.env.OBJECT_SUFFIX;
+  it('returns empty string when EXTENSION_SUFFIX is not set', () => {
+    delete process.env.EXTENSION_SUFFIX;
     expect(getObjectSuffix()).toBe('');
   });
 
   it('returns the configured suffix', () => {
-    process.env.OBJECT_SUFFIX = 'ZZ';
+    process.env.EXTENSION_SUFFIX = 'ZZ';
     expect(getObjectSuffix()).toBe('ZZ');
   });
 
   it('strips trailing underscores', () => {
-    process.env.OBJECT_SUFFIX = 'ZZ_';
+    process.env.EXTENSION_SUFFIX = 'ZZ_';
     expect(getObjectSuffix()).toBe('ZZ');
   });
 
   it('trims whitespace', () => {
-    process.env.OBJECT_SUFFIX = '  AB  ';
+    process.env.EXTENSION_SUFFIX = '  AB  ';
     expect(getObjectSuffix()).toBe('AB');
   });
 
   it('returns empty for whitespace-only value', () => {
-    process.env.OBJECT_SUFFIX = '   ';
+    process.env.EXTENSION_SUFFIX = '   ';
     expect(getObjectSuffix()).toBe('');
   });
 });

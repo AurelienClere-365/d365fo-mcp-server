@@ -163,11 +163,11 @@ export async function validateObjectNamingTool(request: CallToolRequest, context
         }
       }
 
-      // Suffix check — if OBJECT_SUFFIX is configured, verify the name ends with it
+      // Suffix check — if EXTENSION_SUFFIX is configured, verify the name ends with it
       const configuredSuffix = getObjectSuffix();
       if (configuredSuffix) {
         if (!name.toLowerCase().endsWith(configuredSuffix.toLowerCase())) {
-          warnings.push(`OBJECT_SUFFIX="${configuredSuffix}" is configured but the proposed name does not end with it. Expected: ${name}${configuredSuffix}`);
+          warnings.push(`EXTENSION_SUFFIX="${configuredSuffix}" is configured but the proposed name does not end with it. Expected: ${name}${configuredSuffix}`);
           suggestions.push(`Suffixed name: ${name}${configuredSuffix}`);
         }
       }

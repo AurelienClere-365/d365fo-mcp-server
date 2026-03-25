@@ -422,7 +422,7 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
         // Prefix diagnostics
         const extensionPrefixEnv = process.env.EXTENSION_PREFIX?.trim() || null;
         const effectivePrefix = resolveObjectPrefix(modelName ?? '');
-        const objectSuffixEnv = process.env.OBJECT_SUFFIX?.trim() || null;
+        const objectSuffixEnv = process.env.EXTENSION_SUFFIX?.trim() || null;
         const effectiveSuffix = getObjectSuffix();
 
         const PLACEHOLDER_NAMES = new Set([
@@ -461,11 +461,11 @@ export function registerToolHandler(server: Server, context: XppServerContext): 
           ``,
           `## Suffix Configuration`,
           ``,
-          `OBJECT_SUFFIX   : ${objectSuffixEnv ?? '(not set)'}`,
+          `EXTENSION_SUFFIX: ${objectSuffixEnv ?? '(not set)'}`,
           `Effective suffix: ${effectiveSuffix || '(none)'}`,
           effectiveSuffix
-            ? `✅ OBJECT_SUFFIX is set — new objects will have suffix "${effectiveSuffix}" appended (e.g. MyTable${effectiveSuffix}).`
-            : `ℹ️  OBJECT_SUFFIX is not set. No suffix will be applied. This is normal — most projects use prefixes only.`,
+            ? `✅ EXTENSION_SUFFIX is set — new objects will have suffix "${effectiveSuffix}" appended (e.g. MyTable${effectiveSuffix}).`
+            : `ℹ️  EXTENSION_SUFFIX is not set. No suffix will be applied. This is normal — most projects use prefixes only.`,
           ``,
         ];
 
