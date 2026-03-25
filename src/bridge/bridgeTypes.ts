@@ -424,6 +424,20 @@ export interface BridgeWriteResult {
   api?: string;
 }
 
+/** Result from createSmartTable — includes BP defaults summary */
+export interface BridgeSmartTableResult extends BridgeWriteResult {
+  bpDefaults?: {
+    cacheLookup?: string;
+    saveDataPerCompany?: string;
+    titleField1?: string;
+    titleField2?: string;
+    primaryIndex?: string;
+    clusteredIndex?: string;
+    fieldGroupCount?: number;
+    deleteActionCount?: number;
+  };
+}
+
 /** Method parameter for createObject */
 export interface BridgeMethodParam {
   name: string;

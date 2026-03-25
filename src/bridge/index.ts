@@ -37,6 +37,7 @@ export {
   canBridgeCreate,
   canBridgeModify,
   bridgeCreateObject,
+  bridgeCreateSmartTable,
   bridgeAddMethod,
   bridgeRemoveMethod,
   bridgeAddField,

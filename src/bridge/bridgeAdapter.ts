@@ -31,6 +31,7 @@ import type {
   BridgeCompletionResult,
   BridgeExtensionClassResult,
   BridgeEventSubscriberResult,
+  BridgeSmartTableResult,
 } from './bridgeTypes.js';
 
 /** Standard MCP tool response shape */
@@ -941,6 +942,44 @@ export async function bridgeCreateObject(
   } catch (e) {
     console.error(`[BridgeAdapter] createObject(${params.objectType}, ${params.objectName}) failed: ${e}`);
     return null; // Signal to caller: fall back to XML generation
+  }
+}
+
+/**
+ * Creates a smart table via the C# bridge with all BP-smart defaults
+ * (CacheLookup, FieldGroups, DeleteActions, TitleField, PrimaryIndex) auto-set.
+ * Returns { success, filePath, bpDefaults } or null if bridge unavailable.
+ */
+export async function bridgeCreateSmartTable(
+  bridge: BridgeClient | undefined,
+  params: {
+    objectName: string;
+    modelName: string;
+    tableGroup?: string;
+    tableType?: string;
+    label?: string;
+    fields?: Record<string, unknown>[];
+    extraFieldGroups?: Record<string, unknown>[];
+    indexes?: Record<string, unknown>[];
+    relations?: Record<string, unknown>[];
+    methods?: { name: string; source?: string }[];
+    extraProperties?: Record<string, string>;
+  },
+): Promise<BridgeSmartTableResult | null> {
+  if (!bridge?.isReady || !bridge.metadataAvailable) return null;
+
+  try {
+    const result = await bridge.createSmartTable(params);
+    if (result.success) {
+      console.error(`[BridgeAdapter] ✅ Smart table created: ${result.filePath} (${result.api})`);
+      return result;
+    } else {
+      console.error(`[BridgeAdapter] createSmartTable returned success=false`);
+      return null;
+    }
+  } catch (e) {
+    console.error(`[BridgeAdapter] createSmartTable(${params.objectName}) failed: ${e}`);
+    return null; // Signal to caller: fall back to SmartXmlBuilder
   }
 }
 

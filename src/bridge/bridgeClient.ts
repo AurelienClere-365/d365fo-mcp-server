@@ -39,6 +39,7 @@ import type {
   BridgeResolveResult,
   BridgeRefreshResult,
   BridgeWriteResult,
+  BridgeSmartTableResult,
   BridgeDeleteResult,
   BridgeBatchOperationRequest,
   BridgeBatchOperationResult,
@@ -433,6 +434,26 @@ export class BridgeClient extends EventEmitter {
     properties?: Record<string, string>;
   }): Promise<BridgeWriteResult> {
     return this.call<BridgeWriteResult>('createObject', params);
+  }
+
+  /**
+   * Create a smart table via C# CreateSmartTable — all BP-smart defaults
+   * (CacheLookup, FieldGroups, DeleteActions, TitleField, indexes) are auto-set in C#.
+   */
+  async createSmartTable(params: {
+    objectName: string;
+    modelName: string;
+    tableGroup?: string;
+    tableType?: string;
+    label?: string;
+    fields?: Record<string, unknown>[];
+    extraFieldGroups?: Record<string, unknown>[];
+    indexes?: Record<string, unknown>[];
+    relations?: Record<string, unknown>[];
+    methods?: { name: string; source?: string }[];
+    extraProperties?: Record<string, string>;
+  }): Promise<BridgeSmartTableResult> {
+    return this.call<BridgeSmartTableResult>('createSmartTable', params);
   }
 
   /** Add or replace a method on a class or table via IMetadataProvider.Update() */

@@ -410,6 +410,26 @@ namespace D365MetadataBridge.Protocol
                             }
                         });
 
+                    case "createsmarttable":
+                        return HandleWrite(request, () =>
+                        {
+                            var objectName = request.GetStringParam("objectName")
+                                ?? throw new ArgumentException("Missing: objectName");
+                            var modelName = request.GetStringParam("modelName")
+                                ?? throw new ArgumentException("Missing: modelName");
+                            return _writeService!.CreateSmartTable(
+                                objectName, modelName,
+                                request.GetStringParam("tableGroup"),
+                                request.GetStringParam("tableType"),
+                                request.GetStringParam("label"),
+                                request.GetParam<System.Collections.Generic.List<WriteFieldParam>>("fields"),
+                                request.GetParam<System.Collections.Generic.List<WriteFieldGroupParam>>("extraFieldGroups"),
+                                request.GetParam<System.Collections.Generic.List<WriteIndexParam>>("indexes"),
+                                request.GetParam<System.Collections.Generic.List<WriteRelationParam>>("relations"),
+                                request.GetParam<System.Collections.Generic.List<WriteMethodParam>>("methods"),
+                                request.GetDictParam("extraProperties"));
+                        });
+
                     case "addmethod":
                         return HandleWrite(request, () =>
                         {
