@@ -39,8 +39,8 @@ describe('tool inventory contract', () => {
       expect(publishedTools.has(toolName)).toBe(true);
     }
 
-    expect(LOCAL_TOOLS.size).toBe(13);
-    expect(mcpServerToolNames.filter(name => !LOCAL_TOOLS.has(name))).toHaveLength(41);
+    expect(LOCAL_TOOLS.size).toBe(25);
+    expect(mcpServerToolNames.filter(name => !LOCAL_TOOLS.has(name))).toHaveLength(29);
   });
 
   it('includes critical diagnostics and SDLC tools in both inventories', () => {

@@ -24,6 +24,7 @@ import {
   bridgeAddControl, bridgeAddDataSource,
   bridgeAddFieldModification, bridgeAddMenuItemToMenu,
 } from '../bridge/index.js';
+import { invalidateCache } from './updateSymbolIndex.js';
 import { ProjectFileManager, ProjectFileFinder } from './createD365File.js';
 
 /**
@@ -722,6 +723,12 @@ export async function modifyD365FileTool(request: CallToolRequest, context: XppS
       );
       if (validationMsg) bridgeValidation = `\n${validationMsg}`;
     } catch (_e) { /* skip */ }
+
+    // Auto-invalidate Redis cache so subsequent reads return fresh data
+    // (bridgeValidateAfterWrite already refreshed the C# bridge DiskProvider)
+    try {
+      await invalidateCache(context.cache, objectName, objectType, [objectName]);
+    } catch { /* Redis not available — non-fatal */ }
 
     // Optionally add the file to the Visual Studio project
     let projectMessage = '';

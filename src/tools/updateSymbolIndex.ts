@@ -256,8 +256,11 @@ export const updateSymbolIndexTool = async (params: any, context: XppServerConte
  * - Method signature keys (xpp:method-sig:Name:*)
  * - Search results that might include the object (xpp:search:*)
  * - Code completion cache (xpp:complete:Name:*)
+ *
+ * Exported so create_d365fo_file and modify_d365fo_file can auto-invalidate
+ * without requiring an explicit update_symbol_index call.
  */
-async function invalidateCache(
+export async function invalidateCache(
   cache: XppServerContext['cache'],
   primaryName: string,
   _objectType: string,

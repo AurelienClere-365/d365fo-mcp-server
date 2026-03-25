@@ -14,6 +14,7 @@ import { PackageResolver } from '../utils/packageResolver.js';
 import { ensureXppDocComment, ensureBlankLineBeforeClosingBrace } from '../utils/xppDocGen.js';
 import { decodeXmlEntitiesFromXppSource } from './modifyD365File.js';
 import { bridgeValidateAfterWrite, canBridgeCreate, bridgeCreateObject } from '../bridge/index.js';
+import { invalidateCache } from './updateSymbolIndex.js';
 
 /**
  * Per-project-file mutex to serialise concurrent addToProject calls.
@@ -3079,7 +3080,10 @@ export class ProjectFileManager {
  */
 export async function handleCreateD365File(
   request: CallToolRequest,
-  context?: { bridge?: import('../bridge/bridgeClient.js').BridgeClient },
+  context?: {
+    bridge?: import('../bridge/bridgeClient.js').BridgeClient;
+    cache?: import('../cache/redisCache.js').RedisCacheService;
+  },
 ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
   const args = CreateD365FileArgsSchema.parse(request.params.arguments);
 
@@ -3584,6 +3588,14 @@ export async function handleCreateD365File(
             }
           }
 
+          // Auto-invalidate Redis cache so subsequent reads see fresh data
+          // (bridge was already refreshed internally by bridgeCreateObject)
+          if (context?.cache) {
+            try {
+              await invalidateCache(context.cache, finalObjectName, args.objectType, [finalObjectName]);
+            } catch { /* Redis not available — non-fatal */ }
+          }
+
           return {
             content: [
               {
@@ -3725,6 +3737,14 @@ export async function handleCreateD365File(
       }
     } catch (e) {
       console.error(`[create_d365fo_file] Bridge validation skipped: ${e}`);
+    }
+
+    // Auto-invalidate Redis cache so subsequent reads return fresh data
+    // (bridgeValidateAfterWrite already refreshed the C# bridge DiskProvider)
+    if (context?.cache) {
+      try {
+        await invalidateCache(context.cache, finalObjectName, args.objectType, [finalObjectName]);
+      } catch { /* Redis not available — non-fatal */ }
     }
 
     // Add to Visual Studio project if requested

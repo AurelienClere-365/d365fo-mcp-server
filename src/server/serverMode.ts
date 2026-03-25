@@ -19,6 +19,10 @@
  *  2. They do NOT need the symbol database — they skip the dbReady await.
  *  3. They are the tools available in 'write-only' (local companion) mode.
  *
+ * The set also includes bridge-backed READ tools (get_class_info, get_table_info, …)
+ * which work in write-only mode via IMetadataProvider — no SQLite needed.
+ * This allows Copilot to verify objects it just created without an Azure re-deploy.
+ *
  * - Excluded in 'read-only' mode (Azure deployment can't access local K:\ paths)
  * - The only tools exposed in 'write-only' mode (lightweight local companion)
  *
@@ -47,6 +51,22 @@ export const LOCAL_TOOLS = new Set([
   'review_workspace_changes',
   'undo_last_modification',
   'get_workspace_info',
+  // Bridge-backed read tools: work in write-only mode via IMetadataProvider
+  // (no SQLite needed — bridge reads directly from disk).
+  // Allows Copilot to verify objects it just created/modified without waiting
+  // for an Azure DB re-deploy or an explicit update_symbol_index call.
+  'get_class_info',
+  'get_table_info',
+  'get_form_info',
+  'get_enum_info',
+  'get_edt_info',
+  'get_query_info',
+  'get_view_info',
+  'get_report_info',
+  'get_data_entity_info',
+  'get_method_source',
+  'get_method_signature',
+  'get_menu_item_info',
 ]);
 
 /**

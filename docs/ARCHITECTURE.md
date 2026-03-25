@@ -1047,7 +1047,7 @@ after files are created, modified, deleted, or reverted.
 | `update_symbol_index` (file deleted) | Removes symbols + labels from SQLite, clears same Redis patterns, refreshes C# bridge |
 | `undo_last_modification` (revert) | Removes stale SQLite entries, clears Redis, refreshes bridge, then re-indexes restored file |
 | `undo_last_modification` (delete) | Removes stale SQLite entries, clears Redis, refreshes bridge |
-| `create_d365fo_file` / `modify_d365fo_file` | Calls `update_symbol_index` which triggers the invalidation above |
+| `create_d365fo_file` / `modify_d365fo_file` | **Auto-invalidates** Redis cache and refreshes the C# bridge provider directly (no explicit `update_symbol_index` call needed) |
 
 The `invalidateCache()` helper in `updateSymbolIndex.ts` clears entries for all top-level
 object names found in the file (classes, tables, enums, EDTs) plus wildcard patterns for

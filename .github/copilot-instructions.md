@@ -350,7 +350,7 @@ For any D365FO request, **start with MCP tools — never** `code_search`, `grep_
 > - All parameters are **optional** — model name and packagePath are auto-detected from `.mcp.json`.
 > - If `run_bp_check` returns an error about a missing binary, it means `packagePath` in `.mcp.json` is wrong — fix the config, do NOT switch to PowerShell / Developer PowerShell or `review_workspace_changes`.
 > - `review_workspace_changes` is for **git diff code review only** — NOT a substitute for BP check, and NOT for verifying that `modify_d365fo_file` succeeded.
-> - After `modify_d365fo_file` or `create_d365fo_file`, always call `update_symbol_index(filePath)` first, then `get_class_info` or `get_method_source` to confirm the change landed. Never use `review_workspace_changes` as a verification step.
+> - After `modify_d365fo_file` or `create_d365fo_file`, the bridge and Redis cache are **auto-refreshed** — you can call `get_class_info` or `get_method_source` immediately to verify the change. An explicit `update_symbol_index(filePath)` call is **no longer required** but remains available for edge cases (e.g. files modified outside MCP tools). Never use `review_workspace_changes` as a verification step.
 
 > ### ⚠️ CRITICAL — `get_form_info` WORKS for ALL D365FO forms
 >
@@ -791,7 +791,7 @@ c) Save to disk:                     create_d365fo_file(objectType="report", obj
 ### SDLC & Build Tools
 | Tool | Use for |
 |------|---------|
-| `update_symbol_index(filePath)` | **Call after every `modify_d365fo_file` AND `create_d365fo_file`** so that `get_class_info`, `get_method_source`, and `search` return fresh results. Without this, the index is stale and lookups for newly-added methods will return ❌ not found. |
+| `update_symbol_index(filePath)` | Re-index a file in SQLite and refresh the bridge. **No longer required** after `create_d365fo_file` / `modify_d365fo_file` (auto-refresh is built-in). Still useful for files modified outside MCP tools (e.g. manual edits, git pull). |
 | `build_d365fo_project(projectPath)` | Run MSBuild compilation locally to capture errors. |
 | `trigger_db_sync(modelName, tableName?)` | Run a database sync for the current model. |
 | `run_bp_check(projectPath, targetFilter?)` | Run Microsoft Best Practices (xppbp.exe) analysis. |

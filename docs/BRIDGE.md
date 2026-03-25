@@ -756,19 +756,21 @@ index, labels database, and Redis cache in sync via a coordinated cleanup pipeli
 
 ```mermaid
 graph TD
-    CREATE([create_d365fo_file]) --> USI[update_symbol_index]
-    MODIFY([modify_d365fo_file]) --> USI
-    DELETE([undo_last_modification<br/>delete untracked]) --> CLEANUP[cleanupIndexAfterUndo]
-    REVERT([undo_last_modification<br/>revert tracked]) --> CLEANUP
+    CREATE([create_d365fo_file]) --> AUTO_INV[Auto-invalidate Redis cache<br/>+ refresh C# bridge]
+    MODIFY([modify_d365fo_file]) --> AUTO_INV
+    AUTO_INV --> DONE_AUTO([Done — object immediately visible])
 
-    USI --> EXIST{File exists?}
+    USI([update_symbol_index<br/>edge cases only]) --> EXIST{File exists?}
     EXIST -->|Yes| REINDEX[Re-parse XML → update SQLite symbols + labels]
     EXIST -->|No| REMOVE[Remove stale symbols + labels from SQLite]
     
     REINDEX --> INVALIDATE[Invalidate Redis cache entries]
     REMOVE --> INVALIDATE
     INVALIDATE --> REFRESH[Refresh C# bridge provider]
-    
+    REFRESH --> DONE([Done])
+
+    DELETE([undo_last_modification<br/>delete untracked]) --> CLEANUP[cleanupIndexAfterUndo]
+    REVERT([undo_last_modification<br/>revert tracked]) --> CLEANUP
     CLEANUP --> REMOVE2[Remove stale symbols + labels from SQLite]
     REMOVE2 --> INVALIDATE2[Invalidate Redis cache entries]
     INVALIDATE2 --> REFRESH2[Refresh C# bridge provider]
@@ -776,11 +778,11 @@ graph TD
     REVERT_CHECK -->|Yes| REINDEX2[Re-index restored file]
     REVERT_CHECK -->|No| DONE2([Done])
     REINDEX2 --> DONE2
-    
-    REFRESH --> DONE([Done])
 
     style CREATE fill:#4CAF50,color:#fff
     style MODIFY fill:#4CAF50,color:#fff
+    style AUTO_INV fill:#4CAF50,color:#fff
+    style USI fill:#607D8B,color:#fff
     style DELETE fill:#DC382D,color:#fff
     style REVERT fill:#FF9800,color:#fff
     style INVALIDATE fill:#DC382D,color:#fff

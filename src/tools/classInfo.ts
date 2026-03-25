@@ -101,6 +101,13 @@ export async function classInfoTool(request: CallToolRequest, context: XppServer
     const classSymbol = symbolIndex.getSymbolByName(args.className, 'class');
 
     if (!classSymbol) {
+      // SQLite has no record — try bridge as fallback (essential in write-only mode
+      // where SQLite is an empty in-memory DB but bridge reads directly from disk)
+      const bridgeFallback = await tryBridgeClass(context.bridge, args.className, false, args.methodOffset ?? 0);
+      if (bridgeFallback) {
+        await cache.setClassInfo(cacheKey, bridgeFallback).catch(() => {});
+        return bridgeFallback;
+      }
       const typeMismatch = buildObjectTypeMismatchMessage(symbolIndex.getReadDb(), args.className);
       return {
         content: [

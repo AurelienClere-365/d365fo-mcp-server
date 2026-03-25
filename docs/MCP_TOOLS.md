@@ -1015,8 +1015,10 @@ Verifies that D365FO objects exist on disk at the correct AOT path and are refer
 
 ### update_symbol_index
 
-Re-indexes a D365FO XML file after it has been created, modified, or deleted. This tool
-is the key mechanism for keeping the MCP symbol database in sync with the actual files on disk.
+Re-indexes a D365FO XML file in the SQLite symbol database. Since `create_d365fo_file`
+and `modify_d365fo_file` now **auto-invalidate** the Redis cache and refresh the C# bridge
+provider, this tool is no longer required after those operations. It remains useful for
+edge cases — files modified outside MCP tools (manual edits, `git pull`, external scripts).
 
 **Handles three scenarios:**
 

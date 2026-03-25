@@ -184,6 +184,9 @@ always targets the right model even when multiple projects are open.
 
 > **How it works:** GitHub Copilot sees both tool lists combined. Search calls go to Azure,
 > `create_d365fo_file` / `modify_d365fo_file` / `create_label` go to the local server.
+> The local server also exposes 12 bridge-backed read tools (`get_class_info`, `get_table_info`,
+> `get_form_info`, etc.) that work via the C# bridge (no SQLite needed), so Copilot can
+> immediately verify objects it just created without waiting for an Azure DB re-deploy.
 
 ---
 

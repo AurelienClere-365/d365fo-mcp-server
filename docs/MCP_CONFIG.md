@@ -277,8 +277,8 @@ this by running two servers simultaneously:
 
 | Instance | Runs on | `MCP_SERVER_MODE` | Tools |
 |----------|---------|-------------------|-------|
-| `d365fo-azure` | Azure App Service | `read-only` | 36 search & analysis tools |
-| `d365fo-local` | Windows VM (stdio) | `write-only` | `create_d365fo_file`, `modify_d365fo_file`, `create_label`, `rename_label`, `verify_d365fo_project`, `get_workspace_info` |
+| `d365fo-azure` | Azure App Service | `read-only` | 29 search & analysis tools |
+| `d365fo-local` | Windows VM (stdio) | `write-only` | 25 tools: write tools + bridge-backed read tools (see below) |
 
 GitHub Copilot connects to both servers at the same time and selects the right one automatically.
 
@@ -323,15 +323,15 @@ When the server starts, it logs the detected mode and tool count:
 **Write-only mode (local companion):**
 ```
 🔧 Server mode: write-only (from env: write-only)
-🎯 Registered 13 X++ MCP tools (create_d365fo_file, modify_d365fo_file, create_label, rename_label, verify_d365fo_project, update_symbol_index, build_d365fo_project, trigger_db_sync, run_bp_check, run_systest_class, review_workspace_changes, undo_last_modification, get_workspace_info)
-[MCP Server] Tool list filtered for write-only mode: 13 tools
+🎯 Registered 25 X++ MCP tools (write tools + bridge-backed read tools)
+[MCP Server] Tool list filtered for write-only mode: 25 tools
 ```
 
 **Read-only mode (Azure server):**
 ```
 🔧 Server mode: read-only (from env: read-only)
-🎯 Registered 41 X++ MCP tools (all except local tools)
-[MCP Server] Tool list filtered for read-only mode: 41 tools (local tools excluded)
+🎯 Registered 29 X++ MCP tools (all except local tools)
+[MCP Server] Tool list filtered for read-only mode: 29 tools (local tools excluded)
 ```
 
 **Full mode (local development):**
