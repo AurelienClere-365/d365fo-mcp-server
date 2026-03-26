@@ -41,11 +41,12 @@ export const buildProjectToolDefinition = {
 };
 
 export const buildProjectTool = async (params: any, _context: any) => {
+  let resolvedProjectPath: string | undefined;
   try {
     const configManager = getConfigManager();
     await configManager.ensureLoaded();
 
-    const resolvedProjectPath = params.projectPath || await configManager.getProjectPath();
+    resolvedProjectPath = params.projectPath || await configManager.getProjectPath();
     if (!resolvedProjectPath) {
       return {
         content: [{ type: 'text', text: '❌ Cannot determine project path.\n\nProvide projectPath parameter or set it in .mcp.json.' }],
