@@ -270,14 +270,17 @@ public class ${formName} extends FormRun
 \t\t\t<Table>${dsTable}</Table>
 \t\t\t<Fields />
 \t\t\t<ReferencedDataSources />
+\t\t\t<InsertIfEmpty>No</InsertIfEmpty>
 \t\t\t<DataSourceLinks />
 \t\t\t<DerivedDataSources />
 \t\t</AxFormDataSource>
 \t</DataSources>
 \t<Design>
-${captionXml}\t\t<Pattern xmlns="">SimpleListDetails</Pattern>
+${captionXml}\t\t<DataSource xmlns="">${dsName}</DataSource>
+\t\t<Pattern xmlns="">SimpleListDetails</Pattern>
 \t\t<PatternVersion xmlns="">1.3</PatternVersion>
 \t\t<Style xmlns="">SimpleListDetails</Style>
+\t\t<TitleDataSource xmlns="">${dsName}</TitleDataSource>
 \t\t<Controls xmlns="">
 \t\t\t<AxFormControl xmlns=""
 \t\t\t\t\ti:type="AxFormActionPaneControl">
@@ -306,6 +309,8 @@ ${captionXml}\t\t<Pattern xmlns="">SimpleListDetails</Pattern>
 \t\t\t<AxFormControl xmlns=""
 \t\t\t\t\ti:type="AxFormGroupControl">
 \t\t\t\t<Name>GridContainer</Name>
+\t\t\t\t<Pattern>SidePanel</Pattern>
+\t\t\t\t<PatternVersion>1.0</PatternVersion>
 \t\t\t\t<Type>Group</Type>
 \t\t\t\t<FormControlExtension
 \t\t\t\t\ti:nil="true" />
@@ -469,12 +474,14 @@ public class ${formName} extends FormRun
 \t\t\t<Table>${dsTable}</Table>
 \t\t\t<Fields />
 \t\t\t<ReferencedDataSources />
+\t\t\t<InsertIfEmpty>No</InsertIfEmpty>
 \t\t\t<DataSourceLinks />
 \t\t\t<DerivedDataSources />
 \t\t</AxFormDataSource>
 \t</DataSources>
 \t<Design>
-${captionXml}\t\t<Pattern xmlns="">DetailsMaster</Pattern>
+${captionXml}\t\t<DataSource xmlns="">${dsName}</DataSource>
+\t\t<Pattern xmlns="">DetailsMaster</Pattern>
 \t\t<PatternVersion xmlns="">1.1</PatternVersion>
 \t\t<Style xmlns="">DetailsFormMaster</Style>
 \t\t<TitleDataSource xmlns="">${dsName}</TitleDataSource>
@@ -505,11 +512,42 @@ ${captionXml}\t\t<Pattern xmlns="">DetailsMaster</Pattern>
 \t\t\t</AxFormControl>
 \t\t\t<AxFormControl xmlns=""
 \t\t\t\t\ti:type="AxFormGroupControl">
+\t\t\t\t<Name>NavigationFilterGroup</Name>
+\t\t\t\t<Pattern>CustomAndQuickFilters</Pattern>
+\t\t\t\t<PatternVersion>1.1</PatternVersion>
+\t\t\t\t<Type>Group</Type>
+\t\t\t\t<WidthMode>SizeToAvailable</WidthMode>
+\t\t\t\t<FormControlExtension
+\t\t\t\t\ti:nil="true" />
+\t\t\t\t<Controls>
+\t\t\t\t\t<AxFormControl>
+\t\t\t\t\t\t<Name>QuickFilterControl</Name>
+\t\t\t\t\t\t<FormControlExtension>
+\t\t\t\t\t\t\t<Name>QuickFilterControl</Name>
+\t\t\t\t\t\t\t<ExtensionComponents />
+\t\t\t\t\t\t\t<ExtensionProperties>
+\t\t\t\t\t\t\t\t<AxFormControlExtensionProperty>
+\t\t\t\t\t\t\t\t\t<Name>targetControlName</Name>
+\t\t\t\t\t\t\t\t\t<Type>String</Type>
+\t\t\t\t\t\t\t\t\t<Value>Grid</Value>
+\t\t\t\t\t\t\t\t</AxFormControlExtensionProperty>
+\t\t\t\t\t\t\t</ExtensionProperties>
+\t\t\t\t\t\t</FormControlExtension>
+\t\t\t\t\t</AxFormControl>
+\t\t\t\t</Controls>
+\t\t\t\t<ArrangeMethod>HorizontalLeft</ArrangeMethod>
+\t\t\t\t<FrameType>None</FrameType>
+\t\t\t\t<Style>CustomFilter</Style>
+\t\t\t\t<ViewEditMode>Edit</ViewEditMode>
+\t\t\t</AxFormControl>
+\t\t\t<AxFormControl xmlns=""
+\t\t\t\t\ti:type="AxFormGroupControl">
 \t\t\t\t<Name>HeaderGroup</Name>
 \t\t\t\t<Type>Group</Type>
 \t\t\t\t<FormControlExtension
 \t\t\t\t\ti:nil="true" />
 \t\t\t\t<Controls />
+\t\t\t\t<DataSource>${dsName}</DataSource>
 \t\t\t\t<WidthMode>SizeToAvailable</WidthMode>
 \t\t\t</AxFormControl>
 \t\t\t<AxFormControl xmlns=""
@@ -563,6 +601,7 @@ ${overviewFieldControls}\t\t\t\t\t\t\t\t</Controls>
 \t\t\t\t\t\t</Controls>
 \t\t\t\t\t</AxFormControl>
 \t\t\t\t</Controls>
+\t\t\t\t<Style>FastTabs</Style>
 \t\t\t</AxFormControl>
 \t\t</Controls>
 \t</Design>
@@ -628,6 +667,7 @@ public class ${formName} extends FormRun
 \t\t\t<Table>${dsTable}</Table>
 \t\t\t<Fields />
 \t\t\t<ReferencedDataSources />
+\t\t\t<InsertIfEmpty>No</InsertIfEmpty>
 \t\t\t<DataSourceLinks />
 \t\t\t<DerivedDataSources />
 \t\t</AxFormDataSource>
@@ -636,9 +676,10 @@ public class ${formName} extends FormRun
 \t\t\t<Table>${linesDsTable}</Table>
 \t\t\t<Fields />
 \t\t\t<ReferencedDataSources />
+\t\t\t<InsertIfEmpty>No</InsertIfEmpty>
 \t\t\t<DataSourceLinks>
 \t\t\t\t<AxFormDataSourceLink>
-\t\t\t\t\t<LinkType>InnerJoin</LinkType>
+\t\t\t\t\t<LinkType>Active</LinkType>
 \t\t\t\t\t<Table>${dsName}</Table>
 \t\t\t\t</AxFormDataSourceLink>
 \t\t\t</DataSourceLinks>
@@ -646,7 +687,8 @@ public class ${formName} extends FormRun
 \t\t</AxFormDataSource>
 \t</DataSources>
 \t<Design>
-${captionXml}\t\t<Pattern xmlns="">DetailsTransaction</Pattern>
+${captionXml}\t\t<DataSource xmlns="">${dsName}</DataSource>
+\t\t<Pattern xmlns="">DetailsTransaction</Pattern>
 \t\t<PatternVersion xmlns="">1.1</PatternVersion>
 \t\t<Style xmlns="">DetailsFormTransaction</Style>
 \t\t<TitleDataSource xmlns="">${dsName}</TitleDataSource>
@@ -676,6 +718,36 @@ ${captionXml}\t\t<Pattern xmlns="">DetailsTransaction</Pattern>
 \t\t\t\t<ArrangeMethod>Vertical</ArrangeMethod>
 \t\t\t</AxFormControl>
 \t\t\t<AxFormControl xmlns=""
+\t\t\t\t\ti:type="AxFormGroupControl">
+\t\t\t\t<Name>NavigationFilterGroup</Name>
+\t\t\t\t<Pattern>CustomAndQuickFilters</Pattern>
+\t\t\t\t<PatternVersion>1.1</PatternVersion>
+\t\t\t\t<Type>Group</Type>
+\t\t\t\t<WidthMode>SizeToAvailable</WidthMode>
+\t\t\t\t<FormControlExtension
+\t\t\t\t\ti:nil="true" />
+\t\t\t\t<Controls>
+\t\t\t\t\t<AxFormControl>
+\t\t\t\t\t\t<Name>QuickFilterControl</Name>
+\t\t\t\t\t\t<FormControlExtension>
+\t\t\t\t\t\t\t<Name>QuickFilterControl</Name>
+\t\t\t\t\t\t\t<ExtensionComponents />
+\t\t\t\t\t\t\t<ExtensionProperties>
+\t\t\t\t\t\t\t\t<AxFormControlExtensionProperty>
+\t\t\t\t\t\t\t\t\t<Name>targetControlName</Name>
+\t\t\t\t\t\t\t\t\t<Type>String</Type>
+\t\t\t\t\t\t\t\t\t<Value>Grid</Value>
+\t\t\t\t\t\t\t\t</AxFormControlExtensionProperty>
+\t\t\t\t\t\t\t</ExtensionProperties>
+\t\t\t\t\t\t</FormControlExtension>
+\t\t\t\t\t</AxFormControl>
+\t\t\t\t</Controls>
+\t\t\t\t<ArrangeMethod>HorizontalLeft</ArrangeMethod>
+\t\t\t\t<FrameType>None</FrameType>
+\t\t\t\t<Style>CustomFilter</Style>
+\t\t\t\t<ViewEditMode>Edit</ViewEditMode>
+\t\t\t</AxFormControl>
+\t\t\t<AxFormControl xmlns=""
 \t\t\t\t\ti:type="AxFormTabControl">
 \t\t\t\t<Name>Tab</Name>
 \t\t\t\t<Type>Tab</Type>
@@ -695,8 +767,6 @@ ${captionXml}\t\t<Pattern xmlns="">DetailsTransaction</Pattern>
 \t\t\t\t\t\t\t<AxFormControl xmlns=""
 \t\t\t\t\t\t\t\t\ti:type="AxFormGroupControl">
 \t\t\t\t\t\t\t\t<Name>HeaderGeneralGroup</Name>
-\t\t\t\t\t\t\t\t<Pattern>FieldsFieldGroups</Pattern>
-\t\t\t\t\t\t\t\t<PatternVersion>1.1</PatternVersion>
 \t\t\t\t\t\t\t\t<Type>Group</Type>
 \t\t\t\t\t\t\t\t<Caption>General</Caption>
 \t\t\t\t\t\t\t\t<DataGroup>Overview</DataGroup>
@@ -747,6 +817,7 @@ ${headerFieldControls}\t\t\t\t\t\t\t\t</Controls>
 \t\t\t\t\t\t</Controls>
 \t\t\t\t\t</AxFormControl>
 \t\t\t\t</Controls>
+\t\t\t\t<Style>FastTabs</Style>
 \t\t\t</AxFormControl>
 \t\t</Controls>
 \t</Design>
@@ -929,11 +1000,14 @@ ${bodyContent}\t\t\t\t</Controls>
         `\t\t\t<Table>${dsTable}</Table>\n` +
         `\t\t\t<Fields />\n` +
         `\t\t\t<ReferencedDataSources />\n` +
+        `\t\t\t<InsertIfEmpty>No</InsertIfEmpty>\n` +
         `\t\t\t<DataSourceLinks />\n` +
         `\t\t\t<DerivedDataSources />\n` +
         `\t\t</AxFormDataSource>\n` +
         `\t</DataSources>\n`
       : `\t<DataSources />\n`;
+
+    const dsOnDesign = dsName ? `\t\t<DataSource xmlns="">${dsName}</DataSource>\n` : '';
 
     return `<?xml version="1.0" encoding="utf-8"?>
 <AxForm xmlns:i="http://www.w3.org/2001/XMLSchema-instance" xmlns="Microsoft.Dynamics.AX.Metadata.V6">
@@ -956,10 +1030,18 @@ public class ${formName} extends FormRun
 \t\t<Members xmlns="" />
 \t</SourceCode>
 ${dsXml}\t<Design>
-${captionXml}\t\t<Pattern xmlns="">TableOfContents</Pattern>
+${captionXml}${dsOnDesign}\t\t<Pattern xmlns="">TableOfContents</Pattern>
 \t\t<PatternVersion xmlns="">1.1</PatternVersion>
 \t\t<Style xmlns="">TableOfContents</Style>
 \t\t<Controls xmlns="">
+\t\t\t<AxFormControl xmlns=""
+\t\t\t\t\ti:type="AxFormActionPaneControl">
+\t\t\t\t<Name>ActionPane</Name>
+\t\t\t\t<Type>ActionPane</Type>
+\t\t\t\t<FormControlExtension
+\t\t\t\t\ti:nil="true" />
+\t\t\t\t<Controls />
+\t\t\t</AxFormControl>
 \t\t\t<AxFormControl xmlns=""
 \t\t\t\t\ti:type="AxFormTabControl">
 \t\t\t\t<Name>Tab</Name>
