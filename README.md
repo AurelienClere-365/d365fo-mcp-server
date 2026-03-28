@@ -59,6 +59,12 @@ Install-D365SupportingSoftware -Name vscode,python,node.js
 git clone https://github.com/dynamics365ninja/d365fo-mcp-server.git
 cd d365fo-mcp-server
 npm install
+
+# Build the C# bridge (required on Windows D365FO VMs for file create/modify)
+cd bridge\D365MetadataBridge
+dotnet build -c Release
+cd ..\..                         # Back to repo root
+
 copy .env.example .env           # Set PACKAGES_PATH, CUSTOM_MODELS, LABEL_LANGUAGES, ...
 npm run extract-metadata         # Extract XML from D365FO packages
 npm run build-database           # Build SQLite index
@@ -141,6 +147,6 @@ Setup guide: [docs/SETUP.md](docs/SETUP.md) · CI/CD pipeline: [docs/PIPELINES.m
 | [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md) | All 54 tools with parameters and example prompts |
 | [docs/USAGE_EXAMPLES.md](docs/USAGE_EXAMPLES.md) | Practical examples: search, CoC, SysOperation, security |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical architecture, dual-database design, cache invalidation |
-| [docs/BRIDGE.md](docs/BRIDGE.md) | C# Metadata Bridge — 19 read + 32 write adapters, DYNAMICSXREFDB cross-ref enrichment |
+| [docs/BRIDGE.md](docs/BRIDGE.md) | C# Metadata Bridge reference — mandatory on Windows VMs for all write operations |
 | [docs/CUSTOM_EXTENSIONS.md](docs/CUSTOM_EXTENSIONS.md) | ISV / custom model configuration |
 | [docs/PIPELINES.md](docs/PIPELINES.md) | Automated metadata extraction via Azure DevOps |

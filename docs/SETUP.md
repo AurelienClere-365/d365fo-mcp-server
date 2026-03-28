@@ -18,6 +18,7 @@ If you are responsible for deploying the server infrastructure to Azure, see [SE
   - [Scenario C: Local server only](#scenario-c-local-server-only)
   - [Scenario D: UDE (Unified Developer Experience)](#scenario-d-ude-unified-developer-experience)
   - [Scenario E: Local stdio server (single developer, zero-config)](#scenario-e-local-stdio-server-single-developer-zero-config)
+- [Building the C# Bridge](#building-the-c-bridge)
 - [Where to place .mcp.json](#where-to-place-mcpjson)
 - [Troubleshooting](#troubleshooting)
 
@@ -30,10 +31,10 @@ If you are responsible for deploying the server infrastructure to Azure, see [SE
 | Visual Studio 2022 | 17.14 | Earlier versions do not support MCP |
 | Visual Studio 2026 | Any | Fully supported |
 | GitHub Copilot extension | Latest | Requires an active Copilot subscription |
-| Node.js | 24.x LTS | Required for hybrid setup only |
-| Python | 3.x | Required for hybrid setup only — used by `node-gyp` to compile native SQLite addon |
-| .NET Framework 4.8 Developer Pack | 4.8 | Optional — enables the C# metadata bridge on Windows D365FO VMs. See [BRIDGE.md](BRIDGE.md) |
-| Git | Any | Required for hybrid setup only |
+| Node.js | 24.x LTS | Required for local/hybrid setup |
+| Python | 3.x | Required for local/hybrid setup — used by `node-gyp` to compile native SQLite addon |
+| .NET Framework 4.8 Developer Pack | 4.8 | **Required** for the C# metadata bridge (all write operations). Pre-installed on D365FO VMs. |
+| Git | Any | Required for local/hybrid setup |
 
 ---
 
@@ -135,6 +136,7 @@ GitHub Copilot routes each tool call to the correct server automatically.
 git clone https://github.com/dynamics365ninja/d365fo-mcp-server.git K:\d365fo-mcp-server
 cd K:\d365fo-mcp-server
 npm install
+cd bridge\D365MetadataBridge && dotnet build -c Release && cd ..\..  # Build the C# bridge
 npm run build
 ```
 
@@ -206,6 +208,7 @@ locally. Suitable for individual developers who do not want to use Azure.
 git clone https://github.com/dynamics365ninja/d365fo-mcp-server.git K:\d365fo-mcp-server
 cd K:\d365fo-mcp-server
 npm install
+cd bridge\D365MetadataBridge && dotnet build -c Release && cd ..\..  # Build the C# bridge
 copy .env.example .env
 ```
 
@@ -325,6 +328,7 @@ Model auto-detection works via the MCP roots protocol without any `context` bloc
 git clone https://github.com/dynamics365ninja/d365fo-mcp-server.git C:\d365fo-mcp-server
 cd C:\d365fo-mcp-server
 npm install
+cd bridge\D365MetadataBridge && dotnet build -c Release && cd ..\..  # Build the C# bridge
 copy .env.example .env
 ```
 
@@ -374,6 +378,63 @@ npm run build
 ```
 
 Restart the MCP server in VS 2022 after updating (MCP panel → Restart).
+
+---
+
+## Building the C# Bridge
+
+> **The C# bridge is mandatory on Windows D365FO VMs.** Without it, `create_d365fo_file`
+> and `modify_d365fo_file` will not work. Read-only tools fall back to SQLite, but all
+> write operations require the bridge. See [BRIDGE.md](BRIDGE.md) for full details.
+
+### Prerequisites
+
+- .NET Framework 4.8 Developer Pack (pre-installed on D365FO VMs, or install via
+  Visual Studio Installer → ".NET desktop development" workload)
+- D365FO development VM with `PackagesLocalDirectory` containing `Microsoft.Dynamics.*.dll`
+
+### Build
+
+```powershell
+cd bridge\D365MetadataBridge
+dotnet build -c Release
+```
+
+The output goes to `bridge/D365MetadataBridge/bin/Release/D365MetadataBridge.exe`.
+
+The server auto-detects the exe location at startup — no manual path configuration needed.
+If the exe is not found, the server logs `ℹ️ C# bridge not available` and starts in
+read-only mode (SQLite + XML parser only).
+
+### Verification
+
+After building, start the MCP server. The log should show:
+
+```
+✅ C# bridge initialized (metadataAvailable: true, xrefAvailable: true)
+```
+
+If you see `xrefAvailable: false`, SQL Server or `DYNAMICSXREFDB` is not accessible.
+This is non-critical — cross-reference tools fall back to SQLite FTS.
+
+### Updating
+
+After a D365FO version upgrade, rebuild the bridge to pick up updated DLLs:
+
+```powershell
+cd bridge\D365MetadataBridge
+dotnet build -c Release
+```
+
+### Testing
+
+```powershell
+# E2E test (requires D365FO VM with metadata)
+npx tsx tests/bridge-e2e.ts
+
+# Unit tests (works everywhere, no D365FO required)
+npm test -- --run
+```
 
 ---
 

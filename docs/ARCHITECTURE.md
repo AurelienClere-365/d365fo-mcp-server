@@ -8,8 +8,9 @@ This document provides visual diagrams and detailed explanations of the D365 F&O
 2. [Request Flow](#request-flow)
 3. [Component Architecture](#component-architecture)
 4. [Data Flow](#data-flow)
-5. [Deployment Architecture](#deployment-architecture)
-6. [Database Schema](#database-schema)
+5. [C# Bridge Architecture](#c-bridge-architecture)
+6. [Deployment Architecture](#deployment-architecture)
+7. [Database Schema](#database-schema)
 
 ---
 
@@ -470,6 +471,188 @@ graph TD
     style FALLBACK fill:#DC382D,color:#fff
     style RESPONSE fill:#4CAF50,color:#fff
 ```
+
+---
+
+## C# Bridge Architecture
+
+> **The C# bridge is mandatory on Windows D365FO development VMs.** All write operations
+> (`create_d365fo_file`, `modify_d365fo_file`) require it. Read operations fall back to
+> SQLite + XML parser when the bridge is unavailable (Azure deployment).
+> See [BRIDGE.md](BRIDGE.md) for endpoint reference and [SETUP.md](SETUP.md) for build instructions.
+
+### Process Lifecycle
+
+````mermaid
+sequenceDiagram
+    participant MCP as MCP Server (Node.js)
+    participant Bridge as D365MetadataBridge.exe (.NET 4.8)
+    participant Meta as IMetadataProvider (D365FO DLLs)
+    participant XRef as DYNAMICSXREFDB (SQL Server)
+
+    MCP->>Bridge: spawn child process (stdio JSON-RPC)
+    Bridge->>Bridge: Load D365FO DLLs from PackagesLocalDirectory
+    Bridge->>Meta: Initialize IMetadataProvider
+    Bridge->>XRef: Open SQL connection (optional)
+    Bridge-->>MCP: ready (stdout)
+
+    loop Every tool call
+        MCP->>Bridge: JSON-RPC request (stdin)
+        alt Read operation
+            Bridge->>Meta: Query metadata
+            Meta-->>Bridge: Result
+        else Write operation
+            Bridge->>Meta: Create/Modify via DiskProvider
+            Meta-->>Bridge: Write result + file path
+        else Cross-reference query
+            Bridge->>XRef: SQL query on DYNAMICSXREFDB
+            XRef-->>Bridge: Rows
+        end
+        Bridge-->>MCP: JSON-RPC response (stdout)
+    end
+
+    MCP->>Bridge: SIGTERM / process.kill()
+    Bridge->>Bridge: Dispose providers, close SQL
+```
+
+### Integration Pattern — Bridge-First with Fallback
+
+Every read tool uses the **try-bridge-first** pattern:
+
+```
+Tool handler:
+  1. tryBridge*(args)        → call C# bridge via JSON-RPC (stdin/stdout)
+     ├─ Bridge available + object found → return live metadata
+     └─ Bridge unavailable or error    → continue to step 2
+  2. symbolIndex.search()    → FTS5 query on SQLite symbols database
+  3. xmlParser.parse()       → Parse raw XML from PackagesLocalDirectory
+  4. Format + cache result   → Store in Redis (optional)
+```
+
+Write tools (`create_d365fo_file`, `modify_d365fo_file`) have **no fallback** — if the bridge
+is unavailable, they return an error. This is by design: only the C# `IMetadataProvider` API
+can safely create/modify D365FO objects (correct XML encoding, AOT path, `.rnrproj` registration).
+
+### C# Components
+
+````mermaid
+graph TB
+    subgraph "D365MetadataBridge.exe"
+        MAIN[Program.cs — stdin/stdout JSON-RPC loop]
+        ROUTER[RequestRouter — dispatches method → handler]
+        
+        subgraph "Read Services"
+            READ_META[MetadataReadService]
+            READ_CLASS[getClassInfo, getMethodSource, getMethodSignature]
+            READ_TABLE[getTableInfo, getEnumInfo, getEdtInfo]
+            READ_FORM[getFormInfo, getQueryInfo, getViewInfo]
+            READ_REPORT[getReportInfo, getDataEntityInfo]
+            READ_SEARCH[search, findReferences]
+        end
+
+        subgraph "Write Services"
+            WRITE_META[MetadataWriteService]
+            WRITE_CREATE[createObject — 18 object types]
+            WRITE_MODIFY[modifyObject — 25 operation types]
+        end
+
+        subgraph "Cross-Reference Service"
+            XREF_SVC[CrossReferenceService]
+            XREF_COC[findCocExtensions — CoC detection]
+            XREF_EVT[findEventHandlers — event handler detection]
+            XREF_REF[findReferences — enriched caller/callee]
+            XREF_API[getApiUsagePatterns — usage statistics]
+        end
+
+        subgraph "DLL Loading"
+            LOADER[AssemblyResolver — loads D365FO DLLs]
+            IMETA_PROV[IMetadataProvider — read access]
+            DISK_PROV[DiskProvider — write access via explicit interface casts]
+        end
+    end
+
+    MAIN --> ROUTER
+    ROUTER --> READ_META
+    ROUTER --> WRITE_META
+    ROUTER --> XREF_SVC
+    READ_META --> READ_CLASS
+    READ_META --> READ_TABLE
+    READ_META --> READ_FORM
+    READ_META --> READ_REPORT
+    READ_META --> READ_SEARCH
+    WRITE_META --> WRITE_CREATE
+    WRITE_META --> WRITE_MODIFY
+    READ_META --> IMETA_PROV
+    WRITE_META --> DISK_PROV
+    XREF_SVC --> XREF_COC
+    XREF_SVC --> XREF_EVT
+    XREF_SVC --> XREF_REF
+    XREF_SVC --> XREF_API
+
+    style MAIN fill:#512BD4,color:#fff
+    style WRITE_META fill:#E65100,color:#fff
+    style XREF_SVC fill:#1565C0,color:#fff
+```
+
+### TypeScript Components
+
+| File | Role |
+|------|------|
+| `src/bridge/bridgeClient.ts` | Spawns `.exe`, manages stdin/stdout JSON-RPC, handles timeouts & restarts |
+| `src/bridge/bridgeAdapter.ts` | 12 `tryBridge*()` read functions + 30 `bridge*()` write functions |
+| `src/bridge/bridgeTypes.ts` | TypeScript interfaces for bridge responses (`BridgeClassInfo`, `BridgeWriteResult`, etc.) |
+
+### Write Operations — DiskProvider Discovery
+
+Creating and modifying D365FO objects through the official API requires several non-obvious steps
+that the bridge handles internally:
+
+1. **DiskProvider discovery** — `IMetadataProvider` does not expose write methods directly.
+   The bridge casts to internal interfaces (`IMetadataProviderInternal`, `IDiskModelProvider`)
+   to reach `DiskProvider` which has `SaveObject()`.
+
+2. **ModelSaveInfo resolution** — every write must specify which model owns the file.
+   The bridge reads the model descriptor (`Descriptor/Model.xml`) to construct `ModelSaveInfo`.
+
+3. **Explicit interface casts** — some D365FO interfaces hide members behind explicit
+   implementations. The bridge casts to the exact interface (e.g. `ITable.SaveExtension()`)
+   rather than calling via the class hierarchy.
+
+4. **Auto-refresh** — after a successful write, the bridge invalidates its internal metadata
+   cache so subsequent reads reflect the change immediately. The MCP server also invalidates
+   its own SQLite + Redis caches.
+
+### Index Lifecycle & Cache Invalidation
+
+````mermaid
+sequenceDiagram
+    participant Tool as MCP Tool Handler
+    participant Bridge as C# Bridge
+    participant SQLite as SQLite Index
+    participant Redis as Redis Cache
+
+    Tool->>Bridge: bridgeCreate/Modify(args)
+    Bridge-->>Tool: { success, filePath }
+
+    Tool->>SQLite: Remove stale symbols by filePath
+    Tool->>SQLite: Re-index new/updated file
+    Tool->>Redis: Invalidate cache keys (objectName, type)
+    Tool->>Bridge: Refresh internal metadata state
+    Note over Tool: Subsequent get_*_info calls see updated data
+```
+
+### Data Source Comparison
+
+| Capability | SQLite + FTS5 | XML Parser | C# Bridge |
+|-----------|--------------|------------|-----------|
+| Available on | All platforms | All platforms | Windows VM only |
+| Symbol search (name, type) | ✅ Fast | ❌ | ✅ Live |
+| Method signatures | ✅ Static snapshot | ✅ Parse on demand | ✅ Live |
+| Method bodies | ✅ `sourceSnippet` (10 lines) | ✅ Full source | ✅ Full source |
+| Cross-references (callers) | ✅ FTS approximation | ❌ | ✅ Exact (DYNAMICSXREFDB) |
+| Create objects | ❌ | ❌ | ✅ 18 types |
+| Modify objects | ❌ | ❌ | ✅ 25 operations |
+| Label operations | ✅ Search | ❌ | ✅ Create/Rename |
 
 ---
 
