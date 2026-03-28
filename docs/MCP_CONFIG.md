@@ -3,6 +3,8 @@
 The `.mcp.json` file tells the MCP server where your D365FO project lives. Without it the
 server still works, but file creation may land in the wrong model.
 
+> **Quick Start?** See [QUICK_START.md](QUICK_START.md) for step-by-step setup with examples.
+
 ---
 
 ## Minimal Configuration
@@ -105,6 +107,8 @@ add `bridgeLogFile` to the `context` block:
 When set, `bridgeLogFile` does two things:
 1. The bridge process tees all its stderr to the log file (append mode)
 2. The TS server forwards **all** bridge stderr lines (not just errors/warnings)
+
+Bridge log levels: `[DEBUG]`, `[INFO]`, `[WARN]`, `[ERROR]`, `[FATAL]`, `[ASSEMBLY]`
 
 Watch live:
 ```powershell

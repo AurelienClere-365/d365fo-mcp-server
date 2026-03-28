@@ -3,6 +3,8 @@
 This guide covers everything a **developer** needs to start using the D365 F&O MCP Server
 with GitHub Copilot in Visual Studio 2022 and 2026.
 
+> **Just want to get running fast?** See [QUICK_START.md](QUICK_START.md) for the condensed 5-step guide.
+
 If you are responsible for deploying the server infrastructure to Azure, see [SETUP_AZURE.md](SETUP_AZURE.md).
 
 ---
