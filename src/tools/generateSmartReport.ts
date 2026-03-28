@@ -1069,6 +1069,13 @@ export async function handleGenerateSmartReport(
       fs.mkdirSync(dir, { recursive: true });
     }
 
+    // Guard: refuse to overwrite existing table files (would destroy existing methods, fields, etc.)
+    if (obj.objectType === 'table' && fs.existsSync(normalizedPath)) {
+      results.push(`⚠️ ${obj.objectType}: ${normalizedPath} — SKIPPED (file already exists, would destroy existing content). Use \`modify_d365fo_file\` to modify existing tables.`);
+      log(`Skipped existing table: ${normalizedPath}`);
+      continue;
+    }
+
     // Reports need UTF-8 BOM
     if (obj.objectType === 'report') {
       const bom = Buffer.from([0xEF, 0xBB, 0xBF]);

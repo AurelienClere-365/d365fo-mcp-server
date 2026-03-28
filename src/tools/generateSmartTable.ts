@@ -726,6 +726,20 @@ export async function handleGenerateSmartTable(
   // The C# bridge applies all BP-smart defaults (CacheLookup, FieldGroups, DeleteActions,
   // TitleField1/2, PrimaryIndex/ClusteredIndex) using the official IMetadataProvider API.
   // Falls back to SmartXmlBuilder → fs.writeFile if bridge is unavailable.
+
+  // Guard: refuse to overwrite an existing table file via bridge path (would destroy existing methods, fields, etc.)
+  if (resolvedModel) {
+    const bridgeTargetPath = path.join(packagePath, resolvedModel, resolvedModel, 'AxTable', `${finalName}.xml`).replace(/\//g, '\\');
+    if (fs.existsSync(bridgeTargetPath)) {
+      throw new Error(
+        `⚠️ Table "${finalName}" already exists at:\n${bridgeTargetPath}\n\n` +
+        `\`generate_smart_table\` is for **NEW** tables only.\n` +
+        `Use \`modify_d365fo_file\` to add fields, methods, or indexes to an existing table.\n` +
+        `Use \`get_table_info("${finalName}")\` to inspect the current structure.`
+      );
+    }
+  }
+
   if (bridge && resolvedModel) {
     console.log(`[generateSmartTable] Attempting bridge-first creation for ${finalName}...`);
     const bridgeResult = await bridgeCreateSmartTable(bridge, {
@@ -878,6 +892,16 @@ export async function handleGenerateSmartTable(
   const dir = path.dirname(normalizedPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+
+  // Guard: refuse to overwrite an existing table file (would destroy existing methods, fields, etc.)
+  if (fs.existsSync(normalizedPath)) {
+    throw new Error(
+      `⚠️ Table "${finalName}" already exists at:\n${normalizedPath}\n\n` +
+      `\`generate_smart_table\` is for **NEW** tables only.\n` +
+      `Use \`modify_d365fo_file\` to add fields, methods, or indexes to an existing table.\n` +
+      `Use \`get_table_info("${finalName}")\` to inspect the current structure.`
+    );
   }
 
   // Write file
