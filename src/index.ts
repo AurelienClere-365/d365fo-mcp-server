@@ -174,9 +174,10 @@ async function initializeServices() {
     serverState.parser = parser;
     serverState.cache = cache;
 
-    const mcpServer = createXppMcpServer({ symbolIndex, parser, cache, workspaceScanner, hybridSearch });
+    const context: import('./types/context.js').XppServerContext = { symbolIndex, parser, cache, workspaceScanner, hybridSearch };
+    const mcpServer = createXppMcpServer(context);
     console.log('✅ MCP Server initialized (write-only mode)');
-    return { mcpServer, symbolIndex, parser, cache, workspaceScanner, hybridSearch };
+    return { mcpServer, symbolIndex, parser, cache, workspaceScanner, hybridSearch, context };
   }
 
   // -----------------------------------------------------------------------
@@ -318,20 +319,68 @@ async function initializeServices() {
 
     // Create MCP server with full context
     serverState.statusMessage = 'Initializing MCP server...';
-    const mcpServer = createXppMcpServer({ 
+    const context: import('./types/context.js').XppServerContext = { 
       symbolIndex, 
       parser, 
       cache, 
       workspaceScanner, 
       hybridSearch,
-    });
+    };
+    const mcpServer = createXppMcpServer(context);
     console.log('✅ MCP Server initialized with workspace support');
 
-    return { mcpServer, symbolIndex, parser, cache, workspaceScanner, hybridSearch };
+    return { mcpServer, symbolIndex, parser, cache, workspaceScanner, hybridSearch, context };
   } catch (error) {
     console.error('❌ Initialization error:', error);
     serverState.statusMessage = `Initialization failed: ${error}`;
     throw error;
+  }
+}
+
+/**
+ * Initialize C# bridge (non-blocking).
+ * Shared by stdio and HTTP startup paths.
+ * Attaches bridge to the given context object on success.
+ */
+async function initializeBridge(targetContext: import('./types/context.js').XppServerContext): Promise<void> {
+  try {
+    const { createBridgeClient } = await import('./bridge/bridgeClient.js');
+    const configMgr = getConfigManager();
+    await configMgr.ensureLoaded();
+    // Call getDevEnvironmentType() BEFORE getPackagePath() — it triggers
+    // ensureXppConfig() which populates xppConfig.customPackagesPath.
+    // Without this ordering, getPackagePath() can't use the UDE custom path.
+    const devEnvType = await configMgr.getDevEnvironmentType();
+    const packagesPath = configMgr.getPackagePath() ?? undefined;
+
+    let binPath: string | undefined;
+    if (devEnvType === 'ude') {
+      const msPath = await configMgr.getMicrosoftPackagesPath();
+      if (msPath) {
+        const { existsSync } = await import('fs');
+        const { join } = await import('path');
+        const candidate = join(msPath, 'bin');
+        if (existsSync(candidate)) binPath = candidate;
+      }
+    }
+
+    // Pass xref connection details for UDE environments
+    const xrefServer = await configMgr.getXrefDbServer() ?? undefined;
+    const xrefDatabase = await configMgr.getXrefDbName() ?? undefined;
+
+    const bridge = await createBridgeClient({
+      packagesPath,
+      binPath,
+      xrefServer,
+      xrefDatabase,
+      logFile: configMgr.getContext()?.bridgeLogFile ?? undefined,
+    });
+    if (bridge) {
+      targetContext.bridge = bridge;
+      console.log(`✅ C# bridge connected (${devEnvType}): metadata=${bridge.metadataAvailable}, xref=${bridge.xrefAvailable}`);
+    }
+  } catch (err) {
+    console.log(`ℹ️  C# bridge not available: ${err}`);
   }
 }
 
@@ -519,38 +568,7 @@ async function main() {
     // Step 3b: Initialize C# bridge in parallel with DB load (non-blocking)
     // The bridge provides live metadata from Microsoft's IMetadataProvider API
     // and cross-reference queries — only available on Windows VMs with D365FO.
-    void (async () => {
-      try {
-        const { createBridgeClient } = await import('./bridge/bridgeClient.js');
-        const configMgr = getConfigManager();
-        await configMgr.ensureLoaded();
-        const packagesPath = configMgr.getPackagePath() ?? undefined;
-        // UDE mode: MS framework DLLs live under microsoftPackagesPath,
-        // not under the main packagesPath.
-        const devEnvType = await configMgr.getDevEnvironmentType();
-        let binPath: string | undefined;
-        if (devEnvType === 'ude') {
-          const msPath = await configMgr.getMicrosoftPackagesPath();
-          if (msPath) {
-            const { existsSync } = await import('fs');
-            const { join } = await import('path');
-            const candidate = join(msPath, 'bin');
-            if (existsSync(candidate)) binPath = candidate;
-          }
-        }
-        const bridge = await createBridgeClient({
-          packagesPath,
-          binPath,
-          logFile: configMgr.getContext()?.bridgeLogFile ?? undefined,
-        });
-        if (bridge) {
-          stubContext.bridge = bridge;
-          console.log(`✅ C# bridge connected (${devEnvType}): metadata=${bridge.metadataAvailable}, xref=${bridge.xrefAvailable}`);
-        }
-      } catch (err) {
-        console.log(`ℹ️  C# bridge not available: ${err}`);
-      }
-    })();
+    void initializeBridge(stubContext);
 
     // Step 4: load real database in the background
     const dbLoadStart = Date.now();
@@ -630,9 +648,12 @@ async function main() {
     }));
 
     // Initialise services in the background; register MCP routes once ready
-    initializeServices().then(({ mcpServer, symbolIndex, parser, cache, workspaceScanner, hybridSearch }) => {
+    initializeServices().then(({ mcpServer, symbolIndex, parser, cache, workspaceScanner, hybridSearch, context }) => {
       // Register MCP transport (Express supports dynamic route registration)
       createStreamableHttpTransport(mcpServer, app, { symbolIndex, parser, cache, workspaceScanner, hybridSearch });
+
+      // Initialize C# bridge (non-blocking) — also needed for HTTP mode on Windows/UDE
+      if (context) void initializeBridge(context);
 
       serverState.isReady = true;
       serverState.isHealthy = true;

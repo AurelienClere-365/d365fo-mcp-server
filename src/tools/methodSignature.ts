@@ -112,7 +112,7 @@ export async function getMethodSignatureTool(request: CallToolRequest, context: 
 
     // Fallback: parse XML file from disk (same pattern as classInfo.ts)
     const xmlSignature = await tryXmlMethodSignature(
-      parser, classRow.file_path, className, methodName, classRow.model, includeCoc, cache, cacheKey,
+      parser, classRow.file_path, className, methodName, classRow.model, includeCoc, cache, cacheKey, classRow.type,
     );
     if (xmlSignature) return xmlSignature;
 
@@ -198,11 +198,12 @@ async function tryXmlMethodSignature(
   includeCoc: boolean,
   cache: any,
   cacheKey: string,
+  objectType?: string,
 ): Promise<any | null> {
   if (!parser || !filePath) return null;
   try {
     const parseResult = await Promise.race([
-      parser.parseClassFile(filePath, modelName),
+      parseByObjectType(parser, filePath, modelName, objectType),
       new Promise<{ success: false; error: string }>(resolve =>
         setTimeout(() => resolve({ success: false, error: 'timeout' }), 3000)
       ),
@@ -224,6 +225,24 @@ async function tryXmlMethodSignature(
   } catch (e) {
     console.error(`[methodSignature] XML parse for ${className}.${methodName} failed: ${e}`);
     return null;
+  }
+}
+
+/**
+ * Dispatch to the correct parser based on object type.
+ * Tables, views, and data-entities have different XML structures than classes.
+ */
+function parseByObjectType(
+  parser: XppMetadataParser,
+  filePath: string,
+  modelName: string,
+  objectType?: string,
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  switch (objectType) {
+    case 'table':       return parser.parseTableFile(filePath, modelName);
+    case 'view':
+    case 'data-entity': return parser.parseViewFile(filePath, modelName);
+    default:            return parser.parseClassFile(filePath, modelName);
   }
 }
 

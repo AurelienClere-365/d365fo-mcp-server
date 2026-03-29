@@ -676,6 +676,16 @@ class ConfigManager {
       return normalizePath(this.autoDetectedProject.packagePath);
     }
 
+    // UDE mode: prefer customPackagesPath from XPP config over well-known path probes.
+    // On UDE boxes, C:\AosService\PackagesLocalDirectory may exist but be empty.
+    if (this.xppConfig?.customPackagesPath && existsSync(this.xppConfig.customPackagesPath)) {
+      if (!(this as any)._packagePathLoggedOnce) {
+        console.error(`[ConfigManager] ✅ UDE customPackagesPath: ${this.xppConfig.customPackagesPath}`);
+        (this as any)._packagePathLoggedOnce = true;
+      }
+      return normalizePath(this.xppConfig.customPackagesPath);
+    }
+
     // Last resort (Windows only): probe well-known PackagesLocalDirectory locations.
     // Covers the two standard D365FO installation scenarios without requiring .mcp.json config:
     //   C:\AosService\PackagesLocalDirectory  → VHD / local developer machine
@@ -1078,6 +1088,22 @@ class ConfigManager {
     // Priority 2: XPP config auto-detection
     await this.ensureXppConfig();
     return this.xppConfig?.microsoftPackagesPath || null;
+  }
+
+  /**
+   * Get the cross-reference database server (UDE: CrossReferencesDbServerName).
+   */
+  async getXrefDbServer(): Promise<string | null> {
+    await this.ensureXppConfig();
+    return this.xppConfig?.xrefDbServer || null;
+  }
+
+  /**
+   * Get the cross-reference database name (UDE: CrossReferencesDatabaseName).
+   */
+  async getXrefDbName(): Promise<string | null> {
+    await this.ensureXppConfig();
+    return this.xppConfig?.xrefDbName || null;
   }
 
   private async ensureXppConfig(): Promise<void> {

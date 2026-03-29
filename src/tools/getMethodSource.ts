@@ -9,6 +9,7 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { XppServerContext } from '../types/context.js';
+import type { XppMetadataParser } from '../metadata/xmlParser.js';
 import { tryBridgeMethodSource } from '../bridge/bridgeAdapter.js';
 
 const GetMethodSourceArgsSchema = z.object({
@@ -101,7 +102,7 @@ async function tryXmlMethodSource(
 
   try {
     const parseResult = await Promise.race([
-      parser.parseClassFile(classRow.file_path, classRow.model),
+      parseByObjectType(parser, classRow.file_path, classRow.model, classRow.type),
       new Promise<{ success: false; error: string }>(resolve =>
         setTimeout(() => resolve({ success: false, error: 'timeout' }), 3000)
       ),
@@ -129,5 +130,23 @@ async function tryXmlMethodSource(
   } catch (e) {
     console.error(`[getMethodSource] XML parse for ${className}.${methodName} failed: ${e}`);
     return null;
+  }
+}
+
+/**
+ * Dispatch to the correct parser based on object type.
+ * Tables, views, and data-entities have different XML structures than classes.
+ */
+function parseByObjectType(
+  parser: XppMetadataParser,
+  filePath: string,
+  modelName: string,
+  objectType?: string,
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  switch (objectType) {
+    case 'table':       return parser.parseTableFile(filePath, modelName);
+    case 'view':
+    case 'data-entity': return parser.parseViewFile(filePath, modelName);
+    default:            return parser.parseClassFile(filePath, modelName);
   }
 }
