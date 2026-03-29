@@ -166,6 +166,28 @@ stderr for `[ERROR]` messages.
 SQL Server is not running, `DYNAMICSXREFDB` does not exist, or auth failure. Bridge uses
 Windows Integrated Authentication by default.
 
+On **UDE boxes**, the cross-reference database is typically hosted on `(LocalDB)\MSSQLLocalDB`
+with a name like `XRef_<config>`. The server reads these values automatically from the XPP
+config (`CrossReferencesDbServerName` / `CrossReferencesDatabaseName`). If auto-detection
+fails, you can verify the XPP config files in `%LOCALAPPDATA%\Microsoft\Dynamics365\XPPConfig\`.
+
+### Building the bridge on UDE
+
+On UDE environments the D365FO DLLs are under the `FrameworkDirectory` from the XPP config,
+not under `C:\AosService\PackagesLocalDirectory\bin`. Pass the correct path explicitly:
+
+```powershell
+cd bridge\D365MetadataBridge
+dotnet build -c Release -p:D365BinPath="<FrameworkDirectory>\bin"
+```
+
+If NuGet restore fails because your global NuGet config requires authentication to a private
+feed, add the public source explicitly:
+
+```powershell
+dotnet build -c Release -p:D365BinPath="<FrameworkDirectory>\bin" --source https://api.nuget.org/v3/index.json
+```
+
 ### Output shows SQLite data, not bridge data
 
 Check if the result was served from cache (cache hit occurs before bridge check), or the

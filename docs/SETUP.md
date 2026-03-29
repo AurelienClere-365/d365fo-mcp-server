@@ -408,6 +408,26 @@ The server auto-detects the exe location at startup — no manual path configura
 If the exe is not found, the server logs `ℹ️ C# bridge not available` and starts in
 read-only mode (SQLite + XML parser only).
 
+### UDE (Unified Developer Experience) build
+
+On UDE boxes the D365FO DLLs are not under `C:\AosService\PackagesLocalDirectory\bin`.
+You must tell the build where to find them using `-p:D365BinPath`:
+
+```powershell
+cd bridge\D365MetadataBridge
+dotnet build -c Release -p:D365BinPath="<FrameworkDirectory>\bin"
+```
+
+Replace `<FrameworkDirectory>` with the `FrameworkDirectory` value from your XPP config
+(typically found in `%LOCALAPPDATA%\Microsoft\Dynamics365\XPPConfig\`).
+
+If your machine has a restrictive NuGet config (e.g., Azure DevOps private feed only),
+add `--source https://api.nuget.org/v3/index.json` to the build command:
+
+```powershell
+dotnet build -c Release -p:D365BinPath="<FrameworkDirectory>\bin" --source https://api.nuget.org/v3/index.json
+```
+
 ### Verification
 
 After building, start the MCP server. The log should show:
