@@ -690,9 +690,15 @@ export async function createBridgeClient(options: {
   // Auto-detect packagesPath if not provided
   const packagesPath = options.packagesPath ?? detectPackagesPath();
   if (!packagesPath) {
-    console.error('[BridgeClient] No packagesPath detected — bridge disabled');
+    console.error(
+      '[BridgeClient] No packagesPath detected — bridge disabled.\n' +
+      '  Set "packagePath" in .mcp.json context, or ensure PackagesLocalDirectory exists.\n' +
+      '  Checked: options.packagesPath=' + (options.packagesPath ?? 'undefined') + ', env.PackagesPath=' + (process.env.PackagesPath ?? 'undefined')
+    );
     return null;
   }
+
+  console.error(`[BridgeClient] packagesPath=${packagesPath}, binPath=${options.binPath ?? 'auto'}`);
 
   // Check if bridge exe exists before trying to spawn
   const client = new BridgeClient({

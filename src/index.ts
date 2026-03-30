@@ -368,6 +368,8 @@ async function initializeBridge(targetContext: import('./types/context.js').XppS
     const xrefServer = await configMgr.getXrefDbServer() ?? undefined;
     const xrefDatabase = await configMgr.getXrefDbName() ?? undefined;
 
+    console.log(`[Bridge] Attempting connection: packagesPath=${packagesPath ?? 'not set'}, binPath=${binPath ?? 'auto'}, devEnvType=${devEnvType}`);
+
     const bridge = await createBridgeClient({
       packagesPath,
       binPath,
@@ -378,6 +380,14 @@ async function initializeBridge(targetContext: import('./types/context.js').XppS
     if (bridge) {
       targetContext.bridge = bridge;
       console.log(`✅ C# bridge connected (${devEnvType}): metadata=${bridge.metadataAvailable}, xref=${bridge.xrefAvailable}`);
+    } else {
+      console.log(
+        `⚠️  C# bridge not available — createBridgeClient returned null.\n` +
+        `   packagesPath: ${packagesPath ?? '(not detected — check .mcp.json context.packagePath or PackagesLocalDirectory)'}\n` +
+        `   devEnvType: ${devEnvType}\n` +
+        `   Check stderr / bridge log for details. Ensure the bridge exe is built:\n` +
+        `     cd bridge/D365MetadataBridge && dotnet build -c Release`
+      );
     }
   } catch (err) {
     console.log(`ℹ️  C# bridge not available: ${err}`);
