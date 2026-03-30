@@ -650,6 +650,27 @@ async function main() {
       });
     });
 
+    // Early /mcp route — returns 503 while services are loading so MCP clients
+    // (VS 2022, VS Code Copilot) get a proper JSON-RPC error instead of a 404
+    // during Azure cold start. Once initializeServices() finishes, the real
+    // transport route replaces this via Express's route stack.
+    app.post('/mcp', (_req, res) => {
+      if (serverState.isReady) {
+        // Should not happen — real transport route takes over. But just in case:
+        res.status(503).json({
+          jsonrpc: '2.0',
+          error: { code: -32000, message: 'Server is starting, please retry in a few seconds' },
+          id: (_req.body as any)?.id ?? null,
+        });
+        return;
+      }
+      res.status(503).json({
+        jsonrpc: '2.0',
+        error: { code: -32000, message: `Server is starting: ${serverState.statusMessage}` },
+        id: (_req.body as any)?.id ?? null,
+      });
+    });
+
     // Bind port immediately — Azure requires the port to be open within ~230 s
     const host = process.env.HOST || '0.0.0.0';
     await new Promise<void>(resolve => app.listen(PORT, host, () => {

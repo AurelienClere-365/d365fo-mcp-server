@@ -25,8 +25,11 @@ export interface McpContext {
 }
 
 export interface McpConfig {
+  /** Top-level context — preferred location (avoids VS 2022 treating it as an MCP server). */
+  context?: McpContext;
   servers: {
     [key: string]: any;
+    /** @deprecated Put context at top level instead. Kept for backward compatibility. */
     context?: McpContext;
   };
 }
@@ -599,7 +602,23 @@ class ConfigManager {
    * Merges .mcp.json config with runtime context (runtime takes priority)
    */
   getContext(): McpContext | null {
-    const fileContext = this.config?.servers.context || null;
+    // Prefer top-level context (doesn't clash with VS 2022 server discovery).
+    // Fall back to servers.context for backward compatibility.
+    const fileContext = this.config?.context || this.config?.servers?.context || null;
+
+    // Environment variables (D365FO_* prefix) — safe in .mcp.json env{} blocks
+    // because VS 2022 passes them to the server subprocess without side effects.
+    const envContext: Partial<McpContext> = {};
+    if (process.env.D365FO_WORKSPACE_PATH)          envContext.workspacePath          = process.env.D365FO_WORKSPACE_PATH;
+    if (process.env.D365FO_PACKAGE_PATH)             envContext.packagePath             = process.env.D365FO_PACKAGE_PATH;
+    if (process.env.D365FO_MODEL_NAME)               envContext.modelName               = process.env.D365FO_MODEL_NAME;
+    if (process.env.D365FO_CUSTOM_PACKAGES_PATH)     envContext.customPackagesPath      = process.env.D365FO_CUSTOM_PACKAGES_PATH;
+    if (process.env.D365FO_MICROSOFT_PACKAGES_PATH)  envContext.microsoftPackagesPath   = process.env.D365FO_MICROSOFT_PACKAGES_PATH;
+    if (process.env.D365FO_PROJECT_PATH)             envContext.projectPath             = process.env.D365FO_PROJECT_PATH;
+    if (process.env.D365FO_SOLUTION_PATH)            envContext.solutionPath            = process.env.D365FO_SOLUTION_PATH;
+    if (process.env.D365FO_DEV_ENVIRONMENT_TYPE)     envContext.devEnvironmentType      = process.env.D365FO_DEV_ENVIRONMENT_TYPE as McpContext['devEnvironmentType'];
+    if (process.env.D365FO_BRIDGE_LOG_FILE)          envContext.bridgeLogFile           = process.env.D365FO_BRIDGE_LOG_FILE;
+
     // Per-request context (AsyncLocalStorage) takes priority over the shared
     // runtimeContext singleton — this prevents workspace paths from bleeding
     // between concurrent HTTP requests from different users.
@@ -608,12 +627,15 @@ class ConfigManager {
       ? { ...this.runtimeContext, ...requestCtx }
       : this.runtimeContext;
 
-    if (!fileContext && Object.keys(effectiveRuntime).length === 0) {
+    const hasEnvContext = Object.keys(envContext).length > 0;
+    if (!fileContext && !hasEnvContext && Object.keys(effectiveRuntime).length === 0) {
       return null;
     }
 
+    // Priority: runtime > env vars > file config
     return {
       ...fileContext,
+      ...envContext,
       ...effectiveRuntime,
     };
   }
